@@ -1,0 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 98%;
+    --foreground: 224 12% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 12% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 12% 12%;
+
+    --primary: 215 72% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 224 12% 12%;
+
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 220 14% 92%;
+    --accent-foreground: 224 12% 12%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 90%;
+    --input: 220 13% 90%;
+    --ring: 215 72% 53%;
+
+    --radius: 0.75rem;
+
+    --status-verified: 142 71% 45%;
+    --status-needs-review: 38 92% 50%;
+    --status-conflict: 0 84% 60%;
+    --status-new: 215 72% 53%;
+
+    --sidebar-background: 224 14% 7%;
+    --sidebar-foreground: 220 14% 75%;
+    --sidebar-primary: 215 72% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 14% 14%;
+    --sidebar-accent-foreground: 220 14% 90%;
+    --sidebar-border: 224 14% 15%;
+    --sidebar-ring: 215 72% 53%;
+
+    --inspector-bg: 220 20% 97%;
+    --terminal-bg: 224 14% 7%;
+    --terminal-foreground: 142 71% 65%;
+
+    --slack-sidebar: 283 72% 18%;
+    --slack-sidebar-hover: 283 40% 25%;
+    --slack-sidebar-active: 283 35% 30%;
+    --slack-green: 154 60% 52%;
+    --jira-blue: 216 100% 40%;
+    --confluence-blue: 216 100% 40%;
+  }
+
+  .dark {
+    --background: 224 14% 7%;
+    --foreground: 220 14% 95%;
+
+    --card: 224 14% 10%;
+    --card-foreground: 220 14% 95%;
+
+    --popover: 224 14% 10%;
+    --popover-foreground: 220 14% 95%;
+
+    --primary: 215 72% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 224 14% 15%;
+    --secondary-foreground: 220 14% 95%;
+
+    --muted: 224 14% 15%;
+    --muted-foreground: 220 9% 55%;
+
+    --accent: 224 14% 18%;
+    --accent-foreground: 220 14% 95%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 14% 18%;
+    --input: 224 14% 18%;
+    --ring: 215 72% 58%;
+
+    --inspector-bg: 224 14% 9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer components {
+  .badge-status {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-verified {
+    background-color: hsl(var(--status-verified) / 0.1);
+    color: hsl(var(--status-verified));
+  }
+
+  .badge-needs-review {
+    background-color: hsl(var(--status-needs-review) / 0.1);
+    color: hsl(var(--status-needs-review));
+  }
+
+  .badge-conflict {
+    background-color: hsl(var(--status-conflict) / 0.1);
+    color: hsl(var(--status-conflict));
+  }
+
+  .badge-new {
+    background-color: hsl(var(--status-new) / 0.1);
+    color: hsl(var(--status-new));
+  }
+
+  .source-chip {
+    @apply inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium cursor-pointer transition-colors;
+    @apply bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground;
+  }
+
+  .inspector-panel {
+    background-color: hsl(var(--inspector-bg));
+    @apply h-full overflow-hidden;
+  }
+
+  .terminal-surface {
+    background-color: hsl(var(--terminal-bg));
+    color: hsl(var(--terminal-foreground));
+    @apply font-mono text-sm;
+  }
+
+  .highlight-citation {
+    @apply bg-primary/10 border-l-2 border-primary pl-3 -ml-3 rounded-r;
+  }
+
+  .confidence-verified {
+    @apply border-l-2 pl-3;
+    border-left-color: hsl(var(--status-verified));
+  }
+
+  .confidence-inferred {
+    @apply border-l-2 pl-3;
+    border-left-color: hsl(var(--status-needs-review));
+  }
+
+  .confidence-needs-verification {
+    @apply border-l-2 pl-3 bg-[hsl(var(--status-needs-review)/0.05)] rounded-r;
+    border-left-color: hsl(var(--status-needs-review));
+  }
+}
+
+@layer utilities {
+  .pane-transition {
+    @apply transition-all duration-300 ease-in-out;
+  }
+}
