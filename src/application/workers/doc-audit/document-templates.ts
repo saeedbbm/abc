@@ -656,14 +656,16 @@ EVIDENCE FROM TEAM COMMUNICATIONS AND TOOLS:
 ${evidenceText}
 
 FORMAT RULES:
-- Use Confluence-compatible HTML.
-- Each section should be an <h2> heading.
+- Output CLEAN HTML only: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, <table>, <tr>, <th>, <td>, <code>.
+- Each section MUST be an <h2> heading followed by <p> paragraphs.
 - Use <ul>/<li> for lists, <p> for paragraphs, <table> for structured data.
 - Bold important terms with <strong>.
-- IMPORTANT: For source citations, you MUST use clickable links. Evidence items have URLs in the format (https://...). Render them as: <a href="URL">Source: Slack #channel-name</a> or <a href="URL">Source: Jira TICKET-123</a>. NEVER output raw URLs or text-only citations.
-- For items needing verification: <ac:structured-macro ac:name="note"><ac:rich-text-body><p>NEEDS VERIFICATION: your text here</p></ac:rich-text-body></ac:structured-macro>
-- For open questions: <ac:structured-macro ac:name="warning"><ac:rich-text-body><p>OPEN QUESTION: your question here</p></ac:rich-text-body></ac:structured-macro>
-- If a required section has NO information, still include the heading with the placeholder text wrapped in a warning macro.
-- Do NOT include the document title as an <h1> -- Confluence handles that.
+- Do NOT use Confluence macros like <ac:structured-macro>, <ac:rich-text-body>, or any ac: namespace tags.
+- IMPORTANT: For source citations, use clickable links: <a href="URL">Source: Slack #channel-name</a> or <a href="URL">Source: Jira TICKET-123</a>. NEVER output raw URLs or text-only citations.
+- For items needing verification: <p><strong>NEEDS VERIFICATION:</strong> your text here</p>
+- For open questions: <p><strong>OPEN QUESTION:</strong> your question here</p>
+- If a required section has NO information, still include the <h2> heading with a <p> containing the placeholder text prefixed with "OPEN QUESTION:".
+- Do NOT include the document title as <h1> — it is handled separately.
+- Every <p> should contain a complete thought or claim. Do not put multiple unrelated claims in one paragraph.
 - Be detailed, specific, and cite sources. Every fact should trace back to evidence with a clickable link.`;
 }

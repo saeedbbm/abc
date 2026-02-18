@@ -8,6 +8,7 @@ import { JiraClient, ConfluenceClient, getValidAtlassianToken } from "@/src/appl
 import { verifySlackSignature } from "@/src/application/lib/integrations/slack/oauth";
 import { embedKnowledgeDocument, ensureKnowledgeCollection, searchKnowledgeWithContext } from "@/src/application/lib/knowledge";
 import { processMessageForTopics } from "@/src/application/lib/knowledge/topic-knowledge-service";
+import { matchAndVerifyClaims } from "@/src/application/lib/knowledge/claim-matcher";
 import { PrefixLogger } from "@/lib/utils";
 
 const oauthTokensRepository = new MongoDBOAuthTokensRepository();
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest): Promise<Response> {
             return NextResponse.json({ ok: true });
         }
 
-        // Handle message events (ingest into knowledge base)
+        // Handle new message events (ingest into knowledge base)
         if (event.type === "message" && !event.subtype && event.user) {
             const eventId = `message:${event.channel}:${event.ts}`;
             
@@ -126,6 +127,50 @@ export async function POST(req: NextRequest): Promise<Response> {
                 console.error("[Slack Webhook] Error ingesting message:", err);
             });
             
+            return NextResponse.json({ ok: true });
+        }
+
+        // Handle message edits (message_changed subtype)
+        if (event.type === "message" && event.subtype === "message_changed" && event.message) {
+            const editedMsg = event.message;
+            const eventId = `edit:${event.channel}:${editedMsg.ts}`;
+
+            if (isEventProcessed(eventId)) return NextResponse.json({ ok: true });
+            markEventProcessed(eventId);
+
+            // Re-ingest with updated content
+            ingestSlackMessage(
+                { ...editedMsg, channel: event.channel },
+                teamId
+            ).catch(err => {
+                console.error("[Slack Webhook] Error ingesting edited message:", err);
+            });
+
+            return NextResponse.json({ ok: true });
+        }
+
+        // Handle message deletes (message_deleted subtype)
+        if (event.type === "message" && event.subtype === "message_deleted" && event.previous_message) {
+            const deletedTs = event.previous_message.ts;
+            const eventId = `delete:${event.channel}:${deletedTs}`;
+
+            if (isEventProcessed(eventId)) return NextResponse.json({ ok: true });
+            markEventProcessed(eventId);
+
+            deleteSlackMessage(event.channel, deletedTs, teamId).catch(err => {
+                console.error("[Slack Webhook] Error deleting message:", err);
+            });
+
+            return NextResponse.json({ ok: true });
+        }
+
+        // Handle channel events (channel_created, channel_rename, channel_deleted)
+        if (['channel_created', 'channel_rename'].includes(event.type)) {
+            logger.log(`Channel event: ${event.type} — ${event.channel?.name || event.channel?.id}`);
+            return NextResponse.json({ ok: true });
+        }
+        if (event.type === 'channel_deleted') {
+            logger.log(`Channel deleted: ${event.channel}`);
             return NextResponse.json({ ok: true });
         }
     }
@@ -508,6 +553,11 @@ async function ingestSlackMessage(event: any, teamId: string) {
         // Ensure collection exists and embed the document
         await ensureKnowledgeCollection(logger);
         const result = await embedKnowledgeDocument(doc, logger);
+
+        // Event-driven claim verification
+        matchAndVerifyClaims(projectId, doc).catch(err => {
+            logger.log(`Claim matching failed: ${err}`);
+        });
         
         if (result.success) {
             logger.log(`Embedded message with ${result.chunksCreated} chunks`);
@@ -541,6 +591,27 @@ async function ingestSlackMessage(event: any, teamId: string) {
 
     } catch (error) {
         logger.log(`Error ingesting message: ${error}`);
+    }
+}
+
+/**
+ * Delete a Slack message from the knowledge base when it's deleted in Slack.
+ */
+async function deleteSlackMessage(channelId: string, messageTs: string, teamId: string) {
+    const projectId = await findProjectBySlackTeamId(teamId);
+    if (!projectId) {
+        logger.log(`No project found for team ${teamId}, skipping delete`);
+        return;
+    }
+
+    const sourceId = `${channelId}:${messageTs}`;
+    const existing = await knowledgeDocumentsRepository.findBySourceId(projectId, 'slack', sourceId);
+
+    if (existing) {
+        await knowledgeDocumentsRepository.delete(existing.id);
+        logger.log(`Deleted message document: ${existing.id} (source: ${sourceId})`);
+    } else {
+        logger.log(`No document found for deleted message: ${sourceId}`);
     }
 }
 

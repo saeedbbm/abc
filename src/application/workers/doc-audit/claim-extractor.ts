@@ -24,7 +24,7 @@ import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/reposi
 export const ClaimType = z.enum(['factual', 'ownership', 'process', 'status', 'architecture']);
 export type ClaimTypeEnum = z.infer<typeof ClaimType>;
 
-export const ClaimStatus = z.enum(['active', 'contradicted', 'stale', 'verified', 'unknown']);
+export const ClaimStatus = z.enum(['active', 'contradicted', 'stale', 'verified', 'human_corrected', 'unknown']);
 export type ClaimStatusEnum = z.infer<typeof ClaimStatus>;
 
 // A single extracted claim

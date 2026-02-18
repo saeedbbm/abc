@@ -7,16 +7,17 @@ interface SourceChipProps {
   source: 'slack' | 'confluence' | 'jira';
   label: string;
   citationId?: string;
+  docId?: string;
 }
 
-export function SourceChip({ source, label, citationId }: SourceChipProps) {
+export function SourceChip({ source, label, citationId, docId }: SourceChipProps) {
   const { showSource } = useInspector();
 
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
-        showSource(source as SourceType, citationId);
+        showSource(source as SourceType, citationId, docId);
       }}
       className="source-chip"
     >

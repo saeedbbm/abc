@@ -19,6 +19,7 @@ import { MongoDBDocAuditFindingsRepository } from "@/src/infrastructure/reposito
 import { MongoDBKnowledgePagesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-pages.repository";
 import { getTemplateForEntityType, buildGenerationPrompt, DocumentCategory } from "./document-templates";
 import { CreateKnowledgePageType, PageCategoryType } from "@/src/entities/models/knowledge-page";
+import { criticReview } from "./critic-agent";
 
 const MAX_SLACK_POSTS_PER_RUN = 40;
 
@@ -179,7 +180,32 @@ export class DocAuditNotificationService {
         const entityName = finding.title.replace(/^\[(System|Project|Customer|Process|Incident|Person|Overview)\]\s*/, '');
 
         // 1. Generate document HTML content
-        const docHtml = await this.generateDocumentContent(finding, category);
+        let docHtml = await this.generateDocumentContent(finding, category);
+
+        // 1b. Critic review — quality gate before human review
+        try {
+            const criticResult = await criticReview(
+                docHtml,
+                (finding.evidence || []).map(e => ({
+                    provider: e.provider || 'unknown',
+                    title: e.title || 'Untitled',
+                    excerpt: e.excerpt || '',
+                    url: e.url,
+                })),
+                this.projectId,
+                finding.title || 'Untitled'
+            );
+            if (!criticResult.passesThreshold) {
+                this.logger.log(`Critic failed (score ${criticResult.score}): ${criticResult.summary}`);
+                // Re-generate with critic feedback
+                const issuesFeedback = criticResult.issues.map(i => `- ${i.type}: ${i.detail}`).join('\n');
+                docHtml = await this.generateDocumentContent(finding, category, issuesFeedback);
+            } else {
+                this.logger.log(`Critic passed (score ${criticResult.score})`);
+            }
+        } catch (err) {
+            this.logger.log(`Critic review failed, proceeding anyway: ${err}`);
+        }
 
         // 2. Extract reviewable blocks from the generated HTML
         const { processedHtml, blocks } = this.extractReviewableBlocks(docHtml);
@@ -302,7 +328,8 @@ export class DocAuditNotificationService {
      */
     private async generateDocumentContent(
         finding: DocAuditFindingType,
-        category: DocumentCategory
+        category: DocumentCategory,
+        criticFeedback?: string
     ): Promise<string> {
         const categoryToType: Record<string, string> = {
             customer: 'customer', system: 'system', project: 'project',
@@ -328,7 +355,11 @@ CRITICAL FORMAT RULES:
 - Source citations: use <a href="URL">Source: provider title</a> format with real URLs from the evidence.
 - Do not include a banner or meta-info — just the content sections.`;
 
-            const prompt = buildGenerationPrompt(template, entityName, evidenceText);
+            let prompt = buildGenerationPrompt(template, entityName, evidenceText);
+
+            if (criticFeedback) {
+                prompt += `\n\nIMPORTANT — A quality reviewer found issues with a previous draft. Fix these problems:\n${criticFeedback}\n\nMake sure every paragraph is well-cited and supported by evidence.`;
+            }
 
             const maxTokens = category === 'overview' ? 6000
                 : category === 'project' ? 5000

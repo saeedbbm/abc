@@ -4,6 +4,7 @@ export interface Citation {
   label: string;
   detail: string;
   date: string;
+  docId?: string;
 }
 
 export interface KBSection {

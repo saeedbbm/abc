@@ -12,6 +12,7 @@ import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { PrefixLogger } from '@/lib/utils';
 import { KnowledgeDocumentType } from '@/src/entities/models/knowledge-document';
 import crypto from 'crypto';
+import { smartChunk, SmartChunk } from './smart-chunker';
 
 // Collection name for knowledge embeddings
 export const KNOWLEDGE_COLLECTION = 'knowledge_embeddings';
@@ -157,8 +158,10 @@ export async function embedKnowledgeDocument(
             }
         }
 
-        // Split content into chunks
-        const chunks = await splitter.splitText(document.content);
+        // Smart chunk based on document type
+        const smartChunks = await smartChunk(document.content, document.sourceType, document.metadata);
+        const chunks = smartChunks.map(c => c.text);
+        const chunkMetadata = smartChunks.map(c => c.metadata || {});
         
         if (chunks.length === 0) {
             return {
@@ -197,6 +200,11 @@ export async function embedKnowledgeDocument(
                 sourceCreatedAt: document.sourceCreatedAt,
                 // Store full content for conversations to enable context retrieval
                 ...(isConversation && { fullContent: document.content }),
+                // Smart chunk metadata
+                ...(chunkMetadata[index]?.sectionTitle && { sectionTitle: chunkMetadata[index].sectionTitle }),
+                ...(chunkMetadata[index]?.fieldType && { fieldType: chunkMetadata[index].fieldType }),
+                ...(chunkMetadata[index]?.messageType && { messageType: chunkMetadata[index].messageType }),
+                chunkReason: chunkMetadata[index]?.chunkReason || 'legacy',
             },
         }));
 

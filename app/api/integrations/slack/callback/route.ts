@@ -18,11 +18,11 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     if (error) {
         console.error('Slack OAuth error:', error);
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=${encodeURIComponent(error)}`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=${encodeURIComponent(error)}`);
     }
 
     if (!code || !state) {
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=Missing+code+or+state`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=Missing+code+or+state`);
     }
 
     try {
@@ -73,9 +73,9 @@ export async function GET(req: NextRequest): Promise<Response> {
         triggerBackgroundSync(projectId, 'slack');
 
         // Redirect back to setup page with success
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/${projectId}/setup?connected=slack`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?connected=slack`);
     } catch (error) {
         console.error('Slack OAuth callback error:', error);
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=${encodeURIComponent(error instanceof Error ? error.message : 'OAuth failed')}`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=${encodeURIComponent(error instanceof Error ? error.message : 'OAuth failed')}`);
     }
 }

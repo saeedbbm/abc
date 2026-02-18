@@ -6,10 +6,13 @@
  */
 
 import { resolveCompanySlug } from "@/lib/company-resolver";
+import { db } from "@/lib/mongodb";
 import { MongoDBKnowledgePagesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-pages.repository";
+import { MongoDBClaimsRepository } from "@/src/infrastructure/repositories/mongodb.claims.repository";
 import { ReviewFeedbackService } from "@/src/application/services/review-feedback.service";
 
 const pagesRepo = new MongoDBKnowledgePagesRepository();
+const claimsRepo = new MongoDBClaimsRepository();
 const feedbackService = new ReviewFeedbackService();
 
 export async function POST(
@@ -65,6 +68,57 @@ export async function POST(
 
         // Fire-and-forget: propagate review into bot knowledge (embeddings, entities, claims)
         feedbackService.propagateReview(projectId, pageId, blockId, action, editedText).catch(() => {});
+
+        // Write back to claims ledger
+        try {
+            const block = finalPage?.reviewableBlocks?.find((b: any) => b.id === blockId);
+            if (block) {
+                if (action === 'accept') {
+                    // Mark related claims as verified
+                    const relatedClaims = await claimsRepo.getClaimsByText(projectId, block.originalText);
+                    for (const claim of relatedClaims) {
+                        await claimsRepo.updateClaimStatus(projectId, claim.id, 'verified');
+                    }
+                } else if (action === 'edit' && editedText) {
+                    // Mark original claims as human_corrected, create new verified claims
+                    const relatedClaims = await claimsRepo.getClaimsByText(projectId, block.originalText);
+                    for (const claim of relatedClaims) {
+                        await claimsRepo.updateClaimStatus(projectId, claim.id, 'human_corrected');
+                    }
+                    // Create a new verified claim from the edited text
+                    await claimsRepo.storeClaims([{
+                        id: crypto.randomUUID(),
+                        projectId,
+                        claimText: editedText,
+                        claimType: 'factual',
+                        sourcePageId: pageId,
+                        sourcePageTitle: finalPage?.title || 'Unknown',
+                        sourcePageUrl: '',
+                        sourceSection: '',
+                        pageLastModified: new Date().toISOString(),
+                        relatedEntityNames: finalPage?.entityName ? [finalPage.entityName] : [],
+                        status: 'verified',
+                        extractedAt: new Date().toISOString(),
+                        lastVerifiedAt: new Date().toISOString(),
+                    }]);
+                }
+
+                // Store review action for audit trail
+                await db.collection('review_actions').insertOne({
+                    pageId,
+                    blockId,
+                    action,
+                    originalText: block.originalText,
+                    editedText: editedText || null,
+                    reviewerName,
+                    timestamp: new Date().toISOString(),
+                    claimsAffected: [],
+                    projectId,
+                });
+            }
+        } catch (err) {
+            console.error('[Review] Claims ledger update failed:', err);
+        }
 
         return Response.json(finalPage);
     } catch (error) {

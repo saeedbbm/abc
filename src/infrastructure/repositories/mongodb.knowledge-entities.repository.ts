@@ -108,11 +108,41 @@ export class MongoDBKnowledgeEntitiesRepository {
         };
     }
 
-    async delete(id: string): Promise<void> {
+    async delete(id: string, projectId?: string): Promise<void> {
         // Soft delete
+        const filter: Filter<z.infer<typeof DocSchema>> = { _id: new ObjectId(id) };
+        if (projectId) filter.projectId = projectId;
         await this.collection.updateOne(
-            { _id: new ObjectId(id) },
+            filter,
             { $set: { deletedAt: new Date().toISOString() } }
+        );
+    }
+
+    async findByProject(
+        projectId: string,
+        type?: string
+    ): Promise<z.infer<typeof KnowledgeEntity>[]> {
+        const query: Filter<z.infer<typeof DocSchema>> = {
+            projectId,
+            deletedAt: { $exists: false },
+        };
+        if (type) query.type = type;
+
+        const results = await this.collection.find(query).toArray();
+        return results.map(doc => {
+            const { _id, ...rest } = doc;
+            return { ...rest, id: _id.toString() };
+        });
+    }
+
+    async updateMetadata(
+        entityId: string,
+        projectId: string,
+        metadata: Record<string, any>
+    ): Promise<void> {
+        await this.collection.updateOne(
+            { _id: new ObjectId(entityId), projectId },
+            { $set: { metadata, updatedAt: new Date().toISOString() } }
         );
     }
 

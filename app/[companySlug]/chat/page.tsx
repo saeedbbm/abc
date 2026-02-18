@@ -7,6 +7,7 @@ import { SourceChip } from '@/components/pidrax/SourceChip';
 import { useInspector } from '@/contexts/InspectorContext';
 import { Button } from '@/components/ui/button';
 import { Send, Zap, FileText, Terminal, LayoutList } from 'lucide-react';
+import { isDemo } from '@/lib/is-demo';
 
 const suggestedPrompts = [
   'Customers want MP4 video enhancement—what should we build?',
@@ -17,7 +18,8 @@ const suggestedPrompts = [
 
 export default function ChatPage() {
   const { companySlug } = useParams<{ companySlug: string }>();
-  const [messages, setMessages] = useState<ChatMsg[]>(chatMessages);
+  const demo = isDemo(companySlug);
+  const [messages, setMessages] = useState<ChatMsg[]>(demo ? chatMessages : []);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const { showSource } = useInspector();
@@ -36,6 +38,24 @@ export default function ChatPage() {
     const assistantId = `msg-${Date.now() + 1}`;
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
     setIsStreaming(true);
+
+    // Demo mode: show a canned response instead of calling the API
+    if (demo) {
+      const demoReply = "This is a demo workspace with mock data. In a real company workspace, Pidrax would search your connected Slack, Jira, and Confluence to answer this question using RAG.";
+      let accumulated = '';
+      for (const char of demoReply) {
+        accumulated += char;
+        const snapshot = accumulated;
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === assistantId ? { ...m, content: snapshot } : m
+          )
+        );
+        await new Promise(r => setTimeout(r, 12));
+      }
+      setIsStreaming(false);
+      return;
+    }
 
     try {
       const response = await fetch(`/api/${companySlug}/ask`, {

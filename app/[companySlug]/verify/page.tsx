@@ -6,6 +6,7 @@ import { verificationTasks, kbDocuments, type VerificationTask, type KBDocument 
 import { useInspector, type SourceType } from '@/contexts/InspectorContext';
 import { User, Calendar, CheckCircle2, Pencil, HelpCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { isDemo } from '@/lib/is-demo';
 
 interface ApiVerificationTask extends VerificationTask {
   pageId?: string;
@@ -15,12 +16,14 @@ interface ApiVerificationTask extends VerificationTask {
 export default function VerifyPage() {
   const { companySlug } = useParams<{ companySlug: string }>();
   const { showSource } = useInspector();
-  const [tasks, setTasks] = useState<ApiVerificationTask[]>(verificationTasks);
-  const [docs, setDocs] = useState<KBDocument[]>(kbDocuments);
-  const [isLoading, setIsLoading] = useState(false);
+  const demo = isDemo(companySlug);
+  const [tasks, setTasks] = useState<ApiVerificationTask[]>(demo ? verificationTasks : []);
+  const [docs, setDocs] = useState<KBDocument[]>(demo ? kbDocuments : []);
+  const [isLoading, setIsLoading] = useState(!demo);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const fetchTasks = useCallback(async () => {
+    if (demo) return;
     setIsLoading(true);
     try {
       const res = await fetch(`/api/${companySlug}/kb`);
@@ -31,7 +34,6 @@ export default function VerifyPage() {
         const pages = data.pages as (KBDocument & { _id?: string })[];
         setDocs(pages);
 
-        // Extract pages with pending reviewable blocks (needs-verification paragraphs)
         const apiTasks: ApiVerificationTask[] = [];
         for (const page of pages) {
           for (const section of page.sections) {
@@ -56,17 +58,14 @@ export default function VerifyPage() {
           }
         }
 
-        if (apiTasks.length > 0) {
-          setTasks(apiTasks);
-        }
-        // If no reviewable blocks found, keep mock verificationTasks as fallback
+        setTasks(apiTasks);
       }
     } catch {
-      // API unavailable — keep mock data as fallback
+      // API unavailable — keep empty state
     } finally {
       setIsLoading(false);
     }
-  }, [companySlug]);
+  }, [companySlug, demo]);
 
   useEffect(() => {
     fetchTasks();
@@ -134,6 +133,16 @@ export default function VerifyPage() {
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin mr-2" />
             <span className="text-sm">Loading verification tasks…</span>
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="h-12 w-12 rounded-xl bg-muted/50 flex items-center justify-center mb-4">
+              <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <h2 className="text-base font-semibold mb-1">No verification tasks</h2>
+            <p className="text-sm text-muted-foreground max-w-sm">
+              Verification tasks will appear here once the knowledge base has been populated and claims have been extracted.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">

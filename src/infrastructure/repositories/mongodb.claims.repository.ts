@@ -15,7 +15,7 @@ const COLLECTION_NAME = "doc_audit_claims";
 export const ClaimType = z.enum(['factual', 'ownership', 'process', 'status', 'architecture']);
 export type ClaimTypeEnum = z.infer<typeof ClaimType>;
 
-export const ClaimStatus = z.enum(['active', 'contradicted', 'stale', 'verified', 'unknown']);
+export const ClaimStatus = z.enum(['active', 'contradicted', 'stale', 'verified', 'human_corrected', 'unknown']);
 export type ClaimStatusEnum = z.infer<typeof ClaimStatus>;
 
 export interface ExtractedClaim {
@@ -151,6 +151,40 @@ export class MongoDBClaimsRepository {
                 },
             }
         );
+    }
+
+    /**
+     * Find claims by text similarity (substring match)
+     */
+    async getClaimsByText(projectId: string, text: string): Promise<ExtractedClaim[]> {
+        const collection = this.getCollection();
+        // Use keywords from the text to find related claims
+        const keywords = text.toLowerCase().split(/\s+/).filter(w => w.length > 4).slice(0, 5);
+        if (keywords.length === 0) return [];
+        
+        const regexPattern = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        const docs = await collection.find({
+            projectId,
+            claimText: { $regex: new RegExp(regexPattern, 'i') },
+        }).limit(10).toArray();
+
+        return docs.map(d => ({
+            id: d.id || d._id.toString(),
+            projectId: d.projectId,
+            claimText: d.claimText,
+            claimType: d.claimType,
+            sourcePageId: d.sourcePageId,
+            sourcePageTitle: d.sourcePageTitle,
+            sourcePageUrl: d.sourcePageUrl,
+            sourceSection: d.sourceSection,
+            pageLastModified: d.pageLastModified,
+            relatedEntityNames: d.relatedEntityNames || [],
+            status: d.status,
+            contradictionEvidence: d.contradictionEvidence,
+            contradictionSource: d.contradictionSource,
+            extractedAt: d.extractedAt,
+            lastVerifiedAt: d.lastVerifiedAt,
+        }));
     }
 
     /**

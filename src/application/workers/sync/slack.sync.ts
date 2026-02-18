@@ -97,62 +97,79 @@ export class SlackSyncWorker {
 
             // Get previous sync state for incremental sync
             const prevState = await this.syncStateRepository.fetch(projectId, 'slack');
+            const isIncremental = !fullSync && !!prevState?.lastCursor;
             
             // Determine oldest message timestamp to sync from
             let oldest: Date;
-            if (!fullSync && prevState?.lastCursor) {
-                // Incremental sync: start from last cursor
-                oldest = new Date(parseFloat(prevState.lastCursor) * 1000);
+            if (isIncremental) {
+                oldest = new Date(parseFloat(prevState!.lastCursor!) * 1000);
                 this.logger.log(`Incremental sync from: ${oldest.toISOString()}`);
             } else {
-                // Full sync: go back messageDays
                 oldest = new Date();
                 oldest.setDate(oldest.getDate() - messageDays);
-                this.logger.log(`Full sync from: ${oldest.toISOString()}`);
+                this.logger.log(`Full sync (backfill) from: ${oldest.toISOString()}`);
             }
 
-            // Sync users
-            this.logger.log('Syncing users...');
-            stats.users = await this.syncUsers(client, projectId);
-            this.logger.log(`Synced ${stats.users} users`);
+            // On full sync: always sync users & channels
+            // On incremental: skip (users/channels rarely change, handled by events)
+            if (!isIncremental) {
+                this.logger.log('Syncing users...');
+                stats.users = await this.syncUsers(client, projectId);
+                this.logger.log(`Synced ${stats.users} users`);
 
-            // Sync channels
-            this.logger.log('Syncing channels...');
-            const channelTypes = includePrivate ? 'public_channel,private_channel' : 'public_channel';
-            stats.channels = await this.syncChannels(client, projectId, channelTypes);
-            this.logger.log(`Synced ${stats.channels} channels`);
+                this.logger.log('Syncing channels...');
+                const channelTypes = includePrivate ? 'public_channel,private_channel' : 'public_channel';
+                stats.channels = await this.syncChannels(client, projectId, channelTypes);
+                this.logger.log(`Synced ${stats.channels} channels`);
 
-            // Auto-join public channels to ensure we can read message history
-            this.logger.log('Joining public channels...');
-            const { joined, failed } = await client.joinAllPublicChannels();
-            if (joined > 0) {
-                this.logger.log(`Joined ${joined} channels (${failed} could not be joined)`);
+                this.logger.log('Joining public channels...');
+                const { joined, failed } = await client.joinAllPublicChannels();
+                if (joined > 0) {
+                    this.logger.log(`Joined ${joined} channels (${failed} could not be joined)`);
+                }
+            } else {
+                this.logger.log('Incremental sync — skipping users/channels (handled by events)');
             }
 
-            // Sync messages
+            // Sync messages (always — uses timestamp cursor for incremental)
             this.logger.log('Syncing messages...');
             const { messages, threads, latestTimestamp } = await this.syncMessages(client, projectId, oldest, includeThreadReplies);
             stats.messages = messages;
             stats.threads = threads;
             this.logger.log(`Synced ${stats.messages} messages and ${stats.threads} threads`);
 
-            // Create conversation summaries by clustering related messages
-            if (createConversationSummaries && stats.messages > 0) {
-                this.logger.log('Creating conversation summaries...');
+            // Create conversation summaries only on full sync (backfill).
+            // On incremental, individual messages are ingested via webhook and
+            // don't need full re-clustering.
+            if (createConversationSummaries && !isIncremental && stats.messages > 0) {
+                this.logger.log('Creating conversation summaries (full sync)...');
                 stats.conversations = await this.createConversationSummaries(projectId);
                 this.logger.log(`Created ${stats.conversations} conversation summaries`);
+            } else if (isIncremental && stats.messages > 0) {
+                this.logger.log(`Skipping conversation summary rebuild (incremental, ${stats.messages} new messages will be picked up by webhook)`);
             }
 
-            // Generate embeddings for all Slack documents
+            // Generate embeddings only for documents with pending status
             if (generateEmbeddings) {
-                this.logger.log(`Fetching all Slack documents for embedding...`);
-                const { items: slackDocs } = await this.knowledgeDocumentsRepository.findByProjectAndProvider(projectId, 'slack');
+                const pendingDocs = await this.knowledgeDocumentsRepository.findPendingEmbedding(projectId);
                 
-                if (slackDocs.length > 0) {
-                    this.logger.log(`Generating embeddings for ${slackDocs.length} documents...`);
-                    const embeddingResults = await embedKnowledgeDocuments(slackDocs, this.logger);
+                if (pendingDocs.length > 0) {
+                    this.logger.log(`Embedding ${pendingDocs.length} pending documents...`);
+                    const embeddingResults = await embedKnowledgeDocuments(pendingDocs, this.logger);
                     stats.embedded = embeddingResults.filter(r => r.success).reduce((sum, r) => sum + r.chunksCreated, 0);
                     this.logger.log(`Created ${stats.embedded} embedding chunks`);
+                } else if (!isIncremental) {
+                    // On full sync, check all docs to ensure nothing is missed
+                    this.logger.log(`Fetching all Slack documents for embedding check...`);
+                    const { items: slackDocs } = await this.knowledgeDocumentsRepository.findByProjectAndProvider(projectId, 'slack');
+                    if (slackDocs.length > 0) {
+                        this.logger.log(`Checking embeddings for ${slackDocs.length} documents...`);
+                        const embeddingResults = await embedKnowledgeDocuments(slackDocs, this.logger);
+                        stats.embedded = embeddingResults.filter(r => r.success).reduce((sum, r) => sum + r.chunksCreated, 0);
+                        this.logger.log(`Created ${stats.embedded} embedding chunks`);
+                    }
+                } else {
+                    this.logger.log('No pending documents to embed');
                 }
             }
 

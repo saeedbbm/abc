@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { exchangeAtlassianCodeForTokens, getAtlassianAccessibleResources } from "@/src/application/lib/integrations/atlassian";
 import { MongoDBOAuthTokensRepository } from "@/src/infrastructure/repositories/mongodb.oauth-tokens.repository";
 import { triggerBackgroundSync } from "@/lib/sync-trigger";
+import { registerAtlassianWebhooks } from "@/src/application/lib/integrations/atlassian/webhooks";
 
 const oauthTokensRepository = new MongoDBOAuthTokensRepository();
 
@@ -18,11 +19,11 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     if (error) {
         console.error('Atlassian OAuth error:', error);
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=${encodeURIComponent(error)}`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=${encodeURIComponent(error)}`);
     }
 
     if (!code || !state) {
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=Missing+code+or+state`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=Missing+code+or+state`);
     }
 
     try {
@@ -84,14 +85,20 @@ export async function GET(req: NextRequest): Promise<Response> {
             });
         }
 
+        // Register webhooks for real-time updates from Jira/Confluence
+        console.log('[Atlassian Callback] Registering webhooks...');
+        registerAtlassianWebhooks(tokens.accessToken, site.id, projectId).catch(err => {
+            console.error('[Atlassian Callback] Webhook registration failed:', err);
+        });
+
         // Trigger background sync to ingest Jira and Confluence data immediately
         console.log('[Atlassian Callback] Triggering background sync...');
         triggerBackgroundSync(projectId, 'atlassian');
 
         // Redirect back to setup page with success
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/${projectId}/setup?connected=atlassian`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?connected=atlassian`);
     } catch (error) {
         console.error('Atlassian OAuth callback error:', error);
-        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/c/error?message=${encodeURIComponent(error instanceof Error ? error.message : 'OAuth failed')}`);
+        return Response.redirect(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/admin?error=${encodeURIComponent(error instanceof Error ? error.message : 'OAuth failed')}`);
     }
 }

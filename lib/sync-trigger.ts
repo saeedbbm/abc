@@ -1,10 +1,12 @@
 import { MongoDBOAuthTokensRepository } from "@/src/infrastructure/repositories/mongodb.oauth-tokens.repository";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
 import { MongoDBKnowledgeEntitiesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-entities.repository";
+import { db } from "@/lib/mongodb";
 import { getValidAtlassianToken } from "@/src/application/lib/integrations/atlassian";
 import { SlackSyncWorker } from "@/src/application/workers/sync/slack.sync";
 import { JiraSyncWorker } from "@/src/application/workers/sync/jira.sync";
 import { ConfluenceSyncWorker } from "@/src/application/workers/sync/confluence.sync";
+import { deduplicateEntities } from "@/src/application/lib/knowledge/entity-resolver";
 
 const oauthTokensRepository = new MongoDBOAuthTokensRepository();
 const knowledgeDocumentsRepository = new MongoDBKnowledgeDocumentsRepository();
@@ -53,6 +55,38 @@ export async function triggerBackgroundSync(
                         createConversationSummaries: true,
                     });
                     console.log('[Sync] Background Slack sync completed');
+
+                    // Run entity deduplication
+                    deduplicateEntities(projectId, knowledgeEntitiesRepository).catch(err => {
+                        console.error('[Sync] Entity dedup failed:', err);
+                    });
+
+                    // Auto-trigger doc-audit after first sync
+                    try {
+                        const hasRunBefore = await db.collection('doc_audit_runs').findOne({ projectId });
+                        if (!hasRunBefore) {
+                            console.log('[Sync] First sync complete — auto-triggering doc-audit...');
+                            const { DocAuditWorker } = await import("@/src/application/workers/doc-audit");
+                            const { MongoDBDocAuditFindingsRepository, MongoDBDocAuditRunsRepository, MongoDBDocAuditConfigRepository } = await import("@/src/infrastructure/repositories/mongodb.doc-audit.repository");
+                            const { PrefixLogger } = await import("@/lib/utils");
+                            const worker = new DocAuditWorker(
+                                oauthTokensRepository,
+                                knowledgeDocumentsRepository,
+                                knowledgeEntitiesRepository,
+                                new MongoDBDocAuditFindingsRepository(),
+                                new MongoDBDocAuditRunsRepository(),
+                                new MongoDBDocAuditConfigRepository(),
+                                new PrefixLogger('auto-doc-audit')
+                            );
+                            worker.run(projectId).then(result => {
+                                console.log('[Sync] Auto doc-audit complete:', JSON.stringify(result));
+                            }).catch(err => {
+                                console.error('[Sync] Auto doc-audit failed:', err);
+                            });
+                        }
+                    } catch (err) {
+                        console.error('[Sync] Error checking doc-audit history:', err);
+                    }
                 }
             } else if (provider === 'atlassian') {
                 const atlassianToken = await getValidAtlassianToken(projectId);
@@ -73,6 +107,38 @@ export async function triggerBackgroundSync(
                         generateEmbeddings: true,
                     });
                     console.log('[Sync] Background Confluence sync completed');
+
+                    // Run entity deduplication
+                    deduplicateEntities(projectId, knowledgeEntitiesRepository).catch(err => {
+                        console.error('[Sync] Entity dedup failed:', err);
+                    });
+
+                    // Auto-trigger doc-audit after first sync
+                    try {
+                        const hasRunBefore = await db.collection('doc_audit_runs').findOne({ projectId });
+                        if (!hasRunBefore) {
+                            console.log('[Sync] First sync complete — auto-triggering doc-audit...');
+                            const { DocAuditWorker } = await import("@/src/application/workers/doc-audit");
+                            const { MongoDBDocAuditFindingsRepository, MongoDBDocAuditRunsRepository, MongoDBDocAuditConfigRepository } = await import("@/src/infrastructure/repositories/mongodb.doc-audit.repository");
+                            const { PrefixLogger } = await import("@/lib/utils");
+                            const worker = new DocAuditWorker(
+                                oauthTokensRepository,
+                                knowledgeDocumentsRepository,
+                                knowledgeEntitiesRepository,
+                                new MongoDBDocAuditFindingsRepository(),
+                                new MongoDBDocAuditRunsRepository(),
+                                new MongoDBDocAuditConfigRepository(),
+                                new PrefixLogger('auto-doc-audit')
+                            );
+                            worker.run(projectId).then(result => {
+                                console.log('[Sync] Auto doc-audit complete:', JSON.stringify(result));
+                            }).catch(err => {
+                                console.error('[Sync] Auto doc-audit failed:', err);
+                            });
+                        }
+                    } catch (err) {
+                        console.error('[Sync] Error checking doc-audit history:', err);
+                    }
                 }
             }
         } catch (error) {

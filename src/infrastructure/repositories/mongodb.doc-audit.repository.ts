@@ -33,6 +33,11 @@ export class MongoDBDocAuditFindingsRepository {
         };
     }
 
+    /** Alias for `create` — used by event-driven claim matcher */
+    async createFinding(data: z.infer<typeof CreateDocAuditFindingSchema>): Promise<z.infer<typeof DocAuditFinding>> {
+        return this.create(data);
+    }
+
     async fetch(id: string): Promise<z.infer<typeof DocAuditFinding> | null> {
         try {
             const doc = await this.collection.findOne({ _id: new ObjectId(id) });

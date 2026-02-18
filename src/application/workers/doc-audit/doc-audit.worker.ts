@@ -89,10 +89,6 @@ export class DocAuditWorker {
             const config = await this.configRepo.getOrCreate(projectId);
             const { slackClient, confluenceClient, siteUrl } = await this.initializeClients(projectId);
 
-            if (!slackClient) {
-                throw new Error('Slack is not connected. Cannot send notifications.');
-            }
-
             // Initialize detectors
             const conflictDetector = new ConflictDetector(
                 this.knowledgeDocsRepo,
@@ -111,12 +107,14 @@ export class DocAuditWorker {
                 }
             );
 
-            // Company slug for KB pages
-            const companySlug = config.pidraxSpaceKey?.toLowerCase() || 'bix';
+            // Resolve company slug from the projects collection
+            const project = await (await import("@/lib/mongodb")).db.collection('projects').findOne({ projectId });
+            const companySlug = project?.companySlug || config.pidraxSpaceKey?.toLowerCase() || 'unknown';
 
             // Initialize notification service (v3 — saves to our DB)
+            // Slack is optional — KB pages are still generated even without Slack
             const notificationService = new DocAuditNotificationService(
-                slackClient,
+                slackClient!,
                 confluenceClient,
                 this.findingsRepo,
                 this.kbPagesRepo,
@@ -126,17 +124,26 @@ export class DocAuditWorker {
                 this.logger.child('notifications')
             );
 
-            // Get BOTH channels
-            const docChannel = await notificationService.getChannel(
-                config.slackChannelName || 'documentation'
-            );
-            const kbChannel = await notificationService.getChannel('knowledge-base');
-
-            if (!docChannel) {
-                throw new Error(`Could not find or create #${config.slackChannelName} channel`);
+            // Try to get Slack channels — non-fatal if they don't exist
+            let docChannelId: string | null = null;
+            let kbChannelId: string | null = null;
+            if (slackClient) {
+                try {
+                    const docChannel = await notificationService.getChannel(
+                        config.slackChannelName || 'documentation'
+                    );
+                    const kbChannel = await notificationService.getChannel('knowledge-base');
+                    docChannelId = docChannel?.id || null;
+                    kbChannelId = kbChannel?.id || null;
+                    if (docChannelId) {
+                        this.logger.log(`Using Slack channels: #documentation (${docChannelId})${kbChannelId ? `, #knowledge-base (${kbChannelId})` : ''}`);
+                    }
+                } catch (err) {
+                    this.logger.log(`Slack channel setup failed (non-fatal, KB pages will still be generated): ${err}`);
+                }
+            } else {
+                this.logger.log('Slack not connected — KB pages will be generated without Slack notifications');
             }
-
-            this.logger.log(`Using #documentation (${docChannel.id})${kbChannel ? `, #knowledge-base (${kbChannel.id})` : ''}`);
 
             // --- Clear stale findings ---
             const clearedCount = await this.findingsRepo.clearStaleFindings(projectId);
@@ -178,9 +185,9 @@ export class DocAuditWorker {
                 this.logger.log('Creating "What PidraxBot Understands" page...');
                 try {
                     const result = await notificationService.createUnderstandingPage(understandingHtml);
-                    if (result && kbChannel) {
+                    if (result && kbChannelId && slackClient) {
                         const msg = `:brain: Updated the company understanding analysis — <${result.url}|View the full analysis>`;
-                        await slackClient.postMessage(kbChannel.id, msg);
+                        await slackClient.postMessage(kbChannelId, msg);
                     }
                 } catch (error) {
                     this.logger.log(`Understanding page failed (non-fatal): ${error}`);
@@ -206,11 +213,13 @@ export class DocAuditWorker {
                     if (existing) continue;
 
                     const saved = await this.findingsRepo.create(findingData);
-                    try {
-                        await notificationService.notifyConflictFinding(saved, docChannel.id);
-                        totalNotifications++;
-                    } catch (error) {
-                        this.logger.log(`Notification failed: ${error}`);
+                    if (docChannelId) {
+                        try {
+                            await notificationService.notifyConflictFinding(saved, docChannelId);
+                            totalNotifications++;
+                        } catch (error) {
+                            this.logger.log(`Notification failed: ${error}`);
+                        }
                     }
                 }
 
@@ -227,7 +236,7 @@ export class DocAuditWorker {
                 totalGaps = gapResult.findings.length;
                 this.logger.log(`Found ${totalGaps} undocumented entities`);
 
-                const gapChannelId = kbChannel?.id || docChannel.id;
+                const gapChannelId = kbChannelId || docChannelId;
 
                 // Step 1: Save findings and filter out duplicates
                 const newFindings = [];
@@ -263,7 +272,7 @@ export class DocAuditWorker {
                 }
 
                 // Step 2: Send ONE summary Slack message with all created pages
-                if (createdPages.length > 0) {
+                if (createdPages.length > 0 && gapChannelId) {
                     try {
                         await notificationService.sendGapSummary(createdPages, gapChannelId);
                         totalNotifications++;

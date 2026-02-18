@@ -103,7 +103,11 @@ export class ConflictDetector {
         // Step 2: Verify claims in PARALLEL batches of 10
         this.logger.log('Step 2: Verifying claims against Slack/Jira evidence (parallel batches of 10)...');
         const findings: CreateDocAuditFindingType[] = [];
-        const claimsToCheck = allClaims.slice(0, this.config.maxClaimsPerRun);
+        // Only verify claims that haven't been verified recently (event-driven handles the rest)
+        const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const staleClaims = allClaims.filter(c => !c.lastVerifiedAt || c.lastVerifiedAt < staleCutoff);
+        const claimsToCheck = staleClaims.slice(0, this.config.maxClaimsPerRun);
+        this.logger.log(`${staleClaims.length} stale claims (not verified in 24h), checking up to ${claimsToCheck.length}`);
         let verified = 0;
         const BATCH_SIZE = 10;
 
@@ -323,7 +327,14 @@ Compare the claim against the evidence. Is it still accurate?`,
             });
 
             if (object.verdict === 'confirmed') return null;
-            return object;
+            return object as {
+                verdict: 'confirmed' | 'contradicted' | 'outdated' | 'needs_update';
+                severity: string;
+                summary: string;
+                explanation: string;
+                counterEvidence: string;
+                suggestedFix?: string;
+            };
         } catch (error) {
             this.logger.log(`LLM claim comparison error: ${error}`);
             return null;

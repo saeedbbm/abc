@@ -8,6 +8,7 @@
 
 import { resolveCompanySlug } from "@/lib/company-resolver";
 import { MongoDBKnowledgePagesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-pages.repository";
+import { transformPageToKBDocument } from "@/lib/kb-transform";
 
 const pagesRepo = new MongoDBKnowledgePagesRepository();
 
@@ -24,7 +25,8 @@ export async function GET(
         if (!page) {
             return Response.json({ error: 'Page not found' }, { status: 404 });
         }
-        return Response.json(page);
+        // Transform to sections[] format with enriched source previews
+        return Response.json(await transformPageToKBDocument(page, companySlug, true));
     } catch (error) {
         return Response.json({ error: String(error) }, { status: 500 });
     }
