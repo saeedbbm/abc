@@ -10,8 +10,8 @@
  * If score < 60, the page is sent back to the drafter with feedback.
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
 import { MongoDBClaimsRepository, ExtractedClaim } from "@/src/infrastructure/repositories/mongodb.claims.repository";
@@ -181,7 +181,7 @@ async function checkEvidenceQuality(
 
     try {
         const { object } = await generateObject({
-            model: openai('gpt-4o-mini'),
+            model: getPrimaryModel(),
             schema: z.object({
                 paragraphReviews: z.array(z.object({
                     paragraphIndex: z.number(),
@@ -251,7 +251,7 @@ async function checkAgainstClaims(
 
     try {
         const { object } = await generateObject({
-            model: openai('gpt-4o-mini'),
+            model: getPrimaryModel(),
             schema: z.object({
                 conflicts: z.array(z.object({
                     paragraphIndex: z.number(),

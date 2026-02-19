@@ -13,7 +13,7 @@ import { z } from "zod";
 // Individual section with confidence tracking
 export const ProfileSection = z.object({
     content: z.string(),
-    confidence: z.number().min(0).max(1).default(0.5),
+    confidence: z.number().default(0.5),
     sourceCount: z.number().default(0),        // How many sources contributed
     lastUpdatedAt: z.string().datetime(),
 });

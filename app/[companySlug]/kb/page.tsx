@@ -6,6 +6,12 @@ import { kbDocuments, type KBDocument } from '@/data/mockData';
 import { useInspector, type SourceType, type CitationSource } from '@/contexts/InspectorContext';
 import { ChevronRight, ChevronDown, FileText, CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Loader2, Link2 } from 'lucide-react';
 import { isDemo } from '@/lib/is-demo';
+import { KB_CATEGORY_LABELS, type KBCategory } from '@/src/entities/models/score-format';
+
+const CATEGORY_ORDER: KBCategory[] = [
+  "company_overview", "setup_onboarding", "people", "clients",
+  "past_documented", "past_undocumented", "ongoing_projects", "new_projects", "processes",
+];
 
 const statusConfig: Record<string, { label: string; className: string; icon: any }> = {
   verified: { label: 'Verified', className: 'badge-verified', icon: CheckCircle2 },
@@ -38,7 +44,12 @@ export default function KBPage() {
   const [activePara, setActivePara] = useState<string | null>(null);
   const { showSource, showCitations, hideSource } = useInspector();
 
-  const categories = Array.from(new Set(documents.map(d => d.category)));
+  const docCategories = new Set(documents.map(d => d.category));
+  const categories = CATEGORY_ORDER.filter(c => docCategories.has(c) || docCategories.has(c.replace(/_/g, ' ')));
+  // Also include any categories from the API that don't match the new system (backward compat)
+  for (const cat of docCategories) {
+    if (!categories.includes(cat as KBCategory)) categories.push(cat as KBCategory);
+  }
 
   const fetchDocuments = useCallback(async () => {
     if (demo) return;
@@ -193,7 +204,7 @@ export default function KBPage() {
                     className="flex items-center gap-1.5 w-full rounded-md px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent transition-colors"
                   >
                     {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                    {cat}
+                    {KB_CATEGORY_LABELS[cat as KBCategory] || cat}
                     <span className="ml-auto text-[10px] text-muted-foreground/60">{docs.length}</span>
                   </button>
                   {isExpanded && (

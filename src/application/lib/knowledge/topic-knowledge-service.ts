@@ -13,8 +13,8 @@
  * This mimics how human memory works - associative, not temporal.
  */
 
-import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
+import { getPrimaryModel } from '@/lib/ai-model';
 import { MongoDBKnowledgeDocumentsRepository } from '@/src/infrastructure/repositories/mongodb.knowledge-documents.repository';
 import { PrefixLogger } from '@/lib/utils';
 import { embedKnowledgeDocument } from './embedding-service';
@@ -50,7 +50,7 @@ export async function extractTopics(
     
     try {
         const result = await generateText({
-            model: openai('gpt-4o-mini'),
+            model: getPrimaryModel(),
             messages: [
                 {
                     role: 'system',

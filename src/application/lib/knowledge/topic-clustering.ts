@@ -9,7 +9,7 @@
  */
 
 import { generateText, embedMany } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { getPrimaryModel } from '@/lib/ai-model';
 import { embeddingModel } from '@/lib/embedding';
 import { PrefixLogger } from '@/lib/utils';
 import { KnowledgeDocumentType } from '@/src/entities/models/knowledge-document';
@@ -106,7 +106,7 @@ async function generateThreadTopicName(
     
     try {
         const { text } = await generateText({
-            model: openai('gpt-4o-mini'),
+            model: getPrimaryModel(),
             prompt: `Read these Slack messages from a thread and output ONLY a short topic name (3-6 words) that describes the SUBJECT MATTER being discussed. Do NOT describe the container (e.g., no "Thread in #general", no "Slack conversation about"). Just the subject.
 
 Examples of GOOD topic names: "Dashboard Invoice Loading Performance", "Redis Connection Pool Issue", "Q1 Release Code Freeze Schedule", "Acme Corp Billing Integration", "PostgreSQL Latency Optimization"
@@ -116,7 +116,7 @@ Messages:
 ${preview}
 
 Topic name:`,
-            maxTokens: 30,
+            maxOutputTokens: 30,
         });
         
         const cleaned = text.trim().replace(/^["']|["']$/g, '').replace(/^Topic:\s*/i, '').trim();
@@ -238,9 +238,9 @@ Output ONLY valid JSON, no explanation.`;
 
     try {
         const { text } = await generateText({
-            model: openai('gpt-4o-mini'),
+            model: getPrimaryModel(),
             prompt,
-            maxTokens: 1000,
+            maxOutputTokens: 1000,
         });
         
         // Parse LLM response

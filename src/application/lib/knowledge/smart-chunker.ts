@@ -31,6 +31,8 @@ const KEEP_WHOLE_TYPES = new Set([
     'jira_user', 'jira_project', 'jira_comment',
     'confluence_space', 'confluence_user',
     'topic_document', 'company_profile',
+    'customer_feedback',
+    'github_commit',
 ]);
 
 const MAX_SECTION_LENGTH = 2000;
@@ -66,6 +68,16 @@ export async function smartChunk(
     // Jira issues: split by fields
     if (sourceType === 'jira_issue') {
         return chunkJiraIssue(content, metadata);
+    }
+
+    // GitHub files: split by function/class boundaries or by sections
+    if (sourceType === 'github_file') {
+        return chunkGitHubFile(content, metadata);
+    }
+
+    // GitHub PRs: split description from review comments
+    if (sourceType === 'github_pr') {
+        return chunkGitHubPR(content, metadata);
     }
 
     // Check provider registry for custom strategy (future providers)
@@ -214,6 +226,55 @@ function chunkJiraIssue(content: string, metadata?: Record<string, any>): Promis
     }
     
     return Promise.resolve(chunks.length > 0 ? chunks : [{ text: content, metadata: { chunkReason: 'jira-whole' } }]);
+}
+
+/**
+ * GitHub file: split by sections/functions if possible, otherwise by size.
+ */
+async function chunkGitHubFile(content: string, metadata?: Record<string, any>): Promise<SmartChunk[]> {
+    if (content.length <= MAX_SECTION_LENGTH) {
+        return [{ text: content, metadata: { chunkReason: 'github-file-whole' } }];
+    }
+    const sections: SmartChunk[] = [];
+    const lines = content.split('\n');
+    let currentChunk = '';
+    let currentSection = metadata?.path || 'file';
+
+    for (const line of lines) {
+        const isBoundary = /^(class |def |function |export |const |import |from |##|\/\/)/.test(line.trim());
+        if (isBoundary && currentChunk.length > 200) {
+            sections.push({ text: currentChunk.trim(), metadata: { sectionTitle: currentSection, chunkReason: 'github-file-section' } });
+            currentChunk = '';
+            currentSection = line.trim().substring(0, 80);
+        }
+        currentChunk += line + '\n';
+        if (currentChunk.length > MAX_SECTION_LENGTH) {
+            sections.push({ text: currentChunk.trim(), metadata: { sectionTitle: currentSection, chunkReason: 'github-file-split' } });
+            currentChunk = '';
+        }
+    }
+    if (currentChunk.trim().length > 0) {
+        sections.push({ text: currentChunk.trim(), metadata: { sectionTitle: currentSection, chunkReason: 'github-file-section' } });
+    }
+    return sections.length > 0 ? sections : [{ text: content, metadata: { chunkReason: 'github-file-whole' } }];
+}
+
+/**
+ * GitHub PR: split description from review comments.
+ */
+function chunkGitHubPR(content: string, metadata?: Record<string, any>): Promise<SmartChunk[]> {
+    const chunks: SmartChunk[] = [];
+    const reviewIndex = content.indexOf('\nReview Comments:');
+    const discussionIndex = content.indexOf('\nDiscussion:');
+    const splitAt = reviewIndex > 0 ? reviewIndex : discussionIndex > 0 ? discussionIndex : -1;
+
+    if (splitAt > 0) {
+        const desc = content.substring(0, splitAt).trim();
+        const reviews = content.substring(splitAt).trim();
+        if (desc.length > 20) chunks.push({ text: desc, metadata: { fieldType: 'description', chunkReason: 'github-pr-desc' } });
+        if (reviews.length > 20) chunks.push({ text: reviews, metadata: { fieldType: 'review', chunkReason: 'github-pr-review' } });
+    }
+    return Promise.resolve(chunks.length > 0 ? chunks : [{ text: content, metadata: { chunkReason: 'github-pr-whole' } }]);
 }
 
 /**

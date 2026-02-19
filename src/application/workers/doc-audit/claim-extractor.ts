@@ -12,8 +12,8 @@
  * - architecture: "Auth uses Keycloak for SSO"
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { createHash } from "crypto";
 import { PrefixLogger } from "@/lib/utils";
@@ -134,7 +134,7 @@ export class ClaimExtractor {
 
         try {
             const { object } = await generateObject({
-                model: openai('gpt-4o-mini'),
+                model: getPrimaryModel(),
                 schema: ExtractedClaimSchema,
                 system: `You are a fact extractor. Your job is to extract specific, verifiable claims from documentation.
 

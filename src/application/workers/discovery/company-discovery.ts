@@ -14,8 +14,8 @@
  *   6. Company Profile synthesis
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateText, generateObject } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
@@ -283,7 +283,7 @@ export class CompanyDiscoveryService {
 
             try {
                 const { object } = await generateObject({
-                    model: openai('gpt-4o-mini'),
+                    model: getPrimaryModel(),
                     schema: z.object({
                         systems: z.array(z.object({
                             name: z.string().describe("System/service name as it appears in the text"),
@@ -405,7 +405,7 @@ Do NOT extract programming languages or general concepts.`,
 
         try {
             const { object } = await generateObject({
-                model: openai('gpt-4o-mini'),
+                model: getPrimaryModel(),
                 schema: z.object({
                     customers: z.array(z.object({
                         name: z.string().describe("Company/organization name"),
@@ -513,7 +513,7 @@ Do NOT extract people as customers -- only companies/organizations.`,
 
                 try {
                     const { object } = await generateObject({
-                        model: openai('gpt-4o-mini'),
+                        model: getPrimaryModel(),
                         schema: z.object({
                             technologies: z.array(z.string()),
                             members: z.array(z.string()),
@@ -648,7 +648,7 @@ Do NOT extract people as customers -- only companies/organizations.`,
 
         try {
             const { object } = await generateObject({
-                model: openai('gpt-4o-mini'),
+                model: getPrimaryModel(),
                 schema: z.object({
                     processes: z.array(z.object({
                         name: z.string().describe("Process name (e.g., 'Code Freeze', 'On-Call Rotation', 'Release Process')"),
@@ -824,7 +824,7 @@ Do NOT extract one-time tasks or individual actions.`,
 
         try {
             const { text } = await generateText({
-                model: openai('gpt-4o-mini'),
+                model: getPrimaryModel(),
                 system: `You are analyzing a company based on its internal data. Generate a structured company overview.
 Output in this exact format:
 COMPANY_NAME: [name]
@@ -839,7 +839,7 @@ ${entitySummary}
 Confluence page titles: ${pageTitles}
 
 Tech stack mentioned: ${[...new Set(systems.flatMap(s => (s.metadata as any).technologies || []))].join(', ')}`,
-                maxTokens: 800,
+                maxOutputTokens: 800,
             });
 
             // Parse response
@@ -1182,10 +1182,10 @@ FORMAT RULES:
         this.logger.log('Generating understanding analysis with LLM (gpt-4o)...');
 
         const { text } = await generateText({
-            model: openai('gpt-4o'),
+            model: getPrimaryModel(),
             system: `You are PidraxBot, a senior software architect AI with deep expertise in cloud infrastructure, microservices, ML/AI systems, billing platforms, authentication systems, Kubernetes, and DevOps. You have been trained on millions of system design documents and can deduce entire architectures from a few puzzle pieces — just like a musician can guess the song from a few chords. Your specialty is hypothesis-driven analysis: you don't ask lazy open-ended questions, you make specific educated guesses and ask for confirmation. You write clean, well-structured documentation that is easy to read.`,
             prompt,
-            maxTokens: 12000,
+            maxOutputTokens: 12000,
         });
 
         // Wrap in PidraxBot banner

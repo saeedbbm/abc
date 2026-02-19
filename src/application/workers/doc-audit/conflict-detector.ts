@@ -6,8 +6,8 @@
  * verifiable claims and checks each one against recent activity.
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
 import { searchKnowledgeEmbeddings } from "@/src/application/lib/knowledge/embedding-service";
@@ -294,7 +294,7 @@ export class ConflictDetector {
 
         try {
             const { object } = await generateObject({
-                model: openai('gpt-4o-mini'),
+                model: getPrimaryModel(),
                 schema: z.object({
                     verdict: z.enum(['confirmed', 'contradicted', 'outdated', 'needs_update']).describe(
                         "confirmed=evidence agrees; contradicted=evidence directly disagrees; outdated=evidence shows newer info; needs_update=evidence has additional info not in doc"

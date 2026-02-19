@@ -1,13 +1,15 @@
 "use client";
 
-import { BookOpen, MessageSquare, CheckCircle, Settings } from 'lucide-react';
+import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
 
 const navItems = [
   { segment: 'kb', icon: BookOpen, label: 'KB' },
-  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
   { segment: 'verify', icon: CheckCircle, label: 'Verify' },
+  { segment: 'pm', icon: ClipboardList, label: 'PM' },
+  { segment: 'implement', icon: Wrench, label: 'Implement' },
+  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
   { segment: 'admin', icon: Settings, label: 'Admin' },
 ];
 

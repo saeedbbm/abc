@@ -1,5 +1,5 @@
-import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
 import { MongoDBKnowledgeEntitiesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-entities.repository";
@@ -51,7 +51,7 @@ const ExtractedRelationship = z.object({
     relationshipType: z.string().describe("Type of relationship (owns, works_on, member_of, leads, depends_on, etc.)"),
     targetEntity: z.string().describe("Name of the target entity"),
     targetType: z.enum(['person', 'team', 'project', 'system']).describe("Type of target entity"),
-    confidence: z.number().min(0).max(1).describe("Confidence score for this relationship"),
+    confidence: z.number().describe("Confidence score between 0 and 1"),
 });
 
 const ExtractionResult = z.object({
@@ -175,7 +175,7 @@ ${existingEntities}
 
         try {
             const { object } = await generateObject({
-                model: openai(this.model),
+                model: getPrimaryModel(),
                 schema: ExtractionResult,
                 system: systemPrompt,
                 prompt: `Extract all entities and relationships from these documents:\n\n${context}`,

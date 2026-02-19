@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { MongoDBOAuthTokensRepository } from "@/src/infrastructure/repositories/mongodb.oauth-tokens.repository";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
 import { SlackClient } from "@/src/application/lib/integrations/slack";
@@ -400,10 +400,10 @@ async function processAppMention(event: any, teamId: string) {
         const systemPrompt = context + knowledgeContext + integrationContext + "\nAnswer the following question from a team member:";
         
         const { text: answer } = await generateText({
-            model: openai("gpt-4o-mini"),
+            model: getPrimaryModel(),
             system: systemPrompt,
             prompt: question,
-            maxTokens: 500,
+            maxOutputTokens: 500,
         });
 
         console.log("[Slack Webhook] Generated answer:", answer.substring(0, 100) + "...");

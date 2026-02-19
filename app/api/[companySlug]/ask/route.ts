@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { embed, streamText, tool } from "ai";
+import { embed, streamText, tool, stepCountIs } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { db } from "@/lib/mongodb";
 import { resolveCompanySlug } from "@/lib/company-resolver";
@@ -155,7 +156,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
         if (slackClient) {
             tools.slack_list_channels = tool({
                 description: "List all Slack channels in the workspace",
-                parameters: z.object({}),
+                inputSchema: z.object({}),
                 execute: async () => {
                     try {
                         const channels: any[] = [];
@@ -178,7 +179,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.slack_send_message = tool({
                 description: "Send a message to a Slack channel",
-                parameters: z.object({
+                inputSchema: z.object({
                     channel: z.string().describe("The channel ID or name to send to"),
                     text: z.string().describe("The message text to send"),
                 }),
@@ -194,7 +195,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.slack_read_messages = tool({
                 description: "Read recent messages from a Slack channel. Use this to see what people are talking about or working on.",
-                parameters: z.object({
+                inputSchema: z.object({
                     channel: z.string().describe("The channel ID (e.g., C0123456789) - get from slack_list_channels"),
                     limit: z.number().optional().default(20).describe("Number of messages to fetch (max 100)"),
                 }),
@@ -220,7 +221,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.slack_get_user_info = tool({
                 description: "Get information about a Slack user by their ID",
-                parameters: z.object({
+                inputSchema: z.object({
                     userId: z.string().describe("The Slack user ID (e.g., U0123456789)"),
                 }),
                 execute: async ({ userId }) => {
@@ -243,7 +244,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.slack_list_users = tool({
                 description: "List all users/team members in the Slack workspace",
-                parameters: z.object({}),
+                inputSchema: z.object({}),
                 execute: async () => {
                     try {
                         console.log('[Ask] Listing Slack users...');
@@ -278,7 +279,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
         if (jiraClient) {
             tools.jira_list_projects = tool({
                 description: "List all Jira projects accessible to the user",
-                parameters: z.object({}),
+                inputSchema: z.object({}),
                 execute: async () => {
                     try {
                         console.log('[Ask] Calling jira_list_projects...');
@@ -299,7 +300,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.jira_search_issues = tool({
                 description: "Search for Jira issues using JQL query",
-                parameters: z.object({
+                inputSchema: z.object({
                     jql: z.string().describe("JQL query string. Examples: 'type = Bug', 'project = PROJ AND status = Open'"),
                     maxResults: z.number().optional().default(20).describe("Maximum number of results"),
                 }),
@@ -336,7 +337,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.jira_get_issue = tool({
                 description: "Get details of a specific Jira issue by its key",
-                parameters: z.object({
+                inputSchema: z.object({
                     issueKey: z.string().describe("The issue key like PROJ-123"),
                 }),
                 execute: async ({ issueKey }) => {
@@ -363,7 +364,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.jira_create_issue = tool({
                 description: "Create a new Jira issue. To assign to someone, first use jira_search_users to get their accountId.",
-                parameters: z.object({
+                inputSchema: z.object({
                     projectKey: z.string().describe("The project key (e.g., 'KAN')"),
                     summary: z.string().describe("Issue title/summary"),
                     description: z.string().optional().describe("Issue description"),
@@ -391,7 +392,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.jira_search_users = tool({
                 description: "Search for Jira users by name or email. Returns accountId which can be used for assignment.",
-                parameters: z.object({
+                inputSchema: z.object({
                     query: z.string().describe("Search query - name or email of the user"),
                 }),
                 execute: async ({ query }) => {
@@ -414,7 +415,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.jira_list_all_users = tool({
                 description: "List all users/team members in Jira",
-                parameters: z.object({}),
+                inputSchema: z.object({}),
                 execute: async () => {
                     try {
                         console.log('[Ask] Listing all Jira users...');
@@ -441,7 +442,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
         if (confluenceClient) {
             tools.confluence_list_spaces = tool({
                 description: "List all Confluence spaces",
-                parameters: z.object({}),
+                inputSchema: z.object({}),
                 execute: async () => {
                     try {
                         console.log('[Ask] Calling confluence_list_spaces...');
@@ -466,7 +467,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.confluence_search = tool({
                 description: "Search Confluence content using CQL",
-                parameters: z.object({
+                inputSchema: z.object({
                     cql: z.string().describe("CQL query string. Example: 'text ~ \"keyword\"'"),
                     limit: z.number().optional().default(10).describe("Maximum results"),
                 }),
@@ -490,7 +491,7 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
             tools.confluence_get_page = tool({
                 description: "Get the content of a specific Confluence page",
-                parameters: z.object({
+                inputSchema: z.object({
                     pageId: z.string().describe("The Confluence page ID"),
                 }),
                 execute: async ({ pageId }) => {
@@ -512,11 +513,11 @@ ${integrations.length > 0 ? integrations.map(i => `- ${i}`).join('\n') : "No int
 
         // Stream the response with tools
         const result = streamText({
-            model: openai("gpt-4o-mini"),
+            model: getPrimaryModel(),
             system: systemPrompt,
             prompt: message,
             tools: Object.keys(tools).length > 0 ? tools : undefined,
-            maxSteps: 5,
+            stopWhen: stepCountIs(5),
         });
 
         // Create SSE stream

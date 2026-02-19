@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { verificationTasks, kbDocuments, type VerificationTask, type KBDocument } from '@/data/mockData';
 import { useInspector, type SourceType } from '@/contexts/InspectorContext';
-import { User, Calendar, CheckCircle2, Pencil, HelpCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { User, Calendar, CheckCircle2, Pencil, HelpCircle, AlertTriangle, Loader2, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { isDemo } from '@/lib/is-demo';
 
@@ -21,6 +21,20 @@ export default function VerifyPage() {
   const [docs, setDocs] = useState<KBDocument[]>(demo ? kbDocuments : []);
   const [isLoading, setIsLoading] = useState(!demo);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<string>("all");
+
+  const allPeople = useMemo(() => {
+    const names = new Set<string>();
+    for (const task of tasks) {
+      if (task.assignee && task.assignee !== "Unassigned") names.add(task.assignee);
+    }
+    return Array.from(names).sort();
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (selectedPerson === "all") return tasks;
+    return tasks.filter(t => t.assignee === selectedPerson);
+  }, [tasks, selectedPerson]);
 
   const fetchTasks = useCallback(async () => {
     if (demo) return;
@@ -129,12 +143,30 @@ export default function VerifyPage() {
           </p>
         </div>
 
+        {/* Person filter dropdown */}
+        <div className="mb-4 flex items-center gap-2">
+          <User className="h-4 w-4 text-muted-foreground" />
+          <select
+            value={selectedPerson}
+            onChange={e => setSelectedPerson(e.target.value)}
+            className="h-8 rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="all">All people ({tasks.length} tasks)</option>
+            {allPeople.map(p => {
+              const count = tasks.filter(t => t.assignee === p).length;
+              return (
+                <option key={p} value={p}>{p} ({count} tasks)</option>
+              );
+            })}
+          </select>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin mr-2" />
             <span className="text-sm">Loading verification tasks…</span>
           </div>
-        ) : tasks.length === 0 ? (
+        ) : filteredTasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="h-12 w-12 rounded-xl bg-muted/50 flex items-center justify-center mb-4">
               <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
@@ -146,7 +178,7 @@ export default function VerifyPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {tasks.map(task => {
+            {filteredTasks.map(task => {
               const doc = docs.find(d => d.id === task.docId);
               const isConfirmed = task.status === 'confirmed';
               return (

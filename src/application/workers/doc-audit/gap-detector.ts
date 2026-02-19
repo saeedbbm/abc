@@ -6,8 +6,8 @@
  * documentation exists and generates categorized, template-based docs for gaps.
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { PrefixLogger } from "@/lib/utils";
 import { KnowledgeEntityType } from "@/src/entities/models/knowledge-entity";
 import { searchKnowledgeEmbeddings } from "@/src/application/lib/knowledge/embedding-service";
@@ -588,10 +588,10 @@ Generate targeted questions to fill the missing documentation sections.`;
 
         try {
             const { text } = await generateText({
-                model: openai("gpt-4o-mini"),
+                model: getPrimaryModel(),
                 system: systemPrompt,
                 prompt,
-                maxTokens: 1500,
+                maxOutputTokens: 1500,
             });
 
             const cleaned = text.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '');

@@ -124,7 +124,7 @@ export const EntitySource = z.object({
     sourceType: z.string(), // 'user', 'channel', 'issue', 'page', 'comment', etc.
     sourceId: z.string(),
     lastSeen: z.string().datetime(),
-    confidence: z.number().min(0).max(1).default(1),
+    confidence: z.number().default(1),
     extractedFields: z.array(z.string()).default([]), // which fields came from this source
 });
 

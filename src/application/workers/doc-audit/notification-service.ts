@@ -9,8 +9,8 @@
  * New docs are saved to our MongoDB knowledge_pages collection, NOT Confluence.
  */
 
-import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { getPrimaryModel } from "@/lib/ai-model";
 import { PrefixLogger } from "@/lib/utils";
 import { SlackClient } from "@/src/application/lib/integrations/slack";
 import { ConfluenceClient } from "@/src/application/lib/integrations/atlassian/confluence-client";
@@ -361,7 +361,7 @@ CRITICAL FORMAT RULES:
                 prompt += `\n\nIMPORTANT — A quality reviewer found issues with a previous draft. Fix these problems:\n${criticFeedback}\n\nMake sure every paragraph is well-cited and supported by evidence.`;
             }
 
-            const maxTokens = category === 'overview' ? 6000
+            const maxOutputTokens = category === 'overview' ? 6000
                 : category === 'project' ? 5000
                 : category === 'customer' ? 4000
                 : category === 'system' ? 4000
@@ -370,10 +370,10 @@ CRITICAL FORMAT RULES:
 
             try {
                 const { text } = await generateText({
-                    model: openai('gpt-4o-mini'),
+                    model: getPrimaryModel(),
                     system: cleanInstructions,
                     prompt,
-                    maxTokens,
+                    maxOutputTokens,
                 });
                 return text;
             } catch (error) {
