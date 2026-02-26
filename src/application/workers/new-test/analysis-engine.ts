@@ -4,7 +4,9 @@ import { PrefixLogger } from "@/lib/utils";
 import { db } from "@/lib/mongodb";
 import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
 import {
+  TEMPLATE_REGISTRY,
   KB_PAGE_TEMPLATES,
+  validateAndNormalizePage,
   type ScoreFormatOutputType,
   type ScoreFormatPageType,
   type AtomicItemType,
@@ -132,27 +134,50 @@ function computeGroundedness(generated: ScoreFormatOutputType): GroundednessMetr
 // ---------------------------------------------------------------------------
 
 function computeSchemaCompliance(generated: ScoreFormatOutputType): number {
-  const pages = generated.kb_pages || [];
-  if (pages.length === 0) return 0;
+  const allPages = [...(generated.kb_pages || []), ...(generated.howto_pages || [])];
+  if (allPages.length === 0) return 0;
 
-  let totalRequired = 0;
-  let totalPresent = 0;
+  let totalScore = 0;
+  let scoredPages = 0;
 
-  for (const page of pages) {
-    const template = KB_PAGE_TEMPLATES[page.category as KBCategory];
+  for (const page of allPages) {
+    const isHowto = (generated.howto_pages || []).some(h => h.page_id === page.page_id);
+    const templateKey = isHowto ? "howto_implementation" : page.category;
+    const template = TEMPLATE_REGISTRY[templateKey];
     if (!template) continue;
 
-    totalRequired += template.length;
-    const sectionNames = new Set(page.sections.map(s => s.section_name.toLowerCase()));
-    for (const required of template) {
-      if (sectionNames.has(required.toLowerCase()) ||
-          [...sectionNames].some(s => s.includes(required.toLowerCase().split(" ")[0]))) {
-        totalPresent++;
+    const { violations } = validateAndNormalizePage(page, templateKey);
+
+    const missingCount = violations.filter(v => v.startsWith("missing section")).length;
+    const unexpectedCount = violations.filter(v => v.startsWith("unexpected section")).length;
+    const bulletViolations = violations.filter(v => v.includes("bullets (min:") || v.includes("bullets (max:")).length;
+
+    const totalSections = template.sections.length;
+    const templateExactness = totalSections > 0 ? Math.max(0, 1 - (missingCount + unexpectedCount) / totalSections) : 0;
+
+    const sectionCount = template.sections.length;
+    const sectionCompleteness = sectionCount > 0 ? Math.max(0, 1 - bulletViolations / sectionCount) : 0;
+
+    let validItems = 0;
+    let totalItems = 0;
+    for (const section of page.sections) {
+      for (const bullet of section.bullets || []) {
+        totalItems++;
+        const hasType = !!bullet.item_type;
+        const hasRefs = (bullet.source_refs?.length || 0) > 0;
+        const hasRouting = !!bullet.action_routing?.action;
+        const hasConfidence = !!bullet.confidence_bucket;
+        if (hasType && hasRefs && hasRouting && hasConfidence) validItems++;
       }
     }
+    const atomicValidity = totalItems > 0 ? validItems / totalItems : 0;
+
+    const pageScore = templateExactness * 0.2 + sectionCompleteness * 0.4 + atomicValidity * 0.4;
+    totalScore += pageScore;
+    scoredPages++;
   }
 
-  return totalRequired > 0 ? totalPresent / totalRequired : 0;
+  return scoredPages > 0 ? totalScore / scoredPages : 0;
 }
 
 async function computeAtomCoverage(
@@ -419,8 +444,8 @@ export async function runAnalysis(
     { projectId }, { sort: { createdAt: -1 } },
   );
 
-  const generated: ScoreFormatOutputType = generatedDoc?.data || { kb_pages: [], conversation_tickets: [], feedback_tickets: [], howto_pages: [] };
-  const groundTruth: ScoreFormatOutputType = gtDoc?.data || { kb_pages: [], conversation_tickets: [], feedback_tickets: [], howto_pages: [] };
+  const generated: ScoreFormatOutputType = generatedDoc?.data || { kb_pages: [], conversation_tickets: [], customer_tickets: [], howto_pages: [] };
+  const groundTruth: ScoreFormatOutputType = gtDoc?.data || { kb_pages: [], conversation_tickets: [], customer_tickets: [], howto_pages: [] };
 
   const genItems = getAllItems(generated);
   const gtItems = getAllItems(groundTruth);

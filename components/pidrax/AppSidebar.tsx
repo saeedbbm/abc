@@ -1,10 +1,13 @@
 "use client";
 
-import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench } from 'lucide-react';
+import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench, Database, ListTree } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
+import { isDemo } from '@/lib/is-demo';
 
-const navItems = [
+type NavItem = { segment: string; icon: any; label: string };
+
+const demoNavItems: NavItem[] = [
   { segment: 'kb', icon: BookOpen, label: 'KB' },
   { segment: 'verify', icon: CheckCircle, label: 'Verify' },
   { segment: 'pm', icon: ClipboardList, label: 'PM' },
@@ -13,13 +16,24 @@ const navItems = [
   { segment: 'admin', icon: Settings, label: 'Admin' },
 ];
 
+const pidraxNavItems: NavItem[] = [
+  { segment: 'kb', icon: Database, label: 'Input Data' },
+  { segment: 'pass1', icon: BookOpen, label: 'Pass 1' },
+  { segment: 'pass2', icon: ListTree, label: 'Pass 2' },
+  { segment: 'verify', icon: CheckCircle, label: 'Verify' },
+  { segment: 'pm', icon: ClipboardList, label: 'PM' },
+  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
+  { segment: 'admin', icon: Settings, label: 'Admin' },
+];
+
 export function AppSidebar() {
   const pathname = usePathname();
   const { companySlug } = useParams<{ companySlug: string }>();
 
+  const navItems = isDemo(companySlug) ? demoNavItems : pidraxNavItems;
+
   return (
     <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 bg-sidebar border-r border-sidebar-border">
-      {/* Logo */}
       <div className="mb-4 h-8 w-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
         <span className="text-sidebar-primary-foreground text-xs font-bold">P</span>
       </div>

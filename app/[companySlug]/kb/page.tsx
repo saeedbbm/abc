@@ -55,6 +55,47 @@ export default function KBPage() {
     if (demo) return;
     setIsLoading(true);
     try {
+      // Try pidrax inputs first (for companies with pidrax data)
+      const pidraxRes = await fetch(`/api/${companySlug}/pidrax?type=inputs`);
+      if (pidraxRes.ok) {
+        const pidraxData = await pidraxRes.json();
+        if (pidraxData.inputs) {
+          const inputDocs: KBDocument[] = [];
+          const inputs = pidraxData.inputs as Record<string, string>;
+          for (const [source, content] of Object.entries(inputs)) {
+            if (!content || typeof content !== 'string') continue;
+            const paragraphs = content.split('\n\n').filter((p: string) => p.trim().length > 0);
+            inputDocs.push({
+              id: `input-${source}`,
+              title: source.charAt(0).toUpperCase() + source.slice(1).replace(/([A-Z])/g, ' $1'),
+              category: source,
+              status: 'new' as const,
+              lastUpdated: pidraxData.createdAt ? new Date(pidraxData.createdAt).toLocaleDateString() : '',
+              author: 'Pidrax Sync',
+              sections: [{
+                id: `section-${source}`,
+                heading: 'Content',
+                paragraphs: paragraphs.length > 0
+                  ? paragraphs.map((text: string, i: number) => ({
+                      text: text.trim(),
+                      confidence: 'inferred' as const,
+                      citations: [],
+                    }))
+                  : [{ text: '(empty)', confidence: 'inferred' as const, citations: [] }],
+              }],
+            });
+          }
+          if (inputDocs.length > 0) {
+            setDocuments(inputDocs);
+            setSelectedDoc(inputDocs[0]);
+            setExpandedCategories(new Set(inputDocs.map(d => d.category)));
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+
+      // Fallback to standard KB endpoint
       const res = await fetch(`/api/${companySlug}/kb`);
       if (!res.ok) throw new Error('Failed to fetch KB');
       const data = await res.json();

@@ -1,11 +1,18 @@
+import { createHash } from "crypto";
+
 export interface ParsedDocument {
     provider: string;
     sourceType: string;
     sourceId: string;
     title: string;
     content: string;
+    contentHash: string;
     metadata: Record<string, any>;
     entityRefs: string[];
+}
+
+function computeHash(content: string): string {
+    return createHash("sha256").update(content).digest("hex");
 }
 
 export interface ParsedBundles {
@@ -185,12 +192,14 @@ function parseConfluence(raw: string): ParsedDocument[] {
             const spaceMatch = section.body.match(/(?:Space|Namespace)[:\s]+(.+)/i);
             if (spaceMatch) meta.space = spaceMatch[1].trim();
 
+            const content = trimBlock(section.body);
             return {
                 provider: 'confluence',
                 sourceType: 'confluence_page',
                 sourceId: `test:confluence:${idx}`,
                 title,
-                content: trimBlock(section.body),
+                content,
+                contentHash: computeHash(content),
                 metadata: meta,
                 entityRefs: [],
             };
@@ -240,12 +249,14 @@ function parseJira(raw: string): ParsedDocument[] {
             const typeMatch = section.body.match(/(?:Type|Issue Type)[:\s]+(.+)/i);
             if (typeMatch) meta.issueType = typeMatch[1].trim();
 
+            const content = trimBlock(section.body);
             return {
                 provider: 'jira',
                 sourceType: 'jira_issue',
                 sourceId: `test:jira:${idx}`,
                 title,
-                content: trimBlock(section.body),
+                content,
+                contentHash: computeHash(content),
                 metadata: meta,
                 entityRefs: [],
             };
@@ -301,12 +312,14 @@ function parseSlack(raw: string): ParsedDocument[] {
             );
             if (timestampMatch) meta.timestamp = timestampMatch[1];
 
+            const content = trimBlock(section.body);
             return {
                 provider: 'slack',
                 sourceType,
                 sourceId: `test:slack:${idx}`,
                 title,
-                content: trimBlock(section.body),
+                content,
+                contentHash: computeHash(content),
                 metadata: meta,
                 entityRefs: [],
             };
@@ -376,12 +389,14 @@ function parseGitHub(raw: string): ParsedDocument[] {
             const branchMatch = section.body.match(/(?:Branch)[:\s]+([\w/.-]+)/i);
             if (branchMatch) meta.branch = branchMatch[1].trim();
 
+            const content = trimBlock(section.body);
             return {
                 provider: 'github',
                 sourceType,
                 sourceId: `test:github:${idx}`,
                 title,
-                content: trimBlock(section.body),
+                content,
+                contentHash: computeHash(content),
                 metadata: meta,
                 entityRefs: [],
             };
@@ -446,12 +461,14 @@ function parseCustomerFeedback(raw: string): ParsedDocument[] {
             const companyMatch = section.body.match(/(?:Company|Org|Organization)[:\s]+(.+)/i);
             if (companyMatch) meta.company = companyMatch[1].trim();
 
+            const content = trimBlock(section.body);
             return {
                 provider: 'customer_feedback',
                 sourceType: 'customer_feedback',
                 sourceId: `test:customer_feedback:${idx}`,
                 title,
-                content: trimBlock(section.body),
+                content,
+                contentHash: computeHash(content),
                 metadata: meta,
                 entityRefs: [],
             };

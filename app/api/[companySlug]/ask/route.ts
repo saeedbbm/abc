@@ -56,8 +56,14 @@ export async function POST(
     const { message } = data;
 
     try {
-        // Verify project exists
-        const project = await db.collection('projects').findOne({ _id: projectId });
+        // Verify project exists — try by companySlug first, then by _id with ObjectId
+        let project = await db.collection('projects').findOne({ companySlug });
+        if (!project) {
+            try {
+                const { ObjectId } = await import("mongodb");
+                project = await db.collection('projects').findOne({ _id: new ObjectId(projectId) });
+            } catch { /* invalid ObjectId format — skip */ }
+        }
         if (!project) {
             return Response.json({ error: "Project not found" }, { status: 404 });
         }

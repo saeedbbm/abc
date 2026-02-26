@@ -18,20 +18,24 @@ function getOpenAIProvider() {
 }
 
 /**
- * Primary model for all generation, analysis, and reasoning tasks.
- * Claude Opus 4.6 — the most advanced model available.
+ * Reasoning model for high-stakes decisions: planning, classification,
+ * ticket extraction. Claude Opus 4.6.
  */
-export function getPrimaryModel() {
+export function getReasoningModel() {
     return getAnthropicProvider()('claude-opus-4-6');
 }
 
 /**
- * Fast model for high-volume tasks like entity extraction batches
- * where Opus would be too slow/expensive.
- * Still Claude — Sonnet 4 for quality.
+ * Fast model for page generation (template filling), entity extraction,
+ * and other high-volume tasks. Claude Sonnet 4.6.
  */
 export function getFastModel() {
     return getAnthropicProvider()('claude-sonnet-4-6');
+}
+
+/** @deprecated Use getReasoningModel() or getFastModel() explicitly. */
+export function getPrimaryModel() {
+    return getReasoningModel();
 }
 
 /**

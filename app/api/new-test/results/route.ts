@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
     const session = searchParams.get("session") || "";
     const projectId = toProjectId(session);
 
-    if (!type || !["inputs", "generated", "ground_truth", "page_plan"].includes(type)) {
-      return Response.json({ error: "type must be one of: inputs, generated, ground_truth, page_plan" }, { status: 400 });
+    if (!type || !["inputs", "generated", "ground_truth", "page_plan", "pidrax", "pidrax_checkpoint", "pidrax_pass2"].includes(type)) {
+      return Response.json({ error: "type must be one of: inputs, generated, ground_truth, page_plan, pidrax, pidrax_checkpoint, pidrax_pass2" }, { status: 400 });
     }
 
     if (type === "inputs") {
@@ -30,6 +30,52 @@ export async function GET(request: NextRequest) {
         { sort: { updatedAt: -1 } },
       );
       return Response.json({ plan: doc?.plan || null, updatedAt: doc?.updatedAt });
+    }
+
+    if (type === "pidrax_checkpoint") {
+      const doc = await db.collection("new_test_pidrax_checkpoints").findOne(
+        { projectId, completedStep: { $gte: 0, $lt: 8 } },
+        { sort: { updatedAt: -1 } },
+      );
+      if (!doc) return Response.json({ checkpoint: null });
+      return Response.json({
+        checkpoint: {
+          runId: doc.runId,
+          completedStep: doc.completedStep,
+          stepMetrics: doc.stepMetrics || [],
+          documentCount: doc.documentCount,
+          updatedAt: doc.updatedAt,
+        },
+      });
+    }
+
+    if (type === "pidrax_pass2") {
+      const doc = await db.collection("new_test_pidrax_pass2_results").findOne(
+        { projectId },
+        { sort: { createdAt: -1 } },
+      );
+      return Response.json({
+        data: doc?.data || null,
+        verificationGroups: doc?.verificationGroups || null,
+        factClusters: doc?.factClusters || null,
+        metrics: doc?.metrics || null,
+        createdAt: doc?.createdAt,
+      });
+    }
+
+    if (type === "pidrax") {
+      const doc = await db.collection("new_test_pidrax_results").findOne(
+        { projectId },
+        { sort: { createdAt: -1 } },
+      );
+      return Response.json({
+        data: doc?.data || null,
+        ticketAudit: doc?.data?.ticket_audit || null,
+        pagePlan: doc?.pagePlan || null,
+        crossValidation: doc?.crossValidation || null,
+        metrics: doc?.metrics || null,
+        createdAt: doc?.createdAt,
+      });
     }
 
     const collectionName = type === "generated" ? "new_test_results" : "new_test_ground_truth";

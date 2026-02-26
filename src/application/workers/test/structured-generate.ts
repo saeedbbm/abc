@@ -2,6 +2,13 @@ import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
 
+export type LLMUsage = {
+  promptTokens: number;
+  completionTokens: number;
+};
+
+type SDKUsage = { inputTokens?: number; outputTokens?: number };
+
 /**
  * Tries generateObject first (structured output via tool calling).
  * If the model cannot satisfy the schema, falls back to generateText
@@ -14,17 +21,19 @@ export async function structuredGenerate<T>(options: {
     schema: z.ZodType<T>;
     maxOutputTokens?: number;
     logger: PrefixLogger;
+    onUsage?: (usage: LLMUsage) => void;
 }): Promise<T> {
-    const { model, system, prompt, schema, maxOutputTokens = 16384, logger } = options;
+    const { model, system, prompt, schema, maxOutputTokens = 16384, logger, onUsage } = options;
 
     try {
-        const { object } = await generateObject({
+        const { object, usage } = await generateObject({
             model,
             system,
             prompt,
             schema,
             maxOutputTokens,
         });
+        if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
         return object;
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -36,12 +45,13 @@ export async function structuredGenerate<T>(options: {
         "No introductory text, no explanation, no markdown code fences. " +
         "Start your response with { or [ and end with } or ]. Nothing else.";
 
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
         model,
         system: system + jsonDirective,
         prompt,
         maxOutputTokens,
     });
+    if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
 
     return extractJson<T>(text, logger);
 }

@@ -1,293 +1,128 @@
-import { getFastModel } from "@/lib/ai-model";
+import { getFastModel, getReasoningModel } from "@/lib/ai-model";
 import { PrefixLogger } from "@/lib/utils";
 import { db } from "@/lib/mongodb";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
 import { MongoDBKnowledgeEntitiesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-entities.repository";
 import { EntityExtractor } from "@/src/application/workers/sync/entity-extractor";
-import { embedKnowledgeDocument } from "@/src/application/lib/knowledge/embedding-service";
+import { embedKnowledgeDocument, searchKnowledgeEmbeddings } from "@/src/application/lib/knowledge/embedding-service";
 import { parseBundles, type ParsedDocument } from "@/src/application/lib/test/bundle-parser";
-import { streamText } from "ai";
+import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { nanoid } from "nanoid";
+import { z } from "zod";
 import {
-  KB_PAGE_TEMPLATES,
+  TEMPLATE_REGISTRY,
+  getSectionInstructions,
+  validateAndNormalizePage,
+  ScoreFormatPage,
+  PMTicket,
+  KB_BASIC_CATEGORIES,
+  KB_PROJECT_CATEGORIES,
+  KB_CATEGORY_LABELS,
+  type KBCategory,
   type ScoreFormatOutputType,
 } from "@/src/entities/models/score-format";
 
 const QDRANT_COLLECTION = "knowledge_embeddings";
-
 const logger = new PrefixLogger("kb-generator");
 
-const KB_CATEGORIES: { key: string; label: string }[] = [
-  { key: "company_overview", label: "Company Overview" },
-  { key: "setup_onboarding", label: "Setup & Onboarding" },
-  { key: "people", label: "People" },
-  { key: "clients", label: "Clients" },
-  { key: "past_documented", label: "Past Documented Projects" },
-  { key: "past_undocumented", label: "Past Undocumented Projects" },
-  { key: "ongoing_projects", label: "Ongoing Projects" },
-  { key: "new_projects", label: "New Projects" },
-  { key: "processes", label: "Processes" },
-];
+// ---------------------------------------------------------------------------
+// System prompt
+// ---------------------------------------------------------------------------
 
 const PIDRAX_SYSTEM = `You are Pidrax, an AI knowledge base system. You analyze company data from multiple sources and produce structured knowledge.
 
-ROUTING RULES for each atomic item:
+ROUTING RULES:
 - "none": informational, goes in the KB
 - "verify_task": needs human confirmation
 - "update_kb": an existing doc needs a correction
 - "create_jira_ticket": user-facing issue requiring engineering
 
-Internal issues → verify_task or update_kb. User-facing issues → create_jira_ticket.
-
 ITEM TYPE RULES:
-- If Confluence says one thing but Slack/code says another → "conflict"
-- If Confluence info is stale → "outdated"
-- If something only in Slack/GitHub but NOT in Confluence → "gap"
+- Confluence says one thing but Slack/code says another → "conflict"
+- Confluence info is stale → "outdated"
+- Something only in Slack/GitHub but NOT in Confluence → "gap"
 - Use: fact, step, decision, owner, dependency, risk, question, ticket as appropriate
 
-ALWAYS cite source documents in source_refs.`;
-
-// ---------------------------------------------------------------------------
-// Main KB Generation Pipeline (blind — no access to ground truth)
-// ---------------------------------------------------------------------------
-
-export async function runKBGenerationPipeline(
-  inputs: { confluence: string; jira: string; slack: string; github: string; customerFeedback: string },
-  projectId: string,
-  onProgress?: (detail: string, percent: number) => void,
-): Promise<ScoreFormatOutputType> {
-  const docsRepo = new MongoDBKnowledgeDocumentsRepository();
-  const entitiesRepo = new MongoDBKnowledgeEntitiesRepository();
-
-  const pipelineStart = Date.now();
-
-  // Step 1: Setup project
-  onProgress?.("[Pidrax 1/6] Setting up project and clearing previous data...", 10);
-  await ensureProject(projectId);
-  await clearPreviousData(projectId);
-  logger.log("Project setup and cleanup done");
-
-  // Step 2: Parse and store documents
-  onProgress?.("[Pidrax 2/6] Parsing input bundles into individual documents...", 15);
-  const bundles = parseBundles(
-    inputs.confluence, inputs.jira, inputs.slack, inputs.github, inputs.customerFeedback,
-  );
-  logger.log(`Parsed ${bundles.totalDocuments} documents (Confluence: ${bundles.confluence.length}, Jira: ${bundles.jira.length}, Slack: ${bundles.slack.length}, GitHub: ${bundles.github.length}, Feedback: ${bundles.customerFeedback.length})`);
-  onProgress?.(`[Pidrax 2/6] Parsed ${bundles.totalDocuments} documents — storing to MongoDB...`, 18);
-
-  const storedDocs = await storeDocuments(bundles, projectId, docsRepo);
-  logger.log(`Stored ${storedDocs.length} documents`);
-  onProgress?.(`[Pidrax 2/6] Stored ${storedDocs.length} documents in MongoDB`, 22);
-
-  // Step 3: Generate embeddings
-  onProgress?.(`[Pidrax 3/6] Generating embeddings for ${storedDocs.length} documents...`, 25);
-  let embedded = 0;
-  for (const doc of storedDocs) {
-    try {
-      await embedKnowledgeDocument(doc, logger);
-      embedded++;
-      if (embedded % 5 === 0 || embedded === storedDocs.length) {
-        onProgress?.(`[Pidrax 3/6] Embedded ${embedded}/${storedDocs.length} documents...`, 25 + Math.round((embedded / storedDocs.length) * 15));
-      }
-    } catch (err) {
-      logger.log(`Embedding failed for ${doc.title}: ${err}`);
-    }
-  }
-  logger.log(`Embedded ${embedded}/${storedDocs.length} documents`);
-  onProgress?.(`[Pidrax 3/6] Embedding complete — ${embedded}/${storedDocs.length} succeeded`, 40);
-
-  // Step 4: Extract entities
-  onProgress?.("[Pidrax 4/6] Extracting entities (people, teams, projects, systems, customers)...", 42);
-  const extractor = new EntityExtractor(docsRepo, entitiesRepo, {}, logger);
-  const entityResult = await extractor.processProject(projectId);
-  logger.log(`Extracted ${entityResult.processed} entities`);
-  onProgress?.(`[Pidrax 4/6] Extracted ${entityResult.processed} entities`, 50);
-
-  // Step 5: Build comprehensive context for KB generation
-  onProgress?.("[Pidrax 5/6] Building full knowledge context from documents + entities...", 52);
-  const contextSummary = await buildFullContext(projectId, docsRepo, entitiesRepo);
-  logger.log(`Context built — ${contextSummary.length} chars`);
-  onProgress?.(`[Pidrax 5/6] Context ready — ${contextSummary.length} chars of structured input`, 55);
-
-  // Step 6: Discover what pages to create (blind — Pidrax decides from the data)
-  onProgress?.("[Pidrax 6/10] Discovering KB pages from data...", 56);
-  const planResult = streamText({
-    model: getFastModel(),
-    maxTokens: 2048,
-    system: `You analyze company data and decide what KB pages should exist. Output ONLY a JSON array.
-Each element: {"category":"<key>","title":"<page title>"}
-Categories: ${KB_CATEGORIES.map(c => c.key).join(", ")}
-Rules: 1 page for overview/onboarding, 1 per person, 1 per project, 1 per process. Only create pages for things you find evidence of in the data.`,
-    prompt: `DATA:\n${contextSummary}\n\nReturn JSON array of pages to create. JSON only.`,
-  });
-  let planText = "";
-  for await (const chunk of planResult.textStream) {
-    planText += chunk;
-  }
-  let pagesToCreate: { category: string; title: string }[] = [];
-  try {
-    const match = planText.match(/\[[\s\S]*\]/);
-    if (match) pagesToCreate = JSON.parse(match[0]);
-  } catch { /* fallthrough */ }
-  if (pagesToCreate.length === 0) {
-    pagesToCreate = KB_CATEGORIES.map(c => ({ category: c.key, title: c.label }));
-  }
-  logger.log(`Pidrax discovered ${pagesToCreate.length} pages to create`);
-  onProgress?.(`[Pidrax 6/10] Discovered ${pagesToCreate.length} pages`, 58);
-
-  // Step 7: Generate KB pages one by one
-  const output: ScoreFormatOutputType = {
-    kb_pages: [], conversation_tickets: [], feedback_tickets: [], howto_pages: [],
-  };
-  const totalPages = pagesToCreate.length;
-
-  for (let pi = 0; pi < totalPages; pi++) {
-    const spec = pagesToCreate[pi];
-    const cat = KB_CATEGORIES.find(c => c.key === spec.category);
-    const sections = KB_PAGE_TEMPLATES[spec.category as keyof typeof KB_PAGE_TEMPLATES] || [];
-    const pct = 58 + Math.round(((pi + 1) / totalPages) * 12);
-    onProgress?.(`[Pidrax Page ${pi + 1}/${totalPages}] ${spec.title}...`, pct);
-    const pageStart = Date.now();
-
-    try {
-      const pageStream = streamText({
-        model: getFastModel(),
-        maxTokens: 4096,
-        system: `${PIDRAX_SYSTEM}
-
-Generate a KB page as a JSON object. No markdown, ONLY JSON.
-10-20 atomic items across sections. item_id prefix: "gen-${pi + 1}-".
-JSON: {"page_id":"gen-page-${pi + 1}","category":"${spec.category}","title":"${spec.title}","sections":[{"section_name":"<name>","bullets":[{"item_id":"gen-${pi + 1}-1","item_text":"<1-3 sentences>","item_type":"fact|step|decision|owner|dependency|risk|question|ticket|conflict|gap|outdated","source_refs":[{"source_type":"confluence|slack|jira|github|customer_feedback","doc_id":"<id>","title":"<title>","excerpt":"<quote>"}],"verification":{"status":"needs_verification","verifier":null},"action_routing":{"action":"none|verify_task|update_kb|create_jira_ticket","reason":"<why>","severity":"S1|S2|S3|S4"},"confidence_bucket":"high|medium|low"}]}]}
-Sections: ${sections.join(", ")}`,
-        prompt: `Generate KB page "${spec.title}" (${cat?.label || spec.category}) from this data:\n${contextSummary}\n\nJSON only, 10-20 items:`,
-      });
-
-      let accumulated = "";
-      for await (const chunk of pageStream.textStream) {
-        accumulated += chunk;
-        if (accumulated.length % 500 < 15) {
-          onProgress?.(`[Pidrax Page ${pi + 1}/${totalPages}] ${spec.title} (${accumulated.length} chars)...`, pct);
-        }
-      }
-
-      const jsonMatch = accumulated.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON in response");
-      const page = JSON.parse(jsonMatch[0]) as ScoreFormatOutputType["kb_pages"][number];
-      if (!page.page_id) page.page_id = `gen-page-${pi + 1}`;
-      if (!page.category) (page as any).category = spec.category;
-      if (!page.title) page.title = spec.title;
-      output.kb_pages.push(page);
-      const items = (page.sections || []).reduce((s: number, sec: any) => s + (sec.bullets?.length || 0), 0);
-      const elapsed = ((Date.now() - pageStart) / 1000).toFixed(1);
-      logger.log(`Pidrax page "${spec.title}": ${items} items in ${elapsed}s`);
-      onProgress?.(`[Pidrax Page ${pi + 1}/${totalPages}] ${spec.title} ✓ ${items} items (${elapsed}s)`, pct);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.log(`Pidrax page "${spec.title}" FAILED: ${msg}`);
-      onProgress?.(`[Pidrax Page ${pi + 1}/${totalPages}] ${spec.title} FAILED: ${msg}`, pct);
-    }
-  }
-
-  // Step 8: Generate conversation tickets
-  onProgress?.("[Pidrax 8/10] Detecting conversation tickets from Slack/Jira...", 71);
-  try {
-    const convStream = streamText({
-      model: getFastModel(),
-      maxTokens: 3000,
-      system: `${PIDRAX_SYSTEM}\nDetect tickets from Slack/Jira conversations. Output ONLY JSON: {"conversation_tickets":[...]}
-Each: {"ticket_id":"gen-conv-N","type":"bug|feature|task|improvement","title":"...","priority":"P0|P1|P2|P3","priority_rationale":"short","description":"1-2 sentences","acceptance_criteria":["..."],"assigned_to":"...","assignment_rationale":"short","affected_systems":["..."],"customer_evidence":[],"technical_constraints":[],"complexity":"small|medium|large","related_tickets":[],"source_refs":[...]}`,
-      prompt: `DATA:\n${contextSummary}\n\nDetect conversation tickets. JSON only.`,
-    });
-    let text = "";
-    for await (const chunk of convStream.textStream) {
-      text += chunk;
-      if (text.length % 500 < 15) onProgress?.(`[Pidrax 8/10] Conv tickets (${text.length} chars)...`, 72);
-    }
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const data = JSON.parse(match[0]);
-      output.conversation_tickets = data.conversation_tickets || [];
-    }
-    logger.log(`Pidrax conv tickets: ${output.conversation_tickets.length}`);
-    onProgress?.(`[Pidrax 8/10] Conv tickets: ${output.conversation_tickets.length}`, 73);
-  } catch (err) {
-    logger.log(`Pidrax conv tickets FAILED: ${err}`);
-    onProgress?.(`[Pidrax 8/10] Conv tickets FAILED`, 73);
-  }
-
-  // Step 9: Generate feedback tickets
-  onProgress?.("[Pidrax 9/10] Generating tickets from customer feedback...", 73);
-  try {
-    const fbStream = streamText({
-      model: getFastModel(),
-      maxTokens: 3000,
-      system: `${PIDRAX_SYSTEM}\nGenerate tickets from customer feedback. Output ONLY JSON: {"feedback_tickets":[...]}
-Same ticket format as conversation tickets. Include customer_evidence with feedback excerpts.`,
-      prompt: `DATA:\n${contextSummary}\n\nGenerate feedback tickets. JSON only.`,
-    });
-    let text = "";
-    for await (const chunk of fbStream.textStream) {
-      text += chunk;
-      if (text.length % 500 < 15) onProgress?.(`[Pidrax 9/10] Feedback tickets (${text.length} chars)...`, 74);
-    }
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const data = JSON.parse(match[0]);
-      output.feedback_tickets = data.feedback_tickets || [];
-    }
-    logger.log(`Pidrax feedback tickets: ${output.feedback_tickets.length}`);
-    onProgress?.(`[Pidrax 9/10] Feedback tickets: ${output.feedback_tickets.length}`, 75);
-  } catch (err) {
-    logger.log(`Pidrax feedback tickets FAILED: ${err}`);
-    onProgress?.(`[Pidrax 9/10] Feedback tickets FAILED`, 75);
-  }
-
-  // Step 10: Generate how-to pages for feedback tickets
-  if (output.feedback_tickets.length > 0) {
-    for (let hi = 0; hi < output.feedback_tickets.length; hi++) {
-      const ticket = output.feedback_tickets[hi];
-      onProgress?.(`[Pidrax 10/10] How-to ${hi + 1}/${output.feedback_tickets.length}: ${ticket.title}...`, 76);
-      try {
-        const howtoStream = streamText({
-          model: getFastModel(),
-          maxTokens: 2000,
-          system: `${PIDRAX_SYSTEM}\nGenerate a how-to-implement page as JSON. 3-6 items.
-{"page_id":"gen-howto-${hi + 1}","category":"new_projects","title":"...","sections":[{"section_name":"...","bullets":[...]}]}`,
-          prompt: `TICKET: ${ticket.title} (${ticket.type}): ${ticket.description}\nDATA:\n${contextSummary}\n\nJSON only:`,
-        });
-        let text = "";
-        for await (const chunk of howtoStream.textStream) { text += chunk; }
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-          const page = JSON.parse(match[0]) as ScoreFormatOutputType["howto_pages"][number];
-          output.howto_pages.push(page);
-        }
-        onProgress?.(`[Pidrax 10/10] How-to ${hi + 1} ✓`, 77);
-      } catch (err) {
-        logger.log(`Pidrax how-to "${ticket.title}" FAILED: ${err}`);
-      }
-    }
-  }
-
-  const totalItems = output.kb_pages.reduce((s, p) => s + (p.sections || []).reduce((ss: number, sec: any) => ss + (sec.bullets?.length || 0), 0), 0);
-  const pipelineElapsed = ((Date.now() - pipelineStart) / 1000).toFixed(1);
-  logger.log(`Pidrax complete in ${pipelineElapsed}s: ${output.kb_pages.length} pages (${totalItems} items), ${output.conversation_tickets.length} conv, ${output.feedback_tickets.length} fb, ${output.howto_pages.length} howto`);
-  onProgress?.(`[Pidrax] Done — ${output.kb_pages.length} pages, ${totalItems} items (${pipelineElapsed}s)`, 78);
-
-  onProgress?.("[Pidrax] Saving results...", 79);
-  await db.collection("new_test_results").insertOne({
-    projectId,
-    data: output,
-    createdAt: new Date().toISOString(),
-  });
-  onProgress?.("[Pidrax] Saved.", 79);
-
-  return output;
-}
+ALWAYS cite source documents in source_refs with excerpt and location.`;
 
 // ---------------------------------------------------------------------------
 // Helpers
+// ---------------------------------------------------------------------------
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : text.slice(0, max - 3) + "...";
+}
+
+function summarizeKB(pages: ScoreFormatOutputType["kb_pages"]): string {
+  return pages.map(p => {
+    const items = (p.sections || []).flatMap(s => (s.bullets || []).map(b => b.item_text).filter(Boolean));
+    return `[${p.category}] ${p.title}: ${items.slice(0, 5).join("; ")}`;
+  }).join("\n");
+}
+
+function getProjectTitles(pages: ScoreFormatOutputType["kb_pages"]): string[] {
+  return pages
+    .filter(p => KB_PROJECT_CATEGORIES.includes(p.category as any))
+    .map(p => p.title);
+}
+
+// ---------------------------------------------------------------------------
+// RAG Context Retrieval (replaces buildFullContext)
+// ---------------------------------------------------------------------------
+
+async function retrieveContext(
+  projectId: string,
+  query: string,
+  options: { maxChars?: number; minScore?: number; topK?: number } = {},
+): Promise<string> {
+  const { maxChars = 40000, minScore = 0.4, topK = 30 } = options;
+
+  const results = await searchKnowledgeEmbeddings(projectId, query, { limit: topK }, logger);
+  let filtered = results.filter(r => r.score >= minScore);
+
+  // Per-provider floor: ensure at least 2 results from each provider that has data
+  const providerBuckets = new Map<string, typeof results>();
+  for (const r of results) {
+    if (!providerBuckets.has(r.provider)) providerBuckets.set(r.provider, []);
+    providerBuckets.get(r.provider)!.push(r);
+  }
+  for (const [provider, provResults] of providerBuckets) {
+    const inFiltered = filtered.filter(r => r.provider === provider).length;
+    if (inFiltered < 2) {
+      const toAdd = provResults.filter(r => !filtered.includes(r)).slice(0, 2 - inFiltered);
+      filtered.push(...toAdd);
+    }
+  }
+
+  filtered.sort((a, b) => b.score - a.score);
+
+  const lines: string[] = [];
+  let totalChars = 0;
+  for (const r of filtered) {
+    const line = `[${r.provider}] "${r.title}" (score:${r.score.toFixed(2)}):\n${r.content}`;
+    if (totalChars + line.length > maxChars) break;
+    lines.push(line);
+    totalChars += line.length;
+  }
+  return lines.join("\n\n");
+}
+
+async function buildGlobalDigest(projectId: string): Promise<string> {
+  const docsRepo = new MongoDBKnowledgeDocumentsRepository();
+  const providers = ["confluence", "slack", "jira", "github", "customer_feedback"] as const;
+  const lines: string[] = [];
+  for (const provider of providers) {
+    const { items } = await docsRepo.findByProjectId(projectId, { provider, limit: 200 });
+    if (items.length === 0) continue;
+    const titles = items.map(d => `"${truncate(d.title, 60)}"`).join(" | ");
+    lines.push(`[${provider}] ${items.length} docs: ${titles}`);
+  }
+  return lines.length > 0 ? `AVAILABLE DATA:\n${lines.join("\n")}` : "AVAILABLE DATA: none";
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure
 // ---------------------------------------------------------------------------
 
 async function ensureProject(pid: string) {
@@ -302,10 +137,15 @@ async function ensureProject(pid: string) {
 
 async function clearPreviousData(pid: string) {
   await Promise.all([
-    db.collection("knowledge_documents").deleteMany({ projectId: pid }),
-    db.collection("knowledge_entities").deleteMany({ projectId: pid }),
     db.collection("new_test_results").deleteMany({ projectId: pid }),
     db.collection("new_test_analysis").deleteMany({ projectId: pid }),
+  ]);
+}
+
+async function clearSourceData(pid: string) {
+  await Promise.all([
+    db.collection("knowledge_documents").deleteMany({ projectId: pid }),
+    db.collection("knowledge_entities").deleteMany({ projectId: pid }),
   ]);
   try {
     const qdrant = new QdrantClient({ url: process.env.QDRANT_URL || "http://localhost:6333", checkCompatibility: false });
@@ -317,9 +157,14 @@ async function clearPreviousData(pid: string) {
   }
 }
 
-async function storeDocuments(bundles: ReturnType<typeof parseBundles>, pid: string, docsRepo: MongoDBKnowledgeDocumentsRepository) {
+async function storeDocuments(
+  bundles: ReturnType<typeof parseBundles>,
+  pid: string,
+  docsRepo: MongoDBKnowledgeDocumentsRepository,
+) {
   const allParsed: ParsedDocument[] = [
-    ...bundles.confluence, ...bundles.jira, ...bundles.slack, ...bundles.github, ...bundles.customerFeedback,
+    ...bundles.confluence, ...bundles.jira, ...bundles.slack,
+    ...bundles.github, ...bundles.customerFeedback,
   ];
   const stored = [];
   for (const parsed of allParsed) {
@@ -339,48 +184,514 @@ async function storeDocuments(bundles: ReturnType<typeof parseBundles>, pid: str
   return stored;
 }
 
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 3) + "...";
+// ---------------------------------------------------------------------------
+// Checkpoint helpers
+// ---------------------------------------------------------------------------
+
+const PHASE_ORDER = ["embedding", "phase1", "phase2", "phase3", "phase5", "phase6"];
+function phaseIndex(phase: string): number { return PHASE_ORDER.indexOf(phase); }
+
+async function saveCheckpoint(projectId: string, runId: string, phase: string, data: ScoreFormatOutputType) {
+  await db.collection("new_test_checkpoints").updateOne(
+    { projectId, runId },
+    { $set: { phase, data, updatedAt: new Date().toISOString() } },
+    { upsert: true },
+  );
 }
 
-async function buildFullContext(
+async function loadCheckpoint(projectId: string, resumeRunId: string) {
+  return db.collection("new_test_checkpoints").findOne({ projectId, runId: resumeRunId });
+}
+
+// ---------------------------------------------------------------------------
+// Shared Zod schemas for plan/classify calls
+// ---------------------------------------------------------------------------
+
+const PlanItem = z.object({
+  category: z.string(),
+  title: z.string(),
+  evidence_source: z.string(),
+});
+
+const ProjectListItem = z.object({ title: z.string(), evidence: z.string() });
+
+const MergedProjectHowto = z.object({
+  project_page: ScoreFormatPage,
+  howto_page: ScoreFormatPage,
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1: KB Basic (blind)
+// ---------------------------------------------------------------------------
+
+async function phase1_KBBasic(
   projectId: string,
-  docsRepo: MongoDBKnowledgeDocumentsRepository,
-  entitiesRepo: MongoDBKnowledgeEntitiesRepository,
-): Promise<string> {
-  const sections: string[] = [];
+  globalDigest: string,
+  output: ScoreFormatOutputType,
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<void> {
+  onProgress?.("[Phase 1] Planning KB Basic pages...", 56);
+  const categoriesList = KB_BASIC_CATEGORIES.map(c => `- ${c}: ${KB_CATEGORY_LABELS[c]}`).join("\n");
+  const planContext = await retrieveContext(projectId, "company overview setup onboarding people team clients customers");
 
-  const providers = ["confluence", "slack", "jira", "github", "customer_feedback"] as const;
-  for (const provider of providers) {
-    const { items } = await docsRepo.findByProjectId(projectId, { provider, limit: 200 });
-    if (items.length === 0) continue;
+  const plan = await structuredGenerate({
+    model: getReasoningModel(),
+    schema: z.array(PlanItem),
+    system: `${PIDRAX_SYSTEM}\nPlan what KB Basic pages to create.`,
+    prompt: `${globalDigest}\n\nRELEVANT DATA:\n${planContext}\n\nFor each KB Basic category, decide what pages to create:\n${categoriesList}\n\nRules:\n- company_overview: exactly 1 page\n- setup_onboarding: exactly 1 page\n- people: 1 page per person/engineer found\n- clients: 1 page per client/customer found\n\nCite which source you found each in.`,
+    logger,
+  });
 
-    const lines = items.map(d => {
-      const excerpt = d.content.substring(0, 2000).replace(/\n/g, " ");
-      return `[${d.sourceType}] "${d.title}" (id:${d.id}): ${excerpt}`;
-    });
-    sections.push(`=== ${provider.toUpperCase()} (${items.length} docs) ===\n${truncate(lines.join("\n\n"), 20000)}`);
-  }
+  const filtered = plan.filter(p => KB_BASIC_CATEGORIES.includes(p.category as any));
+  logger.log(`Phase 1 plan: ${filtered.length} pages`);
 
-  const entityTypes = ["person", "team", "project", "system", "customer", "process"];
-  const entityLines: string[] = [];
-  for (const type of entityTypes) {
-    const result = await entitiesRepo.findByProjectId(projectId, { type, limit: 100 });
-    for (const e of result.items) {
-      const meta = e.metadata as Record<string, any>;
-      const parts = [`${type.toUpperCase()}: ${e.name}`];
-      if (e.aliases.length > 0) parts.push(`aka: ${e.aliases.join(", ")}`);
-      if (meta.description) parts.push(meta.description.substring(0, 150));
-      if (meta.role) parts.push(`role: ${meta.role}`);
-      if (meta.team) parts.push(`team: ${meta.team}`);
-      if (meta.status) parts.push(`status: ${meta.status}`);
-      entityLines.push(`- ${parts.join(" | ")}`);
+  for (let i = 0; i < filtered.length; i++) {
+    const spec = filtered[i];
+    const templateKey = spec.category as KBCategory;
+    const sectionInstr = getSectionInstructions(templateKey);
+    const pageId = `gen-basic-${i + 1}`;
+    const pct = 57 + Math.round(((i + 1) / filtered.length) * 6);
+    onProgress?.(`[Phase 1 Page ${i + 1}/${filtered.length}] ${spec.title}...`, pct);
+
+    const pageContext = await retrieveContext(
+      projectId,
+      `${spec.title} ${KB_CATEGORY_LABELS[templateKey]} ${spec.evidence_source}`,
+    );
+
+    try {
+      const rawPage = await structuredGenerate({
+        model: getFastModel(),
+        schema: ScoreFormatPage,
+        system: `${PIDRAX_SYSTEM}\n\nGenerate a KB page. Sections (use these exact names):\n${sectionInstr}\n\n10-20 atomic items total. Cite sources with excerpts.`,
+        prompt: `Page ID: "${pageId}"\nCategory: "${spec.category}"\nTitle: "${spec.title}"\nEvidence: ${spec.evidence_source}\n\nDATA:\n${pageContext}`,
+        logger,
+      });
+      rawPage.page_id = pageId;
+      rawPage.category = spec.category as any;
+      rawPage.title = spec.title;
+      const { page, violations } = validateAndNormalizePage(rawPage, templateKey);
+      if (violations.length > 0) logger.log(`Phase 1 "${spec.title}" violations: ${violations.join(", ")}`);
+      output.kb_pages.push(page);
+      const items = page.sections.reduce((s, sec) => s + (sec.bullets?.length || 0), 0);
+      logger.log(`Phase 1 page "${spec.title}": ${items} items`);
+      onProgress?.(`[Phase 1 Page ${i + 1}/${filtered.length}] ${spec.title} done — ${items} items`, pct);
+    } catch (err) {
+      logger.log(`Phase 1 page "${spec.title}" FAILED: ${err}`);
     }
   }
-  if (entityLines.length > 0) {
-    sections.push(`=== EXTRACTED ENTITIES (${entityLines.length}) ===\n${truncate(entityLines.join("\n"), 8000)}`);
+  onProgress?.(`[Phase 1] KB Basic done — ${output.kb_pages.length} pages`, 63);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: KB Projects (blind)
+// ---------------------------------------------------------------------------
+
+const PROJECT_SUB_GROUPS: { category: KBCategory; instruction: string }[] = [
+  {
+    category: "past_documented",
+    instruction: `Find projects that have BOTH Confluence documentation AND Jira tickets with status done/closed/resolved. Cite Confluence page + Jira ticket key + status.`,
+  },
+  {
+    category: "past_undocumented",
+    instruction: `Find projects inferred from GitHub commits, closed Jira tickets, or Slack references — but with NO Confluence documentation. Cite the evidence.`,
+  },
+  {
+    category: "ongoing_documented",
+    instruction: `Find projects that have Confluence docs BUT Jira shows active/in-progress/open tickets. Cite both Confluence doc AND active Jira tickets.`,
+  },
+  {
+    category: "ongoing_undocumented",
+    instruction: `Find projects with active Jira tickets, ongoing Slack discussions, or open PRs but NO Confluence documentation. Cite evidence.`,
+  },
+];
+
+async function phase2_KBProjects(
+  projectId: string,
+  globalDigest: string,
+  kbBasicSummary: string,
+  output: ScoreFormatOutputType,
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<void> {
+  onProgress?.("[Phase 2] Identifying projects...", 64);
+  const allProjectTitles: string[] = [];
+  const allSpecs: { category: string; title: string; evidence: string }[] = [];
+
+  for (const group of PROJECT_SUB_GROUPS) {
+    const classifyContext = await retrieveContext(
+      projectId,
+      `${group.instruction} projects confluence jira status`,
+    );
+    const excludeList = allProjectTitles.length > 0
+      ? `\nEXCLUDE already-classified: ${allProjectTitles.join(", ")}`
+      : "";
+
+    const projects = await structuredGenerate({
+      model: getReasoningModel(),
+      schema: z.array(ProjectListItem),
+      system: `${PIDRAX_SYSTEM}\nIdentify projects for classification.`,
+      prompt: `KB BASIC:\n${kbBasicSummary}\n\n${globalDigest}\n\nRELEVANT DATA:\n${classifyContext}\n\n${group.instruction}${excludeList}\n\nIf none, return [].`,
+      logger,
+    });
+
+    for (const p of projects) {
+      allProjectTitles.push(p.title);
+      allSpecs.push({ category: group.category, title: p.title, evidence: p.evidence });
+    }
+    logger.log(`Phase 2 ${group.category}: ${projects.length} projects`);
   }
 
-  return sections.join("\n\n");
+  onProgress?.(`[Phase 2] ${allSpecs.length} projects — generating pages...`, 66);
+
+  for (let i = 0; i < allSpecs.length; i++) {
+    const spec = allSpecs[i];
+    const templateKey = spec.category as KBCategory;
+    const sectionInstr = getSectionInstructions(templateKey);
+    const pageId = `gen-proj-${i + 1}`;
+    const pct = 66 + Math.round(((i + 1) / allSpecs.length) * 6);
+    onProgress?.(`[Phase 2 Page ${i + 1}/${allSpecs.length}] ${spec.title}...`, pct);
+
+    const pageContext = await retrieveContext(
+      projectId,
+      `${spec.title} ${KB_CATEGORY_LABELS[templateKey]} ${spec.evidence}`,
+    );
+
+    try {
+      const rawPage = await structuredGenerate({
+        model: getFastModel(),
+        schema: ScoreFormatPage,
+        system: `${PIDRAX_SYSTEM}\n\nGenerate a project KB page. Category: ${spec.category}.\nSections:\n${sectionInstr}\n\n10-20 items. Cite exact sources.`,
+        prompt: `Page ID: "${pageId}"\nCategory: "${spec.category}"\nTitle: "${spec.title}"\nEvidence: ${spec.evidence}\n\nDATA:\n${pageContext}`,
+        logger,
+      });
+      rawPage.page_id = pageId;
+      rawPage.category = spec.category as any;
+      rawPage.title = spec.title;
+      const { page, violations } = validateAndNormalizePage(rawPage, templateKey);
+      if (violations.length > 0) logger.log(`Phase 2 "${spec.title}" violations: ${violations.join(", ")}`);
+      output.kb_pages.push(page);
+      const items = page.sections.reduce((s, sec) => s + (sec.bullets?.length || 0), 0);
+      logger.log(`Phase 2 page "${spec.title}": ${items} items`);
+      onProgress?.(`[Phase 2 Page ${i + 1}/${allSpecs.length}] ${spec.title} done`, pct);
+    } catch (err) {
+      logger.log(`Phase 2 page "${spec.title}" FAILED: ${err}`);
+    }
+  }
+  onProgress?.(`[Phase 2] KB Projects done — ${allSpecs.length} pages`, 72);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Processes (blind)
+// ---------------------------------------------------------------------------
+
+async function phase3_Processes(
+  projectId: string,
+  globalDigest: string,
+  existingPagesSummary: string,
+  allProjectTitles: string[],
+  output: ScoreFormatOutputType,
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<void> {
+  onProgress?.("[Phase 3] Identifying processes...", 73);
+  const identifyContext = await retrieveContext(
+    projectId,
+    "recurring workflow deployment on-call code review release process incident response sprint",
+  );
+
+  const processes = await structuredGenerate({
+    model: getReasoningModel(),
+    schema: z.array(ProjectListItem),
+    system: `${PIDRAX_SYSTEM}\nIdentify recurring processes/workflows (NOT projects).`,
+    prompt: `EXISTING KB:\n${existingPagesSummary}\n\n${globalDigest}\n\nRELEVANT DATA:\n${identifyContext}\n\nIdentify recurring activities that are NOT projects.\nA PROJECT has a start, end, deliverable. A PROCESS is ongoing/recurring.\n\nExclude these projects: ${allProjectTitles.join(", ")}\n\nIf none, return [].`,
+    logger,
+  });
+
+  logger.log(`Phase 3: ${processes.length} processes`);
+  const sectionInstr = getSectionInstructions("processes");
+
+  for (let i = 0; i < processes.length; i++) {
+    const spec = processes[i];
+    const pageId = `gen-proc-${i + 1}`;
+    onProgress?.(`[Phase 3 Page ${i + 1}/${processes.length}] ${spec.title}...`, 74);
+
+    const pageContext = await retrieveContext(
+      projectId,
+      `${spec.title} recurring workflow ${spec.evidence}`,
+    );
+
+    try {
+      const rawPage = await structuredGenerate({
+        model: getFastModel(),
+        schema: ScoreFormatPage,
+        system: `${PIDRAX_SYSTEM}\n\nGenerate a Process page.\nSections:\n${sectionInstr}\n\n5-15 items.`,
+        prompt: `Page ID: "${pageId}"\nCategory: "processes"\nTitle: "${spec.title}"\nEvidence: ${spec.evidence}\n\nDATA:\n${pageContext}`,
+        logger,
+      });
+      rawPage.page_id = pageId;
+      rawPage.category = "processes" as any;
+      rawPage.title = spec.title;
+      const { page, violations } = validateAndNormalizePage(rawPage, "processes");
+      if (violations.length > 0) logger.log(`Phase 3 "${spec.title}" violations: ${violations.join(", ")}`);
+      output.kb_pages.push(page);
+      logger.log(`Phase 3 process "${spec.title}" done`);
+      onProgress?.(`[Phase 3 Page ${i + 1}/${processes.length}] ${spec.title} done`, 74);
+    } catch (err) {
+      logger.log(`Phase 3 process "${spec.title}" FAILED: ${err}`);
+    }
+  }
+  onProgress?.(`[Phase 3] Processes done — ${processes.length}`, 75);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: Tickets (blind)
+// ---------------------------------------------------------------------------
+
+async function phase5_Tickets(
+  projectId: string,
+  kbSummary: string,
+  output: ScoreFormatOutputType,
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<void> {
+  onProgress?.("[Phase 5a] Extracting conversation tickets...", 76);
+  const convContext = await retrieveContext(
+    projectId,
+    "actionable items bugs features from slack conversations jira comments",
+  );
+
+  try {
+    const convData = await structuredGenerate({
+      model: getReasoningModel(),
+      schema: z.object({ conversation_tickets: z.array(PMTicket) }),
+      system: `${PIDRAX_SYSTEM}\n\nExtract tickets from Slack conversations and Jira comments.\n1. Include conversation context\n2. Check if similar ticket exists in Jira → set jira_match\n3. Cite exact Slack timestamps/channels or Jira comments\n4. Set source_group: "conversation"`,
+      prompt: `KB CONTEXT:\n${kbSummary}\n\nDATA:\n${convContext}`,
+      maxOutputTokens: 8192,
+      logger,
+    });
+    output.conversation_tickets = convData.conversation_tickets.map(t => ({
+      ...t, source_group: "conversation" as const,
+    }));
+    logger.log(`Phase 5a: ${output.conversation_tickets.length} conv tickets`);
+    onProgress?.(`[Phase 5a] ${output.conversation_tickets.length} conversation tickets`, 78);
+  } catch (err) {
+    logger.log(`Phase 5a FAILED: ${err}`);
+    onProgress?.(`[Phase 5a] FAILED: ${err}`, 78);
+  }
+
+  onProgress?.("[Phase 5b] Extracting customer tickets...", 79);
+  const custContext = await retrieveContext(
+    projectId,
+    "customer feedback bugs features requests complaints",
+  );
+  const convTitles = output.conversation_tickets.map(t => t.title);
+
+  try {
+    const custData = await structuredGenerate({
+      model: getReasoningModel(),
+      schema: z.object({ customer_tickets: z.array(PMTicket) }),
+      system: `${PIDRAX_SYSTEM}\n\nExtract tickets from customer feedback.\n1. Check Jira match\n2. Skip if duplicate of: ${convTitles.join("; ")}\n3. Include customer_evidence\n4. Set source_group: "customer_feedback"`,
+      prompt: `KB CONTEXT:\n${kbSummary}\n\nDATA:\n${custContext}`,
+      maxOutputTokens: 8192,
+      logger,
+    });
+    output.customer_tickets = custData.customer_tickets.map(t => ({
+      ...t, source_group: "customer_feedback" as const,
+    }));
+    logger.log(`Phase 5b: ${output.customer_tickets.length} customer tickets`);
+    onProgress?.(`[Phase 5b] ${output.customer_tickets.length} customer tickets`, 80);
+  } catch (err) {
+    logger.log(`Phase 5b FAILED: ${err}`);
+    onProgress?.(`[Phase 5b] FAILED: ${err}`, 80);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6: New Projects + How-to (merged call, blind)
+// ---------------------------------------------------------------------------
+
+async function phase6_NewProjectsAndHowTo(
+  projectId: string,
+  kbSummary: string,
+  output: ScoreFormatOutputType,
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<void> {
+  const allTickets = [...output.conversation_tickets, ...output.customer_tickets];
+  if (allTickets.length === 0) {
+    onProgress?.("[Phase 6] No tickets — skipping.", 90);
+    return;
+  }
+
+  onProgress?.(`[Phase 6] Generating ${allTickets.length} new projects + how-to docs...`, 81);
+  const projInstr = getSectionInstructions("new_projects");
+  const howtoInstr = getSectionInstructions("howto_implementation");
+
+  for (let i = 0; i < allTickets.length; i++) {
+    const ticket = allTickets[i];
+    const pct = 81 + Math.round(((i + 1) / allTickets.length) * 9);
+    const projId = `gen-newproj-${i + 1}`;
+    const howtoId = `gen-howto-${i + 1}`;
+    const source = ticket.source_group || "conversation";
+    const jiraInfo = (ticket as any).jira_match
+      ? `Jira match: ${(ticket as any).jira_match.exists ? `YES (${(ticket as any).jira_match.matching_jira_key})` : "NO (new)"}`
+      : "";
+
+    onProgress?.(`[Phase 6 ${i + 1}/${allTickets.length}] ${ticket.title}...`, pct);
+    const ticketContext = await retrieveContext(
+      projectId,
+      `${ticket.title} ${ticket.description} implementation`,
+    );
+
+    try {
+      const result = await structuredGenerate({
+        model: getFastModel(),
+        schema: MergedProjectHowto,
+        system: `${PIDRAX_SYSTEM}\n\nGenerate BOTH a New Project page AND a How-to-Implement page for this ticket.\n\nNew Project sections:\n${projInstr}\n\nHow-to-Implement sections:\n${howtoInstr}\n\nSource: ${source}. ${jiraInfo}`,
+        prompt: `TICKET:\n${ticket.ticket_id} — ${ticket.title} (${ticket.type}, ${ticket.priority})\n${ticket.description}\nAcceptance: ${(ticket.acceptance_criteria || []).join("; ")}\n\nKB CONTEXT:\n${truncate(kbSummary, 5000)}\n\nDATA:\n${ticketContext}`,
+        logger,
+      });
+
+      const projPage = result.project_page;
+      projPage.page_id = projId;
+      projPage.category = "new_projects" as any;
+      projPage.title = ticket.title;
+      projPage.linked_ticket_id = ticket.ticket_id;
+      const { page: normProj, violations: projV } = validateAndNormalizePage(projPage, "new_projects");
+      if (projV.length > 0) logger.log(`Phase 6 proj "${ticket.title}" violations: ${projV.join(", ")}`);
+      output.kb_pages.push(normProj);
+
+      const howtoPage = result.howto_page;
+      howtoPage.page_id = howtoId;
+      howtoPage.category = "new_projects" as any;
+      howtoPage.title = `How to Implement: ${ticket.title}`;
+      howtoPage.linked_ticket_id = ticket.ticket_id;
+      const { page: normHowto, violations: howtoV } = validateAndNormalizePage(howtoPage, "howto_implementation");
+      if (howtoV.length > 0) logger.log(`Phase 6 howto "${ticket.title}" violations: ${howtoV.join(", ")}`);
+      output.howto_pages.push(normHowto);
+
+      logger.log(`Phase 6 "${ticket.title}" done (merged)`);
+      onProgress?.(`[Phase 6 ${i + 1}/${allTickets.length}] ${ticket.title} done`, pct);
+    } catch (err) {
+      logger.log(`Phase 6 "${ticket.title}" FAILED: ${err}`);
+    }
+  }
+  onProgress?.(`[Phase 6] Done — ${output.howto_pages.length} new projects + how-to`, 90);
+}
+
+// ---------------------------------------------------------------------------
+// Main: Pidrax KB Generation Pipeline (blind)
+// ---------------------------------------------------------------------------
+
+export async function runKBGenerationPipeline(
+  inputs: { confluence: string; jira: string; slack: string; github: string; customerFeedback: string },
+  projectId: string,
+  options: { embeddingsReady?: boolean; runId?: string; resumeRunId?: string } = {},
+  onProgress?: (detail: string, percent: number) => void,
+): Promise<ScoreFormatOutputType> {
+  const docsRepo = new MongoDBKnowledgeDocumentsRepository();
+  const entitiesRepo = new MongoDBKnowledgeEntitiesRepository();
+  const pipelineStart = Date.now();
+  const runId = options.runId || nanoid();
+
+  let output: ScoreFormatOutputType = {
+    kb_pages: [], conversation_tickets: [], customer_tickets: [], howto_pages: [],
+  };
+  let startAfter = -1;
+
+  if (options.resumeRunId) {
+    const cp = await loadCheckpoint(projectId, options.resumeRunId);
+    if (cp) {
+      output = (cp as any).data || output;
+      startAfter = phaseIndex((cp as any).phase);
+      logger.log(`Resuming run ${options.resumeRunId} from after phase ${(cp as any).phase}`);
+    }
+  }
+
+  if (startAfter < 0) {
+    onProgress?.("[Pidrax 1/8] Setting up project...", 10);
+    await ensureProject(projectId);
+    await clearPreviousData(projectId);
+  }
+
+  if (startAfter < phaseIndex("embedding") && !options.embeddingsReady) {
+    onProgress?.("[Pidrax 2/8] Clearing source data for fresh run...", 12);
+    await clearSourceData(projectId);
+
+    onProgress?.("[Pidrax 3/8] Parsing input bundles...", 15);
+    const bundles = parseBundles(inputs.confluence, inputs.jira, inputs.slack, inputs.github, inputs.customerFeedback);
+    logger.log(`Parsed ${bundles.totalDocuments} documents`);
+
+    onProgress?.(`[Pidrax 4/8] Storing ${bundles.totalDocuments} documents...`, 20);
+    let storedDocs: Awaited<ReturnType<typeof storeDocuments>> | null =
+      await storeDocuments(bundles, projectId, docsRepo);
+
+    onProgress?.("[Pidrax 5/8] Generating embeddings...", 25);
+    let embedded = 0;
+    const totalDocs = storedDocs.length;
+    for (const doc of storedDocs) {
+      try {
+        await embedKnowledgeDocument(doc, logger);
+        embedded++;
+        if (embedded % 5 === 0) {
+          onProgress?.(`[Pidrax 5/8] Embedded ${embedded}/${totalDocs}...`, 25 + Math.round((embedded / totalDocs) * 15));
+        }
+      } catch (err) { logger.log(`Embedding failed for ${doc.title}: ${err}`); }
+    }
+    onProgress?.(`[Pidrax 5/8] Embedded ${embedded}/${totalDocs}`, 40);
+    storedDocs = null;
+
+    onProgress?.("[Pidrax 6/8] Extracting entities...", 42);
+    const extractor = new EntityExtractor(docsRepo, entitiesRepo, {}, logger);
+    const entityResult = await extractor.processProject(projectId);
+    logger.log(`Extracted ${entityResult.processed} entities`);
+    onProgress?.(`[Pidrax 6/8] ${entityResult.processed} entities`, 50);
+
+    await saveCheckpoint(projectId, runId, "embedding", output);
+  }
+
+  onProgress?.("[Pidrax 7/8] Building context digest...", 52);
+  const globalDigest = await buildGlobalDigest(projectId);
+  logger.log(`Global digest: ${globalDigest.length} chars`);
+  onProgress?.("[Pidrax 7/8] Context ready", 55);
+
+  if (startAfter < phaseIndex("phase1")) {
+    await phase1_KBBasic(projectId, globalDigest, output, onProgress);
+    await saveCheckpoint(projectId, runId, "phase1", output);
+  }
+
+  if (startAfter < phaseIndex("phase2")) {
+    const kbBasicSummary = summarizeKB(output.kb_pages);
+    await phase2_KBProjects(projectId, globalDigest, kbBasicSummary, output, onProgress);
+    await saveCheckpoint(projectId, runId, "phase2", output);
+  }
+
+  if (startAfter < phaseIndex("phase3")) {
+    const allPagesSummary = summarizeKB(output.kb_pages);
+    const projectTitles = getProjectTitles(output.kb_pages);
+    await phase3_Processes(projectId, globalDigest, allPagesSummary, projectTitles, output, onProgress);
+    await saveCheckpoint(projectId, runId, "phase3", output);
+  }
+
+  if (startAfter < phaseIndex("phase5")) {
+    const kbSummary = summarizeKB(output.kb_pages);
+    await phase5_Tickets(projectId, kbSummary, output, onProgress);
+    await saveCheckpoint(projectId, runId, "phase5", output);
+  }
+
+  if (startAfter < phaseIndex("phase6")) {
+    const kbSummary = summarizeKB(output.kb_pages);
+    await phase6_NewProjectsAndHowTo(projectId, kbSummary, output, onProgress);
+    await saveCheckpoint(projectId, runId, "phase6", output);
+  }
+
+  const elapsed = ((Date.now() - pipelineStart) / 1000).toFixed(1);
+  const totalItems = output.kb_pages.reduce(
+    (s, p) => s + (p.sections || []).reduce((ss, sec) => ss + (sec.bullets?.length || 0), 0), 0,
+  );
+  logger.log(`Pidrax complete in ${elapsed}s: ${output.kb_pages.length} pages (${totalItems} items)`);
+  onProgress?.(`[Pidrax] Done — ${output.kb_pages.length} pages, ${totalItems} items (${elapsed}s)`, 91);
+
+  await db.collection("new_test_results").insertOne({
+    projectId, runId, data: output, createdAt: new Date().toISOString(),
+  });
+  onProgress?.("[Pidrax] Saved.", 91);
+
+  return output;
 }

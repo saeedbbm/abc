@@ -1,0 +1,325 @@
+Primary user groups (top 3): who must love this first : eng, PM
+Definition of “unwritten knowledge”: things they did but did not write down, decisions they made that ai agents may also need to make but they did not docuement
+Trust bar: when is KB content allowed to be treated as “company truth” vs “draft/inferred”: company truth when it is directly mentioned in the input data, infered when it was not docuemetned but we realized that infered that from the github or the way things are 
+
+Sources in scope for the demo: which are truly available now: (Slack, GitHub, Jira, Confluence, customer feedback
+Freshness requirement:  daily batch at the end of the day or once end of the day and once at lunch time.
+Incremental updates: do you want “append-only with rollups” or “regenerate pages each run”? for update, we should see how that new data is related to the past data, if we have something related, we update that part of the page with new data, if it does not exist in the docs, we create a page for it.
+Permissions: do you need doc-level ACL enforcement per user at retrieval time (like Doti), or is this single-tenant demo without strict ACL?
+I do not thing the data that we are generating right now need permission level, we can genrate all the data comprehensively and then later decide to only show engineering data to engineers, legal to legal team and so on.i think the sepratetion of docs that we have like basic company inof and then engineering, legal, marketing should be good enough for that.
+
+Canonical node types: do you want to stick to person/project/team/system/customer/process/service/decision/ticket or expand (e.g., api_endpoint, table, incident, feature_flag)?
+
+we can expand, but I also think that we should help the llm that is going to decide how to fill these cateogries by choosing the cateogries and giving the categories specific detaield prompt and template.
+we know what software teams have and what categories thet most probably have and cover the common ones are enough for now, we do not need to cover every possible category that they might have.
+
+Entity identity resolution: do you have stable IDs (emails, repo paths, Jira keys), or do we need fuzzy merging rules?
+ this is not a concern for now, right now we are uinsg the data input which is given to us as a text, we want to make sure the sustem is owrking form the input data all the way to the info extracted and then the agents work
+the part to read data from those sources and create the input text can be done later.
+
+Decision Records: what is a “decision” in your company—ADR file, Slack thread, Jira comment, meeting note? Which wins when conflicting? we do not find the winner, we report that and ask an employee to verify the winner. the decision means forexmaple when there was a wirtten concern and they chose something,
+
+“Where facts belong” rule: do you want entity-owned facts (one canonical place, everywhere else references), or page-owned facts with dedupe as a later projection? High Performance & Decoupling (Page-owned: blazing fast to read, requires background syncing to keep data accurate) we should make sure the data is easy to find and when if that is the case,we should be able to update it easily. it is ok to have some duplicates in some pages, if it helps with finding relevant information faster and removes the requirement to go fietch multiple sources, but the important part is that the items should be easy to find, meaning that if those duplicated items need update or verification, we show the employee one cverification card and when employee update or verify that card, we be abel to update and verify all those items. also the verification card should have enough explanation and explain the thing to the employee so they can read and verify or update all the required info in there.
+
+
+Pass 1 goal: is it “best-effort structured KB quickly” (high recall), or “already mostly correct” (higher precision)? best-effort structured KB quickly” (high recall)
+
+Pass 2 goal: is it mainly (a) dedupe + canonicalization, (b) conflict detection + verification grouping, (c) temporal stabilization, or (d) all?
+Success metrics: what will make you say Architecture 2 is better (coverage, fewer duplicates, fewer wrong placements, better citations, better verify workflow)? all also, pass2 should help to read through again for when the confidence was low to see if it can find more better information to update that
+
+
+Who can verify: only assigned owners, or any employee, or “subject-matter circles”? the assigned person will see that verify card and then they either accept as is or they want to edit
+in that case we have 2 options, either they want to edit alone, without help from any other employee, which they can edit that in the text box or they canchat with the llm and brain storm and comeup with how to edit
+or they want to put a comment and mention someone else to verify it. they can always use the chat with the llm to brainstorm about that.
+
+SLA/ownership: what happens when a verify card has no person—auto-assign via graph (ownership edges), or route to team, or “unassigned inbox”? it should always have a person from the pass 1,  and the pass2 should help to read through again for when the confidence was low to see if it can find more better information to update that or keep as is.
+
+Discussion persistence: should verify chat become part of the KB as a first-class source (“human attestation”), or remain ephemeral?
+verify chat is in the carify page under the card. adn it should see the verify card info whenever a card is selected form the left tree menu
+
+Workflow model: do you want Jira-like statuses customizable per team, or a fixed simple lifecycle for v1?  Jira-like statuses customizable per team
+Sync vs replace: for imported Jira tickets, do you need two-way sync (status/assignee/comments) or read-only mirror initially? read only, we want to replace jira, there is no need to keep jira updated, we have our own jira like ticket manageement.
+
+Ticket ↔ KB linkage: should every ticket require linked system/service/decision entities, or optional? linked. it is useful for when we want to create how to implement doc for that ticket,
+
+Agent contract: what is the minimum standard interface you want for “bring your own agent” (inputs, outputs, questions, artifacts, PR link)? for now just a item on the left that says execute, and inside there a link that says connect your own agent assuming they have a agent from a nother company or their own code. but this is just for show for now. it does not have to work.
+
+Human-in-the-loop points: where must execution pause (requirements unclear, design choice, secrets/permissions, code review)?
+whenever the ai agent ask a question and pauases, forexmapel whenever the claude code pauses,
+
+Runtime environment: will agents run in your infra (containers) or user machines (like Claude Code local), or both?
+that is not part of this right now
+
+Hard separation level: separate DB collections + separate Qdrant collection + separate run metadata, or shared stores with architectureVersion tags?
+for the architecture 2, seprate it from arhc 1 because we may wnat to delete the whole arch 1 and its data later.
+
+Comparison UX: do you want a true side-by-side diff view per page/card, or just separate navigation with “compare” buttons?
+no, just create a page like brewandgo2 and put your stuff there and do not touch brewandgo endpoint.
+
+For Engineering Layer B pages, do you want them primarily entity-centric (one page per service/system/integration) or primarily concept-centric (one “Observability” page that lists everything), or both with a hub + per-entity drilldowns?
+
+well these pages are for humans to see and edit things, so it is easier for them if they are not soo detialed and so many places,
+however we also want to be able to create the detailed pages for the ai to see and use.
+
+is it possible to create the pages concept centrci and merged so employees see less number of pages and more human like and also we ahve an AI version that is detailed?
+
+on the left menu, we have a doc item that wehn clicked inside that there is a left manu that has input data, pass 1, pass 2
+and in each of those pass 1 and pass2 we have company overview, engineering, marketing, legal
+in the enginering there are 2 options enginering overview, enginering projects and tickets
+
+in these you see the categories and pages for humans 
+
+then 
+we have a doc-ai item that wehn clicked inside that there is a left manu that has input data, pass 1, pass 2
+and in each of those pass 1 and pass2 we have company overview, engineering, marketing, legal
+in the enginering there are 2 options enginering overview, enginering projects and tickets
+in thse you see the categories and pages for the ai, this is what the ai uses when look for info, 
+
+is this even the case or the ai is going to use the graph-rag that is not human readablae and very messy?
+
+I guess what i want to see is what AI is using and make sure it is using the correct information, but i am not sure if this is the right approach and if this is even possible or if I should not be so freakedout about it and just use the human version?
+
+ Editing happens where?
+Recommended: humans edit via verification cards / claim edits, not by directly editing AI pages. Human pages can allow light edits, but those edits should become claims.
+this makes sense, but what if user edited all the verify cards and still think there i something in the pages that require change? how does the user tell us that?
+
+for this part, i still am not clear what you mean:
+
+Instead of Docs and Docs-AI as two separate primary menu items, do:
+KB
+Pass 1 / Pass 2
+Company / Engineering / Marketing / Legal
+Engineering → Overview (concept hubs) + Projects/Tickets (work)
+Entity Views (for AI / power users) (secondary, not co-equal to KB)
+Search-first entry
+Entity pages: services/systems/integrations/people/decisions/tickets
+Verify / Tickets / How-to / Execute / Chat as you already planned
+If you still want the explicit separation for the demo, make “Doc-AI” a toggle inside KB (“Human view / AI view”), not a separate tree you must maintain.
+
+first of all:
+these are the main items on hte left menu:
+KB / Verify / Tickets / How-to / Execute / Chat
+in side kb these are the main items in the menu:
+Pass 1 / Pass 2
+in each of them these are the main items:
+Company / Engineering / Marketing / Legal
+in each of them these are the children:
+Engineering → Overview (concept hubs) + Projects/Tickets (work)
+and then in them there are categories and pages
+
+the whole goal of pass 1 and pass 2 is so that I can see the result and find out the problem, in each of those pass 1 and pass 2, there are also steps that I want to see the result to findout which step need what modification.
+if it was not for that, this is what the original product would look like:
+kb item has these children items:
+Company / Engineering / Marketing / Legal
+and then when each of (Engineering / Marketing / Legal) is selected, they have 
+these main items: Overview (concept hubs) + Projects/Tickets (work)
+and each of those have categories and pages.
+
+for the ai part, I want that to be visible to the user if they choose to see it, to help gain their trust.
+I think this is a good idea:
+Human Projection (Concept-centric): fewer pages, merged by topic (e.g., “Observability”, “CI/CD”, “Architecture Overview”), with summaries and curated sections.
+AI Projection (Entity-centric views): one page per service/system/integration/decision/ticket, highly structured, exhaustive, optimized for retrieval and agent execution.
+
+but i do not understand this part and how it is do-able:
+The trick is to store one underlying truth layer (claims + graph + evidence), then render two projections:
+
+you said a bunch of things I am not sure if I understood :
+Instead of a full separate “Doc-AI” navigation tree (which risks diverging), add AI transparency on every human page:
+“AI Context” drawer/tab (read-only) shows:
+the top entities the page anchors to
+the Graph traversal path used (1–2 hops)
+the retrieval pack (which AI-pages / claims / source excerpts were provided)
+the FactGroups involved + verification status
+“Open entity view” from any mention (service/system/person) → goes to the entity-centric AI page.
+This gives you confidence and debuggability without duplicating the whole IA.
+Entity Views (for AI / power users) (secondary, not co-equal to KB)
+Search-first entry
+Entity pages: services/systems/integrations/people/decisions/tickets
+
+
+what do you mean?
+do you say that we have a concept page for humans, and then in there have a tab that shoes what exhastive pages related to that single page, ai agents will see and also another tab to show the sources used for creating that paragraph?
+
+explain eaxctly what categories you think should go in these (Overview (concept hubs) + Projects/Tickets (work)) and what pages (give me 2 page as example for each category) and thenwhat each page look like, for human, for ai agent and the source part
+
+
+2 and 4 and 6 look good, I am not sure about 5, but first lets clarify these and then we get to 5 later.
+
+1) If users edited all verify cards but still think a page needs changes—how do they tell you?
+Add a “Request change” action on every page/section/paragraph that creates a new tracked object (not a freeform edit that bypasses the truth layer):
+Request change (gap / rewrite / missing page / wrong placement) → creates a Verify card of type gap (or a lightweight “KB task”) with:
+what looks wrong (user text)
+what they expected instead
+where they saw it (page + section anchor)
+optional: who to ask (mention)
+System then does targeted GraphRAG to propose:
+new claims to add, or claims to modify
+new evidence candidates
+impacted pages (where it will propagate)
+User approves → becomes claims/factgroups updates → pages regenerate.
+This preserves your rule: edits become claims, so everything stays debuggable and propagates cleanly.
+
+
+this makes sense, specially for normal employees we can add a must accept by team lead for the card, but i think if for every small change they need to go through this, that can be annoying, why cannot we make it editbale in place (specially for specific people like team leads) and then when an edit happened and the user click save on the page, it get triggered and use that change to update the underlying facts and stuff? so have both options?
+
+
+this makes sense:
+3) What I meant by “AI Context drawer/tab” (yes—your interpretation is right)
+On a human concept page, each section/paragraph has two optional read-only drilldowns:
+Sources tab (evidence): the exact excerpts used to support that paragraph/claims.
+AI Context tab (retrieval + routing transparency):
+Anchor entities (e.g., Service: Promotions, System: Checkout)
+Traversal path used (e.g., Service -> owned_by -> Team, Service -> depends_on -> Redis)
+Retrieval pack (which entity pages / claims / source chunks were provided to the generator)
+FactGroups used + verification status
+And a button:
+Open entity view → jumps to the detailed AI page for that entity (what the agent would read).
+This gives trust and debuggability without maintaining a totally separate “Docs-AI tree” that can diverge.
+
+but I do not understand these stuff:
+Anchor entities (e.g., Service: Promotions, System: Checkout)
+Traversal path used (e.g., Service -> owned_by -> Team, Service -> depends_on -> Redis)
+Retrieval pack (which entity pages / claims / source chunks were provided to the generator)
+FactGroups used + verification status
+
+I thought you meant having one long exhastive page that ai agents use? is that not the case? what are these things?
+
+
+
+ok i think you misunderstood me in section 2
+I do not think we need that level of detail for debugging
+even if you show me all of that, there is nothing i can do about it, I am not gonna thow can i say oh ok that Traversal path for example is wrong? no. that almost never is the problem. usually the problem is in the final results output. and that is what I (human user) can read and report
+
+what i originally meant by human page - ai page - sources
+was that humans read in paragragh and conceprts merged and do not need all the details, for exmaple in a project page, saying that this is a feature for helping users pay in advnace and this is how it works and this is the owner of the feature and db used is mongodb, is probably enough for human reader, but that info is not enough for ai agent, and agent need to know maybe the detail of how that mongo is setup, what tables it has, how to connect to it, and more to be bale to do things. am i right? or I am worng and we do not have those info in one page and we make the ai agent go read different pages for exmaple one that is about detail of mongodb setup?
+also those info are not in pragraph, they are maybe in line by line statemeents.
+I am saying that those detailed exhastive details that AI agents use, it would be good to be bale to see and read them separetely if the engineer want to check stuff or if the agent does something wrong and the engineer wants to check why it happened, they be able to read that ai page and findout what the ai thought was true.
+for this I do not think goig into detail of Traversal path is going to help that engineer, he wants to know what does this ai think is true about that specific thing before running a task and after for debugging.
+
+
+that being said, I think for me, the creator, it is necessary to have visibility into what the result of pass 1 and pass 2 is, but also, the more detailed results of each step like the rag-graph step result, the first llm call result, and so on to be bale to see which part need change. I am not sure how this can be shown to me
+maybe these detial of traverasl path and stuff can go on a separate tab on those pages that i can see, so that I can copy and paste it to you and say this part i do not like, this is the detail of graph-rag on the page, tell me why this happened, also maybe we can have a separate database that stores the input (including the prompt and template used and sent to the llm api call) and output so that when i say I do not like this, you be bael to read that database and see what went wrong.
+If you can do this nicely in a separate place then I think we do not need to show that pass 1 and pass 2 under kb and kb childs can be these: Company / Engineering / Marketing / Legal
+
+and those pass 1, pass 2 and detail of steps in each pass can be on a separate item on the left menu maybe for me only to see (in the future we make it permission specific to me)
+
+
+Do you want “AI view” to be a generated aggregation per page (pull related service/db/env pages into one AI screen), or do you prefer pure navigation (click out to separate entity pages like Service/DB/Env)? click is more readable and better
+2) For “human attestation” edits by team leads: should those become direct truth immediately, or direct-but-attested (counts as truth, but marked as “human asserted” with audit trail and optionally requires a second approver for high severity)? for now, we do not define roles yet, so make it so that everyone can do the edit in place and send a pr, that pr becomes a verify card for the reviewer. just like how doc pages in github works and if you edit, it becomes a pr that one person need to verify. but for now for us any person can creat those and anyone can accept the pr.
+
+this is what I think should be:
+
+KB → Company / Engineering / Marketing / Legal (human projection)
+Verify
+Tickets
+How-to
+Execute
+Chat
+KB admin:
+
+inside that KB admin we have pass1 and pass 2
+and in that pass 1 and pass 2, show the steps:
+step 1: what was done and what was the result, this is human readable, so i should see that the instruction given was to read this and that and do this and that and use this prompt and then this result came from this step.
+this is what I know and understnad, and want to see, if you think that anything else is also useful for human to read and point out that for example that artifact or graph is bad ( cna human undetsnad and do that?) then add that there.
+make sure that these are stored in a sepearete data base so that wehn i point out at a problem and tell you, you be bale to pull that graphs and artifact and stuff and read all the logs and steps and expalin to me (humna) why it went wrong and suggest what can fix this without ruining the other parts that are working.
+
+
+One more decision (small but important)
+In KB Admin, do you want to debug by:
+Run-first (pick a run → see all steps) — simplest, recommended
+or Page-first (open a page → see which run/steps created it) — useful, but more work
+If you pick run-first now, you can add page-first later.
+
+i think it is best if i could have the option to run the whole pass 1, then pass 2 and also the option to run step 1 of pass 1 and then step 2 of pass 1
+that way I cna run it faster and edit and run again. or use the result of step 2 and run step 3 multiple times.
+
+keep in mind that we want to use the sme input that was used in the brewandgo to create brewandgo2
+
+if you do not have any other questions.
+give me a complete plan, explain in detail what we talked about and what should the final product look like and what should be done to get there.
+
+
+
+Debug mode choice
+Do run-first as the primary UX, but implement it as a step-addressable pipeline so you can:
+run Pass 1 end-to-end
+run Pass 2 end-to-end
+run Pass 1 step N only (reusing cached artifacts from step 
+N
+−
+1
+N−1)
+rerun step 3 multiple times while holding step 2 fixed
+This gives you the “fast iterate on a single step” workflow you want while keeping the UI simple.
+
+from the beginning I want to be balet o run step 1 of pass 1 only as well, and then go to step 2 of pass 1 or say run the rest of pass 1 instead of running all the stes one by one. so I want all the options.
+
+your plan is good but not detaield enough and did not mention everything we talked about froexmple:
+has a verification workflow that can update duplicates everywhere
+the verification card should have at least one person assocaited with it
+
+also we talked about defining the categories and templates in detail so the llm has a easier job to do
+becuase we can brain storm and find what categories must exist, what should be in each category and page and what should not and clearly define the limits of them. like ehat goes in these: Company
+Engineering
+Marketing
+Legal
+
+lets talk about these first and then rewrite a detailed plan
+
+
+
+
+
+
+one problem i have seen before was that 
+Who we serve (customers/segments)
+the engineering team was mentioned under org chat and people and also under clients.
+we should help the llm to figure out that not every human name is client and client means external, for b2c, like apps, client means a lot of people that we probably should group them by wehre these user are for exmaple apple users or android user maybe, and for b2b, the client is the company name and meybe we should add the person in there who is point of contact and more.
+
+What success means (north-star metrics if known)
+I do not think this should be a must, a lot of companies do not have that and we do not need this info either and do not watn to force them to fill it for us,.
+
+i think the glosary for an engineering team can be minimal, we do not want to write a dictionary for them.
+I think this is too much info:
+Category: Glossary
+Example pages
+1) Glossary
+2) Domain Glossary (Customer-facing terms)
+Template
+Term → definition
+Synonyms / old names
+Related entities (systems/services/processes)
+“Common confusions” section
+
+People pages are entity pages (owner, areas, contact, current focus)
+yes and maybe we have their slack handle and email as well?
+
+
+Category: Architecture
+is it important to addecisions and tradeoffs here, many ai agents and coding agents failures are cuased becuase they cannot make these decisions and tradeoffs.
+
+
+I think overall you have a good idea, but i want more specific.
+there are 2 things that matter
+1- we want the templates and pages to have and ask for infromation that the ai agents are going to need to do their tasks or information that the employee are going to ask to make decision and do their tasks, so those are the things that must exsit in the overall kb, we should think in those terms and if this is working for them
+2-  in the human pages, we want to show the information that they already either dicusss in docs or messages themselves to that detail degree.
+if they never talked about time zone for exmaple and if the ai agent does not need that, then we do not want to yap and talk about a bunch of stuff. 
+based on this, lets go over details on pages and categories and explain to me why that part must exist and we should ask the llm to fill even if there are little to no information there because we need that,. which parts we should tell llm look if you find info add if not ignore nad its optional. and which part we must not include. be specific so we can drill this down and get to a detaield agreement.
+
+
+
+
+
+this is must:
+Slack handles + emails (yes, include if present; extremely useful for routing verify/tickets)
+
+there is not how to find doc anymore, they ask in the chat of pidrax:
+Page: Onboarding (Company)
+MUST-IF-PRESENT
+Where to find docs, 
+
+
+
+
+
+

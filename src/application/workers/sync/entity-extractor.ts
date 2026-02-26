@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { getPrimaryModel } from "@/lib/ai-model";
+import { getFastModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { MongoDBKnowledgeDocumentsRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-documents.repository";
 import { MongoDBKnowledgeEntitiesRepository } from "@/src/infrastructure/repositories/mongodb.knowledge-entities.repository";
@@ -175,7 +175,7 @@ ${existingEntities}
 
         try {
             const { object } = await generateObject({
-                model: getPrimaryModel(),
+                model: getFastModel(),
                 schema: ExtractionResult,
                 system: systemPrompt,
                 prompt: `Extract all entities and relationships from these documents:\n\n${context}`,

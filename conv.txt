@@ -1,0 +1,2318 @@
+To make Architecture 2 and the UX land correctly, I need to pin down a few “product truth” decisions first. Answer as many as you can (short bullets are fine).
+
+## Company + scope
+- **Primary user groups (top 3)**: who must love this first (eng, PM, support, sales, exec, everyone)?
+- **Definition of “unwritten knowledge”**: do you mean (a) Slack/meetings/transcripts, (b) implicit patterns inferred from code + tickets, (c) people’s private context captured as memos, or all?
+- **Trust bar**: when is KB content allowed to be treated as “company truth” vs “draft/inferred”?
+
+## Sources + ingestion
+- **Sources in scope for the demo**: which are truly available now (Slack, GitHub, Jira, Confluence, Drive, Notion, customer feedback tool)?
+- **Freshness requirement**: near-real-time (minutes) vs “every few hours” vs daily batch?
+- **Incremental updates**: do you want “append-only with rollups” or “regenerate pages each run”?
+- **Permissions**: do you need doc-level ACL enforcement per user at retrieval time (like Doti), or is this single-tenant demo without strict ACL?
+
+## Knowledge graph design (backbone decisions)
+- **Canonical node types**: do you want to stick to `person/project/team/system/customer/process/service/decision/ticket` or expand (e.g., `api_endpoint`, `table`, `incident`, `feature_flag`)?
+- **Entity identity resolution**: do you have stable IDs (emails, repo paths, Jira keys), or do we need fuzzy merging rules?
+- **Decision Records**: what is a “decision” in your company—ADR file, Slack thread, Jira comment, meeting note? Which wins when conflicting?
+- **“Where facts belong” rule**: do you want *entity-owned facts* (one canonical place, everywhere else references), or *page-owned facts* with dedupe as a later projection?
+
+## Pass 1 / Pass 2 meaning (for side-by-side compare)
+- **Pass 1 goal**: is it “best-effort structured KB quickly” (high recall), or “already mostly correct” (higher precision)?
+- **Pass 2 goal**: is it mainly (a) dedupe + canonicalization, (b) conflict detection + verification grouping, (c) temporal stabilization, or (d) all?
+- **Success metrics**: what will make you say Architecture 2 is better (coverage, fewer duplicates, fewer wrong placements, better citations, better verify workflow)?
+
+## Verify workflow + collaboration
+- **Who can verify**: only assigned owners, or any employee, or “subject-matter circles”?
+- **SLA/ownership**: what happens when a verify card has no person—auto-assign via graph (ownership edges), or route to team, or “unassigned inbox”?
+- **Discussion persistence**: should verify chat become part of the KB as a first-class source (“human attestation”), or remain ephemeral?
+
+## Tickets replacing Jira (product choices)
+- **Workflow model**: do you want Jira-like statuses customizable per team, or a fixed simple lifecycle for v1?
+- **Sync vs replace**: for imported Jira tickets, do you need two-way sync (status/assignee/comments) or read-only mirror initially?
+- **Ticket ↔ KB linkage**: should every ticket require linked `system/service/decision` entities, or optional?
+
+## Execute pipeline (agent ecosystem)
+- **Agent contract**: what is the minimum standard interface you want for “bring your own agent” (inputs, outputs, questions, artifacts, PR link)?
+- **Human-in-the-loop points**: where must execution pause (requirements unclear, design choice, secrets/permissions, code review)?
+- **Runtime environment**: will agents run in your infra (containers) or user machines (like Claude Code local), or both?
+
+## Parallel architecture constraints (/brewandgo2)
+- **Hard separation level**: separate DB collections + separate Qdrant collection + separate run metadata, or shared stores with `architectureVersion` tags?
+- **Comparison UX**: do you want a true side-by-side diff view per page/card, or just separate navigation with “compare” buttons?
+
+If you answer these, my next message will propose **Architecture 2 (graph-first pipeline + storage + prompts)** and **the UX structure** (KB/Verify/Tickets/How-to/Execute) in a way that’s parallel to the current system and easy to delete/rollback.
+
+
+Primary user groups (top 3): who must love this first : eng, PM
+Definition of “unwritten knowledge”: things they did but did not write down, decisions they made that ai agents may also need to make but they did not docuement
+Trust bar: when is KB content allowed to be treated as “company truth” vs “draft/inferred”: company truth when it is directly mentioned in the input data, infered when it was not docuemetned but we realized that infered that from the github or the way things are 
+
+Sources in scope for the demo: which are truly available now: (Slack, GitHub, Jira, Confluence, customer feedback
+Freshness requirement:  daily batch at the end of the day or once end of the day and once at lunch time.
+Incremental updates: do you want “append-only with rollups” or “regenerate pages each run”? for update, we should see how that new data is related to the past data, if we have something related, we update that part of the page with new data, if it does not exist in the docs, we create a page for it.
+Permissions: do you need doc-level ACL enforcement per user at retrieval time (like Doti), or is this single-tenant demo without strict ACL?
+I do not thing the data that we are generating right now need permission level, we can genrate all the data comprehensively and then later decide to only show engineering data to engineers, legal to legal team and so on.i think the sepratetion of docs that we have like basic company inof and then engineering, legal, marketing should be good enough for that.
+
+Canonical node types: do you want to stick to person/project/team/system/customer/process/service/decision/ticket or expand (e.g., api_endpoint, table, incident, feature_flag)?
+
+we can expand, but I also think that we should help the llm that is going to decide how to fill these cateogries by choosing the cateogries and giving the categories specific detaield prompt and template.
+we know what software teams have and what categories thet most probably have and cover the common ones are enough for now, we do not need to cover every possible category that they might have.
+
+Entity identity resolution: do you have stable IDs (emails, repo paths, Jira keys), or do we need fuzzy merging rules?
+ this is not a concern for now, right now we are uinsg the data input which is given to us as a text, we want to make sure the sustem is owrking form the input data all the way to the info extracted and then the agents work
+the part to read data from those sources and create the input text can be done later.
+
+Decision Records: what is a “decision” in your company—ADR file, Slack thread, Jira comment, meeting note? Which wins when conflicting? we do not find the winner, we report that and ask an employee to verify the winner. the decision means forexmaple when there was a wirtten concern and they chose something,
+
+“Where facts belong” rule: do you want entity-owned facts (one canonical place, everywhere else references), or page-owned facts with dedupe as a later projection? High Performance & Decoupling (Page-owned: blazing fast to read, requires background syncing to keep data accurate) we should make sure the data is easy to find and when if that is the case,we should be able to update it easily. it is ok to have some duplicates in some pages, if it helps with finding relevant information faster and removes the requirement to go fietch multiple sources, but the important part is that the items should be easy to find, meaning that if those duplicated items need update or verification, we show the employee one cverification card and when employee update or verify that card, we be abel to update and verify all those items. also the verification card should have enough explanation and explain the thing to the employee so they can read and verify or update all the required info in there.
+
+
+Pass 1 goal: is it “best-effort structured KB quickly” (high recall), or “already mostly correct” (higher precision)? best-effort structured KB quickly” (high recall)
+
+Pass 2 goal: is it mainly (a) dedupe + canonicalization, (b) conflict detection + verification grouping, (c) temporal stabilization, or (d) all?
+Success metrics: what will make you say Architecture 2 is better (coverage, fewer duplicates, fewer wrong placements, better citations, better verify workflow)? all also, pass2 should help to read through again for when the confidence was low to see if it can find more better information to update that
+
+
+Who can verify: only assigned owners, or any employee, or “subject-matter circles”? the assigned person will see that verify card and then they either accept as is or they want to edit
+in that case we have 2 options, either they want to edit alone, without help from any other employee, which they can edit that in the text box or they canchat with the llm and brain storm and comeup with how to edit
+or they want to put a comment and mention someone else to verify it. they can always use the chat with the llm to brainstorm about that.
+
+SLA/ownership: what happens when a verify card has no person—auto-assign via graph (ownership edges), or route to team, or “unassigned inbox”? it should always have a person from the pass 1,  and the pass2 should help to read through again for when the confidence was low to see if it can find more better information to update that or keep as is.
+
+Discussion persistence: should verify chat become part of the KB as a first-class source (“human attestation”), or remain ephemeral?
+verify chat is in the carify page under the card. adn it should see the verify card info whenever a card is selected form the left tree menu
+
+Workflow model: do you want Jira-like statuses customizable per team, or a fixed simple lifecycle for v1?  Jira-like statuses customizable per team
+Sync vs replace: for imported Jira tickets, do you need two-way sync (status/assignee/comments) or read-only mirror initially? read only, we want to replace jira, there is no need to keep jira updated, we have our own jira like ticket manageement.
+
+Ticket ↔ KB linkage: should every ticket require linked system/service/decision entities, or optional? linked. it is useful for when we want to create how to implement doc for that ticket,
+
+Agent contract: what is the minimum standard interface you want for “bring your own agent” (inputs, outputs, questions, artifacts, PR link)? for now just a item on the left that says execute, and inside there a link that says connect your own agent assuming they have a agent from a nother company or their own code. but this is just for show for now. it does not have to work.
+
+Human-in-the-loop points: where must execution pause (requirements unclear, design choice, secrets/permissions, code review)?
+whenever the ai agent ask a question and pauases, forexmapel whenever the claude code pauses,
+
+Runtime environment: will agents run in your infra (containers) or user machines (like Claude Code local), or both?
+that is not part of this right now
+
+Hard separation level: separate DB collections + separate Qdrant collection + separate run metadata, or shared stores with architectureVersion tags?
+for the architecture 2, seprate it from arhc 1 because we may wnat to delete the whole arch 1 and its data later.
+
+Comparison UX: do you want a true side-by-side diff view per page/card, or just separate navigation with “compare” buttons?
+no, just create a page like brewandgo2 and put your stuff there and do not touch brewandgo endpoint.
+
+
+### What I think you should do (high-level)
+- **Make “claims + evidence + owner” the atomic unit** (not pages). Pages become fast “views” that can duplicate claims for readability, while **one verification card controls all duplicates**.
+- **Make the knowledge graph the routing layer**: it decides **what pages exist**, **what goes on them**, **who owns verification**, and **what to regenerate** on daily updates.
+- **Run Architecture 2 as a parallel product slice**: separate storage + separate pipelines + separate UI routes at `/brewandgo2`, fed by the same input endpoint.
+
+---
+
+### Architecture 2 (graph-first) — the backbone
+#### 1) Data model (the key objects)
+- **InputDoc**: your current flattened input text units (Slack thread, Jira ticket, Confluence page, PR, etc.), with `sourceType`, `sourceId`, timestamps.
+- **Entity**: `person/team/system/service/integration/project/customer/process/decision/ticket` (expand later, but start here).
+- **GraphEdge**:
+  - `MENTIONS` (doc → entity)
+  - `RELATES_TO` (entity ↔ entity; typed: `owns`, `depends_on`, `integrates_with`, `part_of`, `decided_in`, etc.)
+- **Claim** (most important):
+  - `truth_status`: `direct` (explicit in input) vs `inferred` (derived from GitHub patterns / behavior)
+  - `confidence`, `severity`, `ownerPersonId`
+  - `entity_refs[]`
+  - `evidence_refs[]` (doc + span/excerpt pointers)
+- **FactGroup / VerificationCard**:
+  - clusters multiple near-duplicate claims/occurrences into **one card**
+  - actions (validate/edit/reject) apply to all linked occurrences
+- **Page + PageItemOccurrence**:
+  - pages are **page-owned for performance**
+  - each item references a `factGroupId` (so duplicates stay manageable)
+
+This matches what you want: **fast pages for humans + one verification workflow for updates**.
+
+#### 2) Pass 1 (high recall): “Generate everything, but route it correctly”
+Graph-first steps:
+1. **Snapshot inputs for `/brewandgo2`** (so Arch2 doesn’t depend on Arch1 DB survival later).
+2. **Build/refresh graph** from docs:
+   - extract entities per doc
+   - link doc→entity mentions
+   - infer entity↔entity edges (ownership/deps/working-on) using your resolver-style logic + heuristics
+3. **Graph-driven page planning (deterministic first, LLM second)**:
+   - deterministic rules ensure coverage (e.g., a service entity ⇒ a service page; a decision claim ⇒ decision record index + linked pages)
+   - then an LLM can **name/group** pages (titles and clustering), but it must output a strict `PagePlan` schema and you validate constraints (no duplicates, page cap, required categories)
+4. **GraphRAG retrieval replaces “flat top-k vector search”**:
+   - pick anchor entities for the page (e.g., service X)
+   - traverse 1–2 hops to gather: owners, deps, integrations, related decisions, related tickets
+   - then do vector search **scoped/seeded by those nodes** (only chunks from docs that mention those entities, plus a small global spillover)
+5. **Generate pages with strict templates** (reuse your current templates/Zod style):
+   - output structured `PageItems[]` that include `entity_refs`, `truth_status`, `confidence`, and `evidence_refs`
+6. **Create verification cards immediately** for:
+   - `inferred` claims
+   - conflicts
+   - low confidence
+   - missing/weak evidence
+   - and enforce: **every card gets an owner** via graph ownership edges; if still unknown, fallback to a configured “default verifier” person for Eng/PM.
+
+#### 3) Pass 2: “Clean it up, dedupe it, and improve low-confidence”
+Pass 2 should operate on **(graph + pass1 pages + claims)**:
+- **Dedupe into FactGroups** using:
+  - entity_refs overlap (strong signal)
+  - semantic similarity embeddings (support signal)
+  - evidence overlap (support signal)
+- **Conflict detection**: contradicting claims in same group ⇒ one conflict card with clear “what to decide”
+- **Citation repair / evidence upgrade**:
+  - for low confidence groups, do a second targeted GraphRAG pull (graph neighborhood + scoped vector) to find better direct quotes
+- **Temporal stabilization**:
+  - tag claims as current/deprecated when timeline evidence exists
+- **Cascade updates**:
+  - when a group’s canonical claim is updated/validated, regenerate all occurrences on pages (still keeping pages “fast”).
+
+#### 4) Incremental daily updates (lunch + end-of-day)
+Graph makes this easy:
+- ingest new docs → update graph incrementally
+- compute impacted entities → impacted pages (by anchor entity) → regenerate only affected sections
+- update/extend FactGroups; create new cards where needed
+
+Critically: **you’re not “regenerating everything”**, you’re regenerating *the set of views touched by new evidence*.
+
+#### 5) “Store every step” (debuggable pipeline)
+For every run, store artifacts per step:
+- `inputSnapshot`
+- `graphBuildResult` (nodes/edges counts + diffs)
+- `pagePlan`
+- `retrievalPacks` (what context each page saw)
+- `pass1Pages`
+- `pass2FactGroups + verifyCards`
+This is exactly how you find what went wrong.
+
+---
+
+### How to run alongside Architecture 1 (and be easy to delete)
+- **New API namespace**: `/brewandgo2/*`
+- **Separate persistence**:
+  - new Mongo collections (or a new DB) for `pidrax2_*`
+  - new Qdrant collection (e.g., `knowledge_embeddings_v2`)
+- **Input reuse without coupling**:
+  - `/brewandgo2` reads from the same input endpoint (`/brewandgo/kb`) but **copies/snapshots** into `pidrax2_inputs` per run
+
+This gives side-by-side comparison without touching `/brewandgo`.
+
+---
+
+### UX suggestions (aligned to your menu)
+#### KB
+- **Tree by Layer → Category → Page** (not long scrolling lists)
+- Each page shows:
+  - center: readable content (duplicated where helpful)
+  - right: “Related” panel (entities + linked tickets + linked decisions + linked verify cards)
+
+#### Verify (your redesign is right; add two key things)
+- Left tree: `S1–S4` → type (`conflict`, `inferred`, `gap`, `outdated`, `citation_missing`)
+- Top filter: **My cards** (owner = me) + team
+- Middle card must answer:
+  - **What is the claim?**
+  - **Why do we believe it?** (direct quote vs inference)
+  - **What do you need to decide?**
+  - **Where will this update propagate?** (pages + tickets + how-to)
+- Right evidence stack: expandable, each with excerpt + source metadata
+- Bottom: persistent discussion thread + AI chat; mentions notify people
+
+#### Tickets (Jira replacement v1)
+- Views: My Tickets, Sprint Board, Backlog, From Jira, From Conversations, From Feedback, Create
+- **Jira-like customizable workflow per project/team**
+- Ticket requires links to KB entities (system/service/decision) so “how-to” generation is grounded
+
+#### How to Implement
+- One per ticket, with a strict template:
+  - goal, constraints, affected entities, approach options + tradeoffs, rollout, testing, observability, risks
+- AI chat uses GraphRAG over linked KB + similar past tickets/decisions
+
+#### Execute
+- For now: a credible placeholder is enough:
+  - “Connect your agent” (non-functional)
+  - a “Run timeline” UI mock (events: agent started → question → human reply → continue)
+
+---
+
+### Can you use Doti AI architecture?
+Yes—selectively.
+- **Do copy**: Graph-RAG + multi-step orchestration, “atomic memos” concept (your version = human-attested claims), moderation/Testbed pattern (your Verify).
+- **Defer**: doc-level ACL enforcement and Slack-autopilot behaviors until after the core graph/verify/ticket loop is solid.
+- **Key difference**: Doti optimizes for *answering inside existing tools*; Pidrax must optimize for *becoming the system of record* (pages + tickets + decisions + execution). Your two-pass + verification-group model is a strong differentiator—keep it.
+
+---
+
+### One last question (so I can sharpen the page planning rules)
+For Engineering Layer B pages, do you want them primarily **entity-centric** (one page per service/system/integration) or primarily **concept-centric** (one “Observability” page that lists everything), or **both** with a hub + per-entity drilldowns?
+
+
+### Yes — do both, but don’t split into “two separate KBs”
+You *can* have **concept-centric pages for humans** (few, merged, editable) and **entity-centric/detail for AI** *without* maintaining two divergent document trees.
+
+The trick is to store one underlying truth layer (claims + graph + evidence), then render **two projections**:
+
+- **Human Projection (Concept-centric)**: fewer pages, merged by topic (e.g., “Observability”, “CI/CD”, “Architecture Overview”), with summaries and curated sections.
+- **AI Projection (Entity-centric views)**: one page per `service/system/integration/decision/ticket`, highly structured, exhaustive, optimized for retrieval and agent execution.
+
+Both projections are generated from the same **Claim/FактGroup** backbone, so verification/editing updates both automatically.
+
+---
+
+### Should the AI “use the messy graph” or the pages?
+**Use both**, for different roles:
+
+- **Graph is for routing + recall**: pick the right entities, neighbors, owners, related tickets/decisions, and targeted evidence.
+- **AI pages are for precision + structure**: when an agent needs an answer, you want it to read a consistent schema (“owner”, “deps”, “runbook”, “SLIs”, “recent decisions”, “risks”), not raw graph edges.
+
+So the AI shouldn’t read the raw graph directly as “content”; it should use the graph to **retrieve** the right structured pages/claims/evidence.
+
+---
+
+### What you want (“see what AI is using”) is valid — here’s the safer way
+Instead of a full separate “Doc-AI” navigation tree (which risks diverging), add **AI transparency on every human page**:
+
+- **“AI Context” drawer/tab** (read-only) shows:
+  - the **top entities** the page anchors to
+  - the **Graph traversal path** used (1–2 hops)
+  - the **retrieval pack** (which AI-pages / claims / source excerpts were provided)
+  - the **FactGroups** involved + verification status
+- **“Open entity view”** from any mention (service/system/person) → goes to the entity-centric AI page.
+
+This gives you confidence and debuggability without duplicating the whole IA.
+
+---
+
+### Recommended IA (what shows up in the product)
+Instead of `Docs` and `Docs-AI` as two separate primary menu items, do:
+
+- **KB**
+  - Pass 1 / Pass 2
+  - Company / Engineering / Marketing / Legal
+  - Engineering → Overview (concept hubs) + Projects/Tickets (work)
+- **Entity Views (for AI / power users)** (secondary, not co-equal to KB)
+  - Search-first entry
+  - Entity pages: services/systems/integrations/people/decisions/tickets
+- **Verify / Tickets / How-to / Execute / Chat** as you already planned
+
+If you still want the explicit separation for the demo, make “Doc-AI” **a toggle** inside KB (“Human view / AI view”), not a separate tree you must maintain.
+
+---
+
+### Concrete answer to your original question (Layer B)
+Do **both with a hub + drilldowns**:
+- **Concept hubs** for humans (low page count, curated, editable).
+- **Entity drilldowns** for AI/agents (detailed, structured, generated).
+
+---
+
+### Why you shouldn’t “just use the human version” for AI
+Human pages will be:
+- merged, summarised, and sometimes omit edge-case details
+- inconsistent for tool-use (“where is owner?”, “what’s the endpoint?”, “what’s the rollout plan?”)
+
+Agents work best when they have **stable schemas** and **complete entity context**. Keep humans on hubs; keep agents on entity pages + claims + evidence.
+
+---
+
+### Two quick design decisions to lock in (so you don’t fight this later)
+1. **Editing happens where?**
+   - Recommended: humans edit via **verification cards / claim edits**, not by directly editing AI pages. Human pages can allow light edits, but those edits should become claims.
+2. **What’s the unit of retrieval?**
+   - Recommended: retrieval returns a bundle: `entity page sections + relevant FactGroups + direct evidence excerpts`, all permission-filtered later if needed.
+
+If you answer (1): do you want humans to be able to directly edit hub pages like Confluence (freeform), or force most edits through verification/structured claims?
+
+ Editing happens where?
+Recommended: humans edit via verification cards / claim edits, not by directly editing AI pages. Human pages can allow light edits, but those edits should become claims.
+this makes sense, but what if user edited all the verify cards and still think there i something in the pages that require change? how does the user tell us that?
+
+for this part, i still am not clear what you mean:
+
+Instead of Docs and Docs-AI as two separate primary menu items, do:
+KB
+Pass 1 / Pass 2
+Company / Engineering / Marketing / Legal
+Engineering → Overview (concept hubs) + Projects/Tickets (work)
+Entity Views (for AI / power users) (secondary, not co-equal to KB)
+Search-first entry
+Entity pages: services/systems/integrations/people/decisions/tickets
+Verify / Tickets / How-to / Execute / Chat as you already planned
+If you still want the explicit separation for the demo, make “Doc-AI” a toggle inside KB (“Human view / AI view”), not a separate tree you must maintain.
+
+first of all:
+these are the main items on hte left menu:
+KB / Verify / Tickets / How-to / Execute / Chat
+in side kb these are the main items in the menu:
+Pass 1 / Pass 2
+in each of them these are the main items:
+Company / Engineering / Marketing / Legal
+in each of them these are the children:
+Engineering → Overview (concept hubs) + Projects/Tickets (work)
+and then in them there are categories and pages
+
+the whole goal of pass 1 and pass 2 is so that I can see the result and find out the problem, in each of those pass 1 and pass 2, there are also steps that I want to see the result to findout which step need what modification.
+if it was not for that, this is what the original product would look like:
+kb item has these children items:
+Company / Engineering / Marketing / Legal
+and then when each of (Engineering / Marketing / Legal) is selected, they have 
+these main items: Overview (concept hubs) + Projects/Tickets (work)
+and each of those have categories and pages.
+
+for the ai part, I want that to be visible to the user if they choose to see it, to help gain their trust.
+I think this is a good idea:
+Human Projection (Concept-centric): fewer pages, merged by topic (e.g., “Observability”, “CI/CD”, “Architecture Overview”), with summaries and curated sections.
+AI Projection (Entity-centric views): one page per service/system/integration/decision/ticket, highly structured, exhaustive, optimized for retrieval and agent execution.
+
+but i do not understand this part and how it is do-able:
+The trick is to store one underlying truth layer (claims + graph + evidence), then render two projections:
+
+you said a bunch of things I am not sure if I understood :
+Instead of a full separate “Doc-AI” navigation tree (which risks diverging), add AI transparency on every human page:
+“AI Context” drawer/tab (read-only) shows:
+the top entities the page anchors to
+the Graph traversal path used (1–2 hops)
+the retrieval pack (which AI-pages / claims / source excerpts were provided)
+the FactGroups involved + verification status
+“Open entity view” from any mention (service/system/person) → goes to the entity-centric AI page.
+This gives you confidence and debuggability without duplicating the whole IA.
+Entity Views (for AI / power users) (secondary, not co-equal to KB)
+Search-first entry
+Entity pages: services/systems/integrations/people/decisions/tickets
+
+
+what do you mean?
+do you say that we have a concept page for humans, and then in there have a tab that shoes what exhastive pages related to that single page, ai agents will see and also another tab to show the sources used for creating that paragraph?
+
+explain eaxctly what categories you think should go in these (Overview (concept hubs) + Projects/Tickets (work)) and what pages (give me 2 page as example for each category) and thenwhat each page look like, for human, for ai agent and the source part
+
+
+
+
+### 1) If users edited all verify cards but still think a page needs changes—how do they tell you?
+Add a **“Request change”** action on every page/section/paragraph that creates a *new tracked object* (not a freeform edit that bypasses the truth layer):
+
+- **Request change (gap / rewrite / missing page / wrong placement)** → creates a **Verify card of type `gap`** (or a lightweight “KB task”) with:
+  - what looks wrong (user text)
+  - what they expected instead
+  - where they saw it (page + section anchor)
+  - optional: who to ask (mention)
+- System then does **targeted GraphRAG** to propose:
+  - new claims to add, or claims to modify
+  - new evidence candidates
+  - impacted pages (where it will propagate)
+- User approves → becomes **claims/factgroups updates** → pages regenerate.
+
+This preserves your rule: **edits become claims**, so everything stays debuggable and propagates cleanly.
+
+---
+
+### 2) “One underlying truth layer (claims + graph + evidence), then render two projections” — what that means, concretely
+Think of it like a database + two views:
+
+#### The underlying truth layer (what you store)
+- **Claims** (atomic statements) + `direct/inferred`, confidence, owner, severity
+- **Evidence** (source excerpts and pointers)
+- **FactGroups / VerificationCards** (one card controls many duplicates)
+- **Graph** (entities + relationships) for routing/retrieval/planning
+
+#### Projection A: Human pages (concept-centric hubs)
+- “Observability”, “CI/CD”, “Architecture Overview”, etc.
+- These pages are **curated summaries** composed of claim-backed paragraphs.
+- They are meant to be readable, not exhaustive.
+
+#### Projection B: AI pages (entity-centric)
+- One page per **service/system/integration/decision/ticket/person**
+- Highly structured, exhaustive, consistent schema
+- What agents retrieve most often
+
+Both projections point back to the **same claims/factgroups/evidence**, so verification updates both.
+
+---
+
+### 3) What I meant by “AI Context drawer/tab” (yes—your interpretation is right)
+On a **human concept page**, each section/paragraph has two optional read-only drilldowns:
+
+- **Sources tab (evidence)**: the exact excerpts used to support that paragraph/claims.
+- **AI Context tab (retrieval + routing transparency)**:
+  - **Anchor entities** (e.g., `Service: Promotions`, `System: Checkout`)
+  - **Traversal path** used (e.g., `Service -> owned_by -> Team`, `Service -> depends_on -> Redis`)
+  - **Retrieval pack** (which entity pages / claims / source chunks were provided to the generator)
+  - **FactGroups** used + verification status
+
+And a button:
+- **Open entity view** → jumps to the detailed AI page for that entity (what the agent would read).
+
+This gives trust and debuggability **without maintaining a totally separate “Docs-AI tree” that can diverge**.
+
+---
+
+### 4) Where Pass 1 / Pass 2 / step-by-step debugging fits in your menu
+Your structure is good for building and diagnosing:
+
+- **KB**
+  - **Input Data**
+  - **Pass 1**
+  - **Pass 2**
+
+Inside Pass 1 and Pass 2 you can show:
+- **Results view** (the pages people read)
+- **Pipeline steps view** (artifacts per step: graph build summary, page plan, retrieval packs, generation outputs)
+
+So employees mostly live in “Results”, and you (builder) can inspect steps when something looks wrong.
+
+---
+
+### 5) Engineering IA: categories + 2 example pages each, plus what each page looks like (Human vs AI vs Sources)
+
+Below is a concrete recommendation for **Engineering → Overview** and **Engineering → Projects & Tickets**.
+
+## Engineering → Overview (concept hubs)
+These are **human-friendly merged pages**. Each page links out to entity drilldowns.
+
+### Category: **Architecture**
+- **Page example 1**: `Engineering Architecture Overview`
+- **Page example 2**: `Core Domain Model & Boundaries`
+
+**Human page layout**
+- Overview (5–10 bullets)
+- Systems map (linked entities)
+- Key constraints (latency, compliance, scaling)
+- “What changes often vs rarely”
+- Links: key services/systems + top decisions
+
+**AI page linkage**
+- “AI Context” lists anchor entities and retrieval pack.
+- Links to `System:*` and `Service:*` pages.
+
+**Sources panel**
+- Evidence excerpts (Confluence/Jira/Slack/GitHub) for each key claim.
+
+---
+
+### Category: **Service & System Catalog**
+- **Page example 1**: `Service Catalog (Engineering)`
+- **Page example 2**: `System Ownership & On-call Map`
+
+**Human page**
+- A table-like list: service → owner → criticality → key deps → runbook link
+- “Top 10 critical services”
+- Common failure modes / escalation
+
+**AI**
+- Each listed service links to its entity page (structured).
+
+**Sources**
+- Evidence for ownership, on-call, deps.
+
+---
+
+### Category: **Integrations**
+- **Page example 1**: `Integration Map (Internal/External)`
+- **Page example 2**: `Payments & Providers Overview`
+
+**Human page**
+- Diagram-ish list: integration → data flow → auth → failure handling
+- Known quirks / rate limits
+
+**AI**
+- Each integration has an entity page with schemas/edges.
+
+**Sources**
+- Pulls from code + tickets + docs excerpts.
+
+---
+
+### Category: **Environments & CI/CD**
+- **Page example 1**: `Environments & Deployment`
+- **Page example 2**: `Build/Release Process & Branching Strategy`
+
+**Human page**
+- “How we ship” summary
+- Envs matrix (dev/stage/prod)
+- Release gates, rollbacks
+
+**AI**
+- Entity pages for pipelines/environments can exist later; for now link to services + process claims.
+
+**Sources**
+- GitHub workflows, CI configs, deployment docs.
+
+---
+
+### Category: **Observability & Operations**
+- **Page example 1**: `Observability Standards (Logs/Metrics/Tracing)`
+- **Page example 2**: `Incident & Postmortem Process`
+
+**Human page**
+- Standard expectations (“every service must expose…”)
+- Links to dashboards/runbooks (if any)
+- Process steps for incidents
+
+**AI**
+- Service entity pages contain “observability” section per service (exhaustive).
+
+**Sources**
+- Tickets/incidents/README snippets.
+
+---
+
+### Category: **Engineering Process**
+- **Page example 1**: `How We Work (PRs, Reviews, RFCs)`
+- **Page example 2**: `Quality Bar (Testing, Security, Performance)`
+
+**Human page**
+- Simple “rules of the road”
+- Escalation paths
+- Definition of done
+
+**AI**
+- Used as policy context in execution/how-to.
+
+**Sources**
+- Team agreements, PR templates, Slack norms.
+
+---
+
+### Category: **Decision Records (concept index)**
+- **Page example 1**: `Decision Record Index (Top Decisions)`
+- **Page example 2**: `Architecture Tradeoffs Patterns (What we usually choose and why)`
+
+**Human page**
+- Decisions grouped by system/service
+- Conflicts flagged with verify cards
+
+**AI**
+- Each decision also exists as an entity page (structured fields).
+
+**Sources**
+- ADRs, Slack threads, PR discussions, Jira comments.
+
+---
+
+## Engineering → Projects & Tickets (work layer)
+This is where PM + Eng live day-to-day.
+
+### Category: **Ongoing Projects**
+- **Page example 1**: `Project: Checkout Revamp`
+- **Page example 2**: `Project: Promotions Engine Improvements`
+
+**Human page**
+- Status, milestones, risks
+- Linked tickets
+- Linked services/systems
+- Linked “how to implement” docs
+
+**AI**
+- Project entity page can be structured; agents primarily use linked tickets/how-to + affected entities.
+
+**Sources**
+- Jira epics, Slack status threads, PRs.
+
+---
+
+### Category: **Past Projects**
+- **Page example 1**: `Project: Migration to X (Retrospective)`
+- **Page example 2**: `Project: Infra Upgrade (What we learned)`
+
+**Human page**
+- What happened, what changed
+- Key decisions, gotchas
+- Reusable playbook patterns
+
+**AI**
+- Used for “similar past work” retrieval.
+
+**Sources**
+- PRs, postmortems, Jira history.
+
+---
+
+### Category: **Proposed Projects**
+- **Page example 1**: `Proposal: Introduce Feature Flags`
+- **Page example 2**: `Proposal: Replace Queue System`
+
+**Human page**
+- Goals, tradeoffs, estimated effort
+- Open questions (verify cards)
+- Stakeholders/owners
+
+**AI**
+- Feeds planning agents; not treated as truth until validated.
+
+**Sources**
+- Customer feedback summaries, discussion threads.
+
+---
+
+### Category: **Tickets**
+Sub-views (as you want): From Jira / From Conversations / From Feedback / Manual.
+
+- **Page example 1**: `Ticket: Fix promotions multiplier cap bug`
+- **Page example 2**: `Ticket: Add idempotency to payment webhook handler`
+
+**Human page**
+- Assignee, workflow state, priority
+- Required links: services/systems/decisions
+- Discussion thread + AI assist
+- Linked “how-to implement” doc
+
+**AI**
+- Ticket becomes a structured object for execution agents.
+
+**Sources**
+- Imported Jira + linked evidence.
+
+---
+
+### Category: **How-to Implement (linked to tickets)**
+- **Page example 1**: `How-to: Implement idempotent webhooks (Ticket #123)`
+- **Page example 2**: `How-to: Roll out promotions cap change safely (Ticket #456)`
+
+**Human page**
+- Options + tradeoffs
+- Proposed plan, rollout, tests, dashboards
+- Open questions routed to verify/mentions
+
+**AI**
+- This is the **primary execution input** (plus ticket + linked entity pages).
+
+**Sources**
+- Past similar tickets, service pages, decisions.
+
+---
+
+### 6) So do you need “Docs-AI” in the left menu?
+Not as a full second tree. The lowest-risk approach is:
+
+- Keep your left menu exactly as you said (**KB / Verify / Tickets / How-to / Execute / Chat**).
+- Inside **KB pages**, add:
+  - **AI Context drawer**
+  - **Sources drawer**
+  - **Open entity view** links
+- Provide a global entry somewhere (header search or a submenu) for **Entity Views** (service/system/person/decision/ticket) for power users and debugging.
+
+That gives you visibility into what AI uses, without maintaining two parallel documentation hierarchies.
+
+If you still want the demo to visibly show “Human vs AI”, do it as a **toggle on the same page**:
+- `View: Human` (concept hub)
+- `View: AI` (entity-centric / structured)
+- `View: Sources` (evidence)
+
+Same underlying objects, different projection.
+
+---
+
+If you answer one thing, it should be this: **For human concept pages, do you want them to be mostly “generated and then curated” (edits create claims), or do you want full Confluence-like freeform editing on those hubs?** This choice affects how strict your “edits become claims” enforcement needs to be.
+
+
+2 and 4 and 6 look good, I am not sure about 5, but first lets clarify these and then we get to 5 later.
+
+1) If users edited all verify cards but still think a page needs changes—how do they tell you?
+Add a “Request change” action on every page/section/paragraph that creates a new tracked object (not a freeform edit that bypasses the truth layer):
+Request change (gap / rewrite / missing page / wrong placement) → creates a Verify card of type gap (or a lightweight “KB task”) with:
+what looks wrong (user text)
+what they expected instead
+where they saw it (page + section anchor)
+optional: who to ask (mention)
+System then does targeted GraphRAG to propose:
+new claims to add, or claims to modify
+new evidence candidates
+impacted pages (where it will propagate)
+User approves → becomes claims/factgroups updates → pages regenerate.
+This preserves your rule: edits become claims, so everything stays debuggable and propagates cleanly.
+
+
+this makes sense, specially for normal employees we can add a must accept by team lead for the card, but i think if for every small change they need to go through this, that can be annoying, why cannot we make it editbale in place (specially for specific people like team leads) and then when an edit happened and the user click save on the page, it get triggered and use that change to update the underlying facts and stuff? so have both options?
+
+
+this makes sense:
+3) What I meant by “AI Context drawer/tab” (yes—your interpretation is right)
+On a human concept page, each section/paragraph has two optional read-only drilldowns:
+Sources tab (evidence): the exact excerpts used to support that paragraph/claims.
+AI Context tab (retrieval + routing transparency):
+Anchor entities (e.g., Service: Promotions, System: Checkout)
+Traversal path used (e.g., Service -> owned_by -> Team, Service -> depends_on -> Redis)
+Retrieval pack (which entity pages / claims / source chunks were provided to the generator)
+FactGroups used + verification status
+And a button:
+Open entity view → jumps to the detailed AI page for that entity (what the agent would read).
+This gives trust and debuggability without maintaining a totally separate “Docs-AI tree” that can diverge.
+
+but I do not understand these stuff:
+Anchor entities (e.g., Service: Promotions, System: Checkout)
+Traversal path used (e.g., Service -> owned_by -> Team, Service -> depends_on -> Redis)
+Retrieval pack (which entity pages / claims / source chunks were provided to the generator)
+FactGroups used + verification status
+
+I thought you meant having one long exhastive page that ai agents use? is that not the case? what are these things?
+
+
+### 1) Yes — you can have both “edit in place” and “request change” (without breaking the truth layer)
+You’re right: forcing a verify-card workflow for *every* tiny fix is annoying.
+
+A good hybrid is:
+
+- **Inline edit (privileged users like team leads)**:
+  - User edits the page text directly
+  - On **Save**, the system opens a **“Change → Claims”** modal that auto-detects what changed and proposes structured updates:
+    - which **claims/factgroups** will be updated/created/retired
+    - what **evidence** (if any) supports the new text
+    - what **pages/sections** will be impacted
+  - User confirms → it becomes claims updates → pages regenerate
+  - If evidence is missing, it creates a **verify card** (“needs evidence / human attestation”)
+
+- **Request change (everyone else, and for ambiguous changes)**:
+  - Creates a gap/rewrite/wrong-placement card
+  - Routes to the owner/team lead for approval
+
+So the page stays editable for the right people, but *no edit bypasses claims*.
+
+---
+
+### 2) Those “anchor entities / traversal path / retrieval pack / factgroups” are about **how the page was generated**, not “one long AI page”
+You don’t need one single long exhaustive page.
+
+Instead, the AI uses a **bundle of structured context** assembled at runtime (and stored for transparency). The terms mean:
+
+#### **Anchor entities**
+The “main things” the page/section is about.
+- Example on a human page section “Checkout reliability”:
+  - anchors: `System: Checkout`, `Service: Payments`, `Team: Platform`
+
+These anchors tell the system **where in the graph to start**.
+
+#### **Traversal path**
+The exact graph hops used to gather related context.
+- Example:
+  - `Service: Payments -> owned_by -> Team: Platform`
+  - `Service: Payments -> depends_on -> Integration: Stripe`
+  - `System: Checkout -> includes -> Service: Cart`
+
+This is how GraphRAG avoids “random top‑k chunks” and pulls the *right neighborhood*.
+
+#### **Retrieval pack**
+The concrete inputs that were fed into the LLM to write that paragraph/section/page.
+Usually a mix of:
+- **Entity pages** (AI-structured, per service/system/decision/ticket)
+- **Claims/factgroups** (canonical statements + verification state)
+- **Evidence excerpts** (quoted snippets from Slack/Jira/Confluence/GitHub-derived text)
+- Sometimes a small number of **vector chunks** found within the graph-scoped neighborhood
+
+Think of it as: “Show me exactly what the model saw.”
+
+#### **FactGroups used + verification status**
+This lists the canonical fact clusters that support the text, and whether they’re:
+- `validated` (treated as company truth)
+- `needs_verification`
+- `conflict`
+- `inferred`
+- etc.
+
+This is what enables “edit once, propagate everywhere.”
+
+---
+
+### 3) So what do AI agents actually read?
+They read **entity-centric structured pages** (service/system/decision/ticket pages) *plus* the relevant factgroups/evidence for the task.
+
+Not one mega-page—because mega-pages are slow, noisy, and hard to keep consistent. Entity pages + claim bundles are easier to retrieve, update, and verify.
+
+---
+
+### 4) How this looks in the UI (simple mental model)
+On a human concept page (e.g., “Observability Standards”):
+
+- Main content: clean, merged, human-friendly
+- A paragraph has:
+  - **Sources** tab → “proof”
+  - **AI Context** tab → “what the model used to write this”
+  - **Open entity view** → jump to `Service: Payments` (AI page) etc.
+
+This gives trust without maintaining two separate documentation trees.
+
+---
+
+If you answer one follow-up, I’ll lock the design:
+**For inline edits by team leads, do you want to require evidence (a quote/link) for every change, or allow “human attestation” as evidence (e.g., “I confirm this is true”) with a higher audit trail?**
+
+
+
+ok i think you misunderstood me in section 2
+I do not think we need that level of detail for debugging
+even if you show me all of that, there is nothing i can do about it, I am not gonna thow can i say oh ok that Traversal path for example is wrong? no. that almost never is the problem. usually the problem is in the final results output. and that is what I (human user) can read and report
+
+what i originally meant by human page - ai page - sources
+was that humans read in paragragh and conceprts merged and do not need all the details, for exmaple in a project page, saying that this is a feature for helping users pay in advnace and this is how it works and this is the owner of the feature and db used is mongodb, is probably enough for human reader, but that info is not enough for ai agent, and agent need to know maybe the detail of how that mongo is setup, what tables it has, how to connect to it, and more to be bale to do things. am i right? or I am worng and we do not have those info in one page and we make the ai agent go read different pages for exmaple one that is about detail of mongodb setup?
+also those info are not in pragraph, they are maybe in line by line statemeents.
+I am saying that those detailed exhastive details that AI agents use, it would be good to be bale to see and read them separetely if the engineer want to check stuff or if the agent does something wrong and the engineer wants to check why it happened, they be able to read that ai page and findout what the ai thought was true.
+for this I do not think goig into detail of Traversal path is going to help that engineer, he wants to know what does this ai think is true about that specific thing before running a task and after for debugging.
+
+
+that being said, I think for me, the creator, it is necessary to have visibility into what the result of pass 1 and pass 2 is, but also, the more detailed results of each step like the rag-graph step result, the first llm call result, and so on to be bale to see which part need change. I am not sure how this can be shown to me
+maybe these detial of traverasl path and stuff can go on a separate tab on those pages that i can see, so that I can copy and paste it to you and say this part i do not like, this is the detail of graph-rag on the page, tell me why this happened, also maybe we can have a separate database that stores the input (including the prompt and template used and sent to the llm api call) and output so that when i say I do not like this, you be bael to read that database and see what went wrong.
+If you can do this nicely in a separate place then I think we do not need to show that pass 1 and pass 2 under kb and kb childs can be these: Company / Engineering / Marketing / Legal
+
+and those pass 1, pass 2 and detail of steps in each pass can be on a separate item on the left menu maybe for me only to see (in the future we make it permission specific to me)
+
+
+
+
+### You’re right: engineers/debuggers care about “what the AI believed,” not the traversal mechanics
+I agree with your correction. For most users, **showing traversal paths is noise**. The useful transparency is:
+
+- **Human page**: merged narrative, minimal.
+- **AI page**: exhaustive, structured “belief state” (line-by-line facts + configs + interfaces + invariants).
+- **Sources**: the evidence excerpts.
+
+Traversal/query plans are only useful for *you as builder* occasionally, and even then should live in a “pipeline debugger” area, not on every page.
+
+---
+
+### Should AI knowledge be in one page, or split across many pages?
+Split across many, but make it feel like one.
+
+An agent shouldn’t rely on a single mega-page for “Project X”; it should pull a **bundle**:
+- `Project` (what/why/owner/status)
+- linked `Service/System` pages (APIs, deps, runbooks)
+- linked `DB/Storage` pages (schemas, connection, migrations, operational constraints)
+- linked `Env/CI/CD` pages (deploy, secrets, pipelines)
+- linked `Decision` pages (tradeoffs, constraints)
+- linked `Ticket/How-to` pages (task-specific plan)
+
+That’s how you get completeness without unreadable monsters. You can still present an engineer-friendly “AI view” that *aggregates* this bundle into one screen when needed.
+
+---
+
+### What “AI page” should look like (so you can read what the AI thinks is true)
+Instead of paragraphs, the AI view should be **structured + claim-backed**. Example for a service:
+
+- **Identity**
+  - name, repo, owner team/person, tier/criticality
+- **Interfaces**
+  - endpoints/events/cron jobs
+- **Dependencies**
+  - upstream/downstream, integrations
+- **Data**
+  - databases used, collections/tables, key schemas, indexes (as far as evidence supports)
+- **Operational**
+  - env vars, secrets references, deploy steps, dashboards, alerts
+- **Invariants / constraints**
+  - “must be idempotent”, “UTC everywhere”, etc.
+- Each line item links to **Sources** and has `direct vs inferred` + confidence.
+
+This matches your “line-by-line statements” idea.
+
+---
+
+### Where do Pass 1 / Pass 2 and step-by-step outputs live?
+Your latest idea is the cleanest UX:
+
+#### Left menu (for normal users)
+- **KB** → Company / Engineering / Marketing / Legal (human projection)
+- **Verify**
+- **Tickets**
+- **How-to**
+- **Execute**
+- **Chat**
+
+#### Builder-only (or admin) left menu
+- **Pipeline / Runs**
+  - pick a run (Lunch batch / EOD batch)
+  - see artifacts per step:
+    - input snapshot
+    - graph build output summary (and optionally raw export)
+    - page plan output
+    - per-page retrieval bundles (what context was used)
+    - Pass 1 pages
+    - Pass 2 factgroups + verify cards
+    - prompts/templates + model + cost/timing
+  - each artifact has “copy JSON” and “open in UI” affordances
+
+This gives you exactly what you want: when you say “I hate this output,” you can open the run, see the exact prompt/template/context, and we can diagnose why it happened.
+
+---
+
+### How engineers see “AI detail” without cluttering KB
+On any KB page, add a simple toggle set:
+- **View: Human | AI | Sources**
+  - **Human**: merged narrative
+  - **AI**: the structured belief view (aggregated bundle for the page’s anchors)
+  - **Sources**: evidence excerpts grouped by claim
+
+No traversal mechanics by default. If you want it, put **“Debug”** behind a builder-only toggle inside the Pipeline area.
+
+---
+
+### Two decisions to confirm (these determine the final shape)
+1) **Do you want “AI view” to be a generated aggregation per page** (pull related service/db/env pages into one AI screen), or do you prefer **pure navigation** (click out to separate entity pages like Service/DB/Env)?
+2) For “human attestation” edits by team leads: should those become **direct truth** immediately, or **direct-but-attested** (counts as truth, but marked as “human asserted” with audit trail and optionally requires a second approver for high severity)?
+
+
+Do you want “AI view” to be a generated aggregation per page (pull related service/db/env pages into one AI screen), or do you prefer pure navigation (click out to separate entity pages like Service/DB/Env)? click is more readable and better
+2) For “human attestation” edits by team leads: should those become direct truth immediately, or direct-but-attested (counts as truth, but marked as “human asserted” with audit trail and optionally requires a second approver for high severity)? for now, we do not define roles yet, so make it so that everyone can do the edit in place and send a pr, that pr becomes a verify card for the reviewer. just like how doc pages in github works and if you edit, it becomes a pr that one person need to verify. but for now for us any person can creat those and anyone can accept the pr.
+
+this is what I think should be:
+
+KB → Company / Engineering / Marketing / Legal (human projection)
+Verify
+Tickets
+How-to
+Execute
+Chat
+KB admin:
+
+inside that KB admin we have pass1 and pass 2
+and in that pass 1 and pass 2, show the steps:
+step 1: what was done and what was the result, this is human readable, so i should see that the instruction given was to read this and that and do this and that and use this prompt and then this result came from this step.
+this is what I know and understnad, and want to see, if you think that anything else is also useful for human to read and point out that for example that artifact or graph is bad ( cna human undetsnad and do that?) then add that there.
+make sure that these are stored in a sepearete data base so that wehn i point out at a problem and tell you, you be bale to pull that graphs and artifact and stuff and read all the logs and steps and expalin to me (humna) why it went wrong and suggest what can fix this without ruining the other parts that are working.
+
+
+### Locked in (good calls)
+- **AI view = click-through navigation** to entity pages (Service/DB/Env/Decision/Ticket), not an aggregated mega-screen.
+- **Edits = PR-style workflow**: anyone can propose edits; the proposal becomes a **verify/review card**; anyone can approve for now.
+
+---
+
+### Recommended final left menu
+- **KB**
+  - Company / Engineering / Marketing / Legal (human projection)
+- **Verify**
+- **Tickets**
+- **How-to**
+- **Execute**
+- **Chat**
+- **KB Admin** (builder/debugger area)
+
+This cleanly separates “product UX” from “pipeline observability.”
+
+---
+
+### What “KB Admin” should contain (Pass 1 / Pass 2 + step artifacts)
+Inside **KB Admin**:
+
+#### A) Runs (top-level)
+- A list of runs: `Lunch 2026‑02‑25`, `EOD 2026‑02‑25`, etc.
+- Each run shows: duration, cost, model usage, success/fail, counts (docs, entities, pages, verify cards).
+
+#### B) Pass 1 (for a selected run)
+Show steps as **human-readable cards**, each with three tabs:
+- **Summary (human readable)**: “What we did, why, key outputs”
+- **Inputs**: prompt/template version + parameters (what the LLM was asked to do)
+- **Outputs**: the artifact (rendered nicely) + “copy raw JSON”
+
+Suggested Pass 1 steps to expose:
+1) **Input snapshot**
+   - counts by source type; list of docs; any parsing warnings
+2) **Entity extraction**
+   - counts by entity type; top entities; merge stats; obvious misclassifications
+3) **Graph build**
+   - graph stats (nodes/edges); top connected components; missing-owner warnings
+   - (optional raw export download for you, not for normal users)
+4) **Page plan**
+   - which pages will be created + why (which entities triggered them)
+5) **Per-page generation results**
+   - page preview + structured items
+6) **Verify cards created**
+   - list grouped by severity/type; assignment coverage (“0 unassigned” should be a goal)
+
+#### C) Pass 2 (for the same run)
+Suggested steps:
+1) **FactGroup clustering / dedupe**
+   - before/after counts; biggest groups; “likely duplicates still remaining”
+2) **Conflict detection**
+   - conflicts found + which pages impacted
+3) **Evidence upgrade (low-confidence re-read)**
+   - how many were upgraded; how many stayed low confidence
+4) **Canonicalization + propagation**
+   - what changed across pages as a result
+5) **Final outputs**
+   - pass2 pages + final verify queue
+
+This matches your goal: you can point to a specific step and say “this output is wrong,” and we can fix that step without breaking everything else.
+
+---
+
+### “Separate database” requirement (so Arch2 is deletable + debuggable)
+Do **separate storage for Architecture 2** and keep it run-scoped:
+
+- **Primary KB2 store**: pages, entities, claims, factgroups, verify cards
+- **Run artifacts store** (could be same Mongo DB but separate collections, or a separate DB entirely):
+  - `kb2_runs`
+  - `kb2_run_steps` (one doc per step with human summary + pointers)
+  - `kb2_run_artifacts` (raw JSON blobs: page plan output, graph snapshot, prompts, retrieval packs if you keep them, etc.)
+  - `kb2_llm_calls` (model, prompt, response, token counts, cost, timestamps)
+
+Key point: store **prompt + template version + inputs + outputs** per step. Then when you complain about a result, we can deterministically trace why.
+
+---
+
+### Can humans understand graphs/artifacts?
+- **Most humans**: no, and they shouldn’t need to.
+- **You (builder)**: yes, but only if presented as *summaries + diffable artifacts*, not raw dumps.
+So in KB Admin:
+- default to **summaries + counts + top examples**
+- keep “raw export” behind a click
+
+---
+
+### How PR-style edits fit
+On any KB page (human projection):
+- **Edit** → creates a “proposed change” object (diff)
+- Reviewer approves → system turns diff into **claim/factgroup updates** + regenerates impacted pages
+- If the edit introduces new info without evidence, it becomes **attested** and can optionally create a follow-up “needs evidence” card later.
+
+---
+
+### One more decision (small but important)
+In **KB Admin**, do you want to debug by:
+- **Run-first** (pick a run → see all steps) — simplest, recommended
+- or **Page-first** (open a page → see which run/steps created it) — useful, but more work
+
+If you pick run-first now, you can add page-first later.
+
+
+One more decision (small but important)
+In KB Admin, do you want to debug by:
+Run-first (pick a run → see all steps) — simplest, recommended
+or Page-first (open a page → see which run/steps created it) — useful, but more work
+If you pick run-first now, you can add page-first later.
+
+i think it is best if i could have the option to run the whole pass 1, then pass 2 and also the option to run step 1 of pass 1 and then step 2 of pass 1
+that way I cna run it faster and edit and run again. or use the result of step 2 and run step 3 multiple times.
+
+keep in mind that we want to use the sme input that was used in the brewandgo to create brewandgo2
+
+if you do not have any other questions.
+give me a complete plan, explain in detail what we talked about and what should the final product look like and what should be done to get there.
+
+
+### Debug mode choice
+Do **run-first** as the primary UX, but implement it as a **step-addressable pipeline** so you can:
+- run **Pass 1 end-to-end**
+- run **Pass 2 end-to-end**
+- run **Pass 1 step N only** (reusing cached artifacts from step \(N-1\))
+- rerun **step 3** multiple times while holding step 2 fixed
+
+This gives you the “fast iterate on a single step” workflow you want while keeping the UI simple.
+
+---
+
+## Complete plan (what the final product should look like + what to build)
+
+### 0) End state: what Pidrax v2 slice (/brewandgo2) becomes
+You will have **two parallel architectures**:
+
+- **/brewandgo**: Architecture 1 (unchanged)
+- **/brewandgo2**: Architecture 2 (graph-first), fully separable storage, pipeline, and UI
+
+Architecture 2’s purpose is to produce a KB that:
+- is readable and not overwhelming for humans (concept hubs + curated pages)
+- is detailed and structured enough for AI agents (entity pages + claims)
+- has a verification workflow that can update duplicates everywhere
+- supports Jira-like ticketing and “how-to implement” as first-class objects
+- provides a builder/admin area to debug each pipeline step and rerun steps quickly
+
+---
+
+## 1) Information architecture (left menu + internal navigation)
+
+### Main left menu (normal users)
+- **KB**
+  - Company
+  - Engineering
+  - Marketing
+  - Legal
+- **Verify**
+- **Tickets**
+- **How-to**
+- **Execute**
+- **Chat**
+- **KB Admin** (builder-only later; visible for you now)
+
+### KB (human projection)
+Within each of Company/Engineering/Marketing/Legal:
+- **Overview** (concept hubs; merged, curated, fewer pages)
+- **Projects & Tickets** (work layer: projects, tickets, how-to)
+
+### AI transparency for engineers (without a separate “Docs-AI tree”)
+On KB pages and entity pages, add view toggles:
+- **Human** (clean narrative)
+- **AI** (structured facts / fields / line items)
+- **Sources** (evidence excerpts)
+
+AI view is **click-through** to entity pages (service/system/db/env/decision/ticket), not one mega-page.
+
+---
+
+## 2) Core data model (the backbone that enables everything)
+Architecture 2 stores one “truth layer” and renders multiple projections.
+
+### Truth layer objects
+- **InputDoc**: snapshot of the input items (from the shared input endpoint)
+- **Entity**: person/team/system/service/integration/project/customer/process/decision/ticket (+ expand later)
+- **GraphEdge**: relationships (ownership, deps, integrates_with, part_of, etc.)
+- **Claim**: atomic statement with:
+  - `truth_status`: `direct` (explicit in input) vs `inferred`
+  - `confidence`, `severity`, `owner`
+  - `entity_refs[]`
+  - `evidence_refs[]` (source excerpts)
+- **FactGroup / VerificationCard**: clusters duplicates/conflicts so **one card controls many occurrences**
+- **Page + PageItemOccurrence**: page-owned items for speed, but each occurrence references a `factGroupId` so edits/verification propagate.
+
+This satisfies your key constraint: pages can duplicate for readability, but verification stays centralized.
+
+---
+
+## 3) Architecture 2 pipeline (graph-first, step-addressable, pass1/pass2)
+
+### Shared input constraint
+Architecture 2 uses the **same input data** as `/brewandgo`, but does not depend on Arch1 internals:
+- `/brewandgo2` pulls from `http://localhost:3000/brewandgo/kb`
+- It **snapshots** into its own `pidrax2_inputs` per run
+- Everything else runs off that snapshot (reproducible debugging)
+
+### Pass 1 (high recall)
+Goal: generate a comprehensive structured KB quickly.
+
+Step outline (each step produces a stored artifact):
+1) **Input snapshot** (freeze what you used)
+2) **Entity extraction** from InputDocs
+3) **Graph build** (entities + edges)
+4) **Page plan** (deterministic rules + optional LLM naming/grouping)
+5) **GraphRAG retrieval + page generation**
+6) **Initial verify cards** (inferred/low confidence/conflict/missing evidence) with owner assignment (must always assign a person; fallback to default if needed)
+
+### Pass 2 (refine)
+Goal: dedupe/canonicalize, detect conflicts, and re-read low-confidence items to improve evidence.
+
+Step outline:
+1) **Dedupe → FactGroups**
+2) **Conflict detection → verification grouping**
+3) **Evidence upgrade** (targeted second retrieval for low-confidence)
+4) **Propagation** (update all page occurrences linked to the factgroups)
+5) **Final Pass 2 outputs** (pages + verify queue)
+
+---
+
+## 4) Editing model (PR-style + verify)
+### Default: PR-like edits everywhere
+- Any user can propose an edit on a KB page or an AI entity page.
+- Saving creates a **proposed change** (diff).
+- That diff becomes a **review/verify card**.
+- Any user can approve/reject for now (roles later).
+- On approval, the system converts the diff into **claim/factgroup updates** and regenerates impacted pages.
+
+### If users think something is wrong but don’t know how to edit
+- **Request change** on paragraph/section/page:
+  - creates a gap/rewrite/wrong-placement card
+  - can mention someone
+  - optionally triggers a system suggestion (“here are the claims we think should change”)
+
+This covers both “small fix” and “not sure what to change” cases.
+
+---
+
+## 5) Tickets + How-to + Execute (product shape)
+### Tickets (Jira replacement)
+- Kanban/sprint board, assignees, priorities, customizable statuses
+- Sub-views by source (From Jira / Conversations / Feedback / Manual)
+- Required links to KB entities (system/service/decision) to keep tickets grounded
+- Discussion thread + AI assist
+
+### How-to
+- One per ticket (or versioned), strict template: options/tradeoffs, plan, rollout, tests, observability, risks
+- Links to entity pages + relevant decisions
+- This becomes the main input to “Execute” later
+
+### Execute (demo now)
+- UI placeholder: “Connect your agent”
+- Later: agent run timeline + “agent question → human answers” loop
+
+---
+
+## 6) KB Admin (builder workflow + step reruns + artifact visibility)
+### What KB Admin contains
+- **Runs list** (Lunch/EOD), pick a run
+- For a run:
+  - **Pass 1** steps with artifacts
+  - **Pass 2** steps with artifacts
+  - per step:
+    - human-readable summary (“what we did”)
+    - inputs (prompt/template versions, parameters)
+    - outputs (rendered + raw JSON copy)
+    - timing/cost metrics
+
+### Step-addressable execution (your requirement)
+Implement runs so you can:
+- run pass1/pass2 end-to-end
+- run step 1 only, step 2 only, etc.
+- rerun step 3 multiple times using cached step 2 output
+
+Mechanically this means:
+- each step reads previous step artifact IDs
+- the runner checks “is artifact available?” else compute it
+- artifacts are immutable per run+step+attempt, so comparisons are easy
+
+---
+
+## 7) Storage separation (easy to delete Arch1 later)
+For Architecture 2:
+- Separate MongoDB collections (or separate DB) prefixed `pidrax2_*`
+- Separate Qdrant collection for embeddings (if used)
+- Store **all run artifacts** (inputs/prompts/outputs/logs) in Arch2 storage
+
+This ensures Arch2 stands alone and Arch1 can be deleted without breaking it.
+
+---
+
+## 8) Implementation plan (sequenced to reduce risk)
+1) **Create `/brewandgo2` route + UI shell** with the final left menu and empty screens.
+2) **Implement KB Admin → Runs + step artifacts UI** (even before the pipeline is perfect). This is your debugging cockpit.
+3) **Implement the step-addressable runner** + artifact storage:
+   - input snapshot step first
+   - then entity extraction + graph build
+4) **Implement Pass 1 page planning + generation** producing:
+   - human KB pages (concept hubs) and
+   - entity pages (service/system/decision/ticket) with AI view + sources view
+5) **Implement verify cards + assignment guarantee** (no unassigned)
+6) **Implement Pass 2 factgrouping + propagation**
+7) **Implement Tickets + How-to basic flows** (read-only first, then editable)
+8) Add **PR-style edits** and “request change” workflow
+9) Later: permissions/roles, execution pipeline, connectors beyond current input format
+
+---
+
+### Final check: the “compare side-by-side” requirement
+You’ll compare by simply navigating:
+- `/brewandgo` (Arch1 results)
+- `/brewandgo2` (Arch2 results)
+No special diff tooling needed now.
+
+---
+
+If you want, next I can write a **concrete step list** for Pass 1 and Pass 2 with exact artifact names, schemas you should store per step, and how each appears in KB Admin (so your engineers can implement it without ambiguity).
+
+
+Debug mode choice
+Do run-first as the primary UX, but implement it as a step-addressable pipeline so you can:
+run Pass 1 end-to-end
+run Pass 2 end-to-end
+run Pass 1 step N only (reusing cached artifacts from step 
+N
+−
+1
+N−1)
+rerun step 3 multiple times while holding step 2 fixed
+This gives you the “fast iterate on a single step” workflow you want while keeping the UI simple.
+
+from the beginning I want to be balet o run step 1 of pass 1 only as well, and then go to step 2 of pass 1 or say run the rest of pass 1 instead of running all the stes one by one. so I want all the options.
+
+your plan is good but not detaield enough and did not mention everything we talked about froexmple:
+has a verification workflow that can update duplicates everywhere
+the verification card should have at least one person assocaited with it
+
+also we talked about defining the categories and templates in detail so the llm has a easier job to do
+becuase we can brain storm and find what categories must exist, what should be in each category and page and what should not and clearly define the limits of them. like ehat goes in these: Company
+Engineering
+Marketing
+Legal
+
+lets talk about these first and then rewrite a detailed plan
+
+
+### Step runner options (yes — all of them)
+Agreed. From day 1 the runner should support **all**:
+- **Run Pass 1 step 1 only**
+- **Run Pass 1 from step N → end** (“run the rest”)
+- **Run Pass 1 end-to-end**
+- **Run Pass 2 step M only**
+- **Run Pass 2 from step M → end**
+- **Run Pass 2 end-to-end**
+- **Rerun a single step** multiple times while pinning upstream artifacts (step attempts)
+
+That’s just a UI/control layer over the same step-addressable artifacts model.
+
+---
+
+## Categories & templates (the “LLM guardrails”) — let’s lock these first
+Below is a concrete category system for **KB → Company / Engineering / Marketing / Legal** with:
+- what pages exist
+- what each page must contain (template sections)
+- what it must NOT contain (hard boundaries)
+- how it links to entities/tickets/decisions
+
+I’m optimizing for your goal: **human readable hubs + AI-usable detail via entity pages**, plus clean verification routing.
+
+---
+
+# Company (human projection)
+Purpose: stable, cross-company truth. Minimal operational churn.
+
+### Category: **Company Overview**
+**Example pages**
+1) `Company Overview`
+2) `How We Make Decisions (Operating Model)`
+
+**Template (must)**
+- Mission/product (what we build)
+- Who we serve (customers/segments)
+- What success means (north-star metrics if known)
+- How decisions are made (roles, rituals, artifacts)
+- Links: Org Map, Glossary, Key Systems, Key Policies
+
+**Must NOT**
+- Sprint/ticket status
+- Implementation details (“how to deploy”, DB schemas)
+- Temporary project timelines
+
+### Category: **Glossary**
+**Example pages**
+1) `Glossary`
+2) `Domain Glossary (Customer-facing terms)`
+
+**Template**
+- Term → definition
+- Synonyms / old names
+- Related entities (systems/services/processes)
+- “Common confusions” section
+
+**Must NOT**
+- Decisions (“we chose X”) unless linked to a Decision Record
+
+### Category: **Org & People**
+**Example pages**
+1) `Org Map`
+2) `People Directory`
+
+**Template**
+- Teams list, responsibilities
+- People pages are entity pages (owner, areas, contact, current focus)
+
+**Must NOT**
+- Personal opinions
+- Sensitive HR details (later permissions)
+
+### Category: **Clients / Customers (high-level)**
+**Example pages**
+1) `Customer Segments`
+2) `Key Customers (if demo needs it)`
+
+**Template**
+- Segment definitions
+- Success criteria and pain points
+- Links to feedback-driven tickets/projects (not details)
+
+**Must NOT**
+- Engineering implementation specifics
+
+### Category: **Onboarding (company-wide)**
+**Example pages**
+1) `New Hire Onboarding`
+2) `How We Communicate (Slack/Jira/Docs norms)`
+
+**Template**
+- Tooling norms
+- Where to find information
+- How to request changes / verify info
+
+**Must NOT**
+- Deep engineering setup (belongs in Engineering)
+
+---
+
+# Engineering (human projection)
+Two sub-areas exactly as you described:
+- **Engineering → Overview**
+- **Engineering → Projects & Tickets**
+
+## Engineering → Overview (concept hubs)
+Purpose: merged, readable, stable-ish “how engineering works here.”
+
+### Category: **Architecture**
+**Example pages**
+1) `Architecture Overview`
+2) `Core Systems & Boundaries`
+
+**Template**
+- System map (linked entities)
+- Key invariants (idempotency, timezone conventions, etc.)
+- Key constraints (scale, compliance)
+- “Where to look for details” (links to entity pages)
+
+**Must NOT**
+- Current sprint status
+- Ticket-by-ticket detail
+- Raw config dumps
+
+### Category: **Service & Ownership Catalog**
+**Example pages**
+1) `Service Catalog`
+2) `Ownership & Escalation Map`
+
+**Template**
+- Service list: owner, purpose, tier, key deps
+- Escalation rules
+- Links to service entity pages
+
+**Must NOT**
+- Full API specs or DB schemas inline (link to entity pages)
+
+### Category: **Integrations**
+**Example pages**
+1) `External Integrations Overview`
+2) `Payments Integrations Overview`
+
+**Template**
+- Integration list: provider, auth, failure modes, ownership
+- Links to integration entity pages + decisions
+
+**Must NOT**
+- Customer-specific secrets/credentials
+
+### Category: **Environments & CI/CD**
+**Example pages**
+1) `Deployments & Environments`
+2) `CI/CD & Release Process`
+
+**Template**
+- Environments, release flow, rollback expectations
+- Links to service runbooks/entity pages for specifics
+
+**Must NOT**
+- Per-service pipeline YAML pasted into hubs (link instead)
+
+### Category: **Observability & Operations**
+**Example pages**
+1) `Observability Standards`
+2) `Incident / Postmortem Process`
+
+**Template**
+- Standards checklist
+- Incident workflow and ownership
+- Links to service observability sections (entity pages)
+
+**Must NOT**
+- Live incident chatter
+
+### Category: **Engineering Process**
+**Example pages**
+1) `PR / Review / Quality Bar`
+2) `Planning (RFCs, estimation, execution)`
+
+**Template**
+- Process rules
+- “Definition of done”
+- How-to propose decisions
+
+**Must NOT**
+- Project-specific plans (belongs in Projects)
+
+### Category: **Decision Records (index hub)**
+**Example pages**
+1) `Decision Records Index`
+2) `Common Tradeoff Patterns`
+
+**Template**
+- Top decisions grouped by system/service
+- Conflicts/inferred decisions highlighted via Verify links
+
+**Must NOT**
+- Present a winner if conflicting; show conflict + route to Verify
+
+## Engineering → Projects & Tickets (work layer)
+### Category: **Projects**
+**Example pages**
+1) `Project: <Name>`
+2) `Project Retrospectives (Index)`
+
+**Template**
+- Goal, scope, milestones
+- Linked tickets
+- Linked services/systems
+- Key decisions
+- Risks + verify items
+
+**Must NOT**
+- Deep implementation step-by-step (belongs in How-to)
+
+### Category: **Tickets**
+(views: From Jira / Conversations / Feedback / Manual)
+**Example pages**
+1) `Ticket: <Title>`
+2) `Sprint Board` (view, not a page)
+
+**Template**
+- Workflow state, assignee(s), priority
+- Required links: system/service/decision
+- Discussion thread + AI assist
+- Linked how-to
+
+**Must NOT**
+- Unlinked tickets; enforce linking for usefulness
+
+### Category: **How-to Implement**
+**Example pages**
+1) `How-to: <Ticket X>`
+2) `How-to Patterns (Index)`
+
+**Template**
+- Options + tradeoffs
+- Proposed plan
+- Rollout + tests + observability
+- Open questions routed to Verify/mentions
+
+**Must NOT**
+- Merge into project hub; keep as its own artifact tied to ticket
+
+---
+
+# Marketing (human projection)
+Purpose: demo-ready and future-proof, but not overbuilt.
+
+### Category: **Positioning & Messaging**
+Pages: `Messaging House`, `Competitive Positioning`
+
+### Category: **Campaigns & Launches**
+Pages: `Launch Plan Template`, `Campaign Calendar`
+
+### Category: **Customer Insights**
+Pages: `ICP & Personas`, `Feedback Themes (from inputs)`
+
+Boundaries: no engineering implementation; link to tickets/projects when needed.
+
+---
+
+# Legal (human projection)
+Purpose: policy/contract/compliance knowledge.
+
+### Category: **Policies**
+Pages: `Security & Privacy Policy Summary`, `Data Handling Rules`
+
+### Category: **Contracts & Terms (summaries)**
+Pages: `Standard Terms Summary`, `Redlines / Negotiation Playbook (high level)`
+
+Boundaries: do not store sensitive raw contract text in demo; keep summaries + references.
+
+---
+
+## AI entity pages (what agents actually use)
+These are not “categories” in the human hub sense; they’re entity types with strict templates. Examples:
+
+- **Service entity page template**
+  - Purpose, owner, repo
+  - Interfaces (endpoints/events)
+  - Dependencies
+  - Data stores used (links to DB entity pages)
+  - Env/config expectations (no secrets, only references)
+  - Runbook/operational behaviors (as evidence allows)
+  - Decisions linked
+  - Open verify items
+
+- **DB entity page template**
+  - Type (Mongo/Postgres), ownership
+  - Connection method (where configured, how accessed)
+  - Schema summary (collections/tables as known)
+  - Migration strategy
+  - Risks/constraints
+
+- **Decision entity page template**
+  - Context, options, chosen (if validated), tradeoffs
+  - Evidence links
+  - Conflicts (if any) → verify card
+
+These AI pages are what give agents the detail you described (Mongo setup, schema, connection patterns), while human hubs stay clean.
+
+---
+
+## Verification workflow requirements (explicit)
+- **Every verify card must have ≥1 person**:
+  - Assignment rule: use graph ownership edges first (service owner, team lead, ticket assignee)
+  - Fallback: a configurable default “KB triage owner” (so it never becomes unassigned)
+- **One card updates duplicates everywhere**:
+  - Every page item occurrence references a `factGroupId`
+  - Approve/edit on the card → regenerate/patch all occurrences
+
+---
+
+## Questions to refine templates (so they fit your demo/company)
+Answer quickly; I’ll then rewrite the plan with exact Pass1/Pass2 steps + artifact schemas.
+
+1) **Engineering entity types**: besides `service/system/integration/decision/ticket`, do you want first-class `database` and `environment` entities now, or later?
+2) **Service granularity**: is a “service” a deployable repo, a module, or can it be either?
+3) **Marketing/Legal depth for demo**: do you want them mostly as static templates, or do you want the pipeline to actually populate them from input data too (even lightly)?
+
+
+one problem i have seen before was that 
+Who we serve (customers/segments)
+the engineering team was mentioned under org chat and people and also under clients.
+we should help the llm to figure out that not every human name is client and client means external, for b2c, like apps, client means a lot of people that we probably should group them by wehre these user are for exmaple apple users or android user maybe, and for b2b, the client is the company name and meybe we should add the person in there who is point of contact and more.
+
+What success means (north-star metrics if known)
+I do not think this should be a must, a lot of companies do not have that and we do not need this info either and do not watn to force them to fill it for us,.
+
+i think the glosary for an engineering team can be minimal, we do not want to write a dictionary for them.
+I think this is too much info:
+Category: Glossary
+Example pages
+1) Glossary
+2) Domain Glossary (Customer-facing terms)
+Template
+Term → definition
+Synonyms / old names
+Related entities (systems/services/processes)
+“Common confusions” section
+
+People pages are entity pages (owner, areas, contact, current focus)
+yes and maybe we have their slack handle and email as well?
+
+
+Category: Architecture
+is it important to addecisions and tradeoffs here, many ai agents and coding agents failures are cuased becuase they cannot make these decisions and tradeoffs.
+
+
+I think overall you have a good idea, but i want more specific.
+there are 2 things that matter
+1- we want the templates and pages to have and ask for infromation that the ai agents are going to need to do their tasks or information that the employee are going to ask to make decision and do their tasks, so those are the things that must exsit in the overall kb, we should think in those terms and if this is working for them
+2-  in the human pages, we want to show the information that they already either dicusss in docs or messages themselves to that detail degree.
+if they never talked about time zone for exmaple and if the ai agent does not need that, then we do not want to yap and talk about a bunch of stuff. 
+based on this, lets go over details on pages and categories and explain to me why that part must exist and we should ask the llm to fill even if there are little to no information there because we need that,. which parts we should tell llm look if you find info add if not ignore nad its optional. and which part we must not include. be specific so we can drill this down and get to a detaield agreement.
+
+
+### Core guardrails (so you don’t get “yapping KB”)
+You’re describing two non-negotiables:
+
+1) **Agent usefulness**: templates must cover the *minimum set of facts* that agents + eng/PM need to execute work and make tradeoffs.  
+2) **Evidence-respecting UX**: human pages should **not invent structure/content** if the company never discussed it (unless it’s a required operational field like “owner”, in which case “unknown” becomes a verify task).
+
+So the right pattern is **conditional templates**:
+- **MUST (always show)**: only for fields that are operationally required for routing work (owner, criticality, repos, linked systems, decision status, etc.). If missing → create verify card.
+- **MUST-IF-PRESENT (include only if evidence exists)**: most narrative sections.
+- **OPTIONAL (include if present or strongly inferred)**: extra helpful info; never force it.
+- **MUST-NOT (forbidden)**: prevents drift (e.g., no ticket timelines in stable hubs).
+
+---
+
+## 1) Fixing the “client vs internal people/team” misclassification (be explicit)
+You’re right: this is a recurring failure mode. Solve it with **taxonomy + rules**, not hoping the LLM guesses.
+
+### Define “Client/Customer” precisely
+- **Customer (B2B)**: an *external company* you sell to or support. May have **contacts** (people) linked to it.
+- **User segment (B2C)**: a *group of end-users* (e.g., “iOS users”, “Android users”, “Power users”) — not individual humans.
+- **Internal**: employees, contractors, teams, squads, departments.
+
+### Hard rules (template + extractor)
+- **A person name is NEVER a “client” entity by itself.** A person can only be:
+  - `Person` (internal), or
+  - `ExternalContact` (only when linked to a specific B2B customer company)
+- **“Client/Customer” pages only list external entities**.
+- **If evidence is ambiguous** (“talked to Alex about onboarding”), default to **internal Person** and raise a **verify card** if it might be external.
+
+### Classification cues (fast heuristics you can bake in)
+- Internal Person signals: Slack handle, your email domain, “team”, “on-call”, “PR”, “repo”, “standup”, “sprint”, “deploy”.
+- B2B Customer signals: company suffixes (Inc/LLC), “contract”, “invoice”, “renewal”, “account”, “POC”, “customer asked”, “support ticket from”.
+- B2C segment signals: “users”, “cohort”, “iOS/Android”, “retention”, “funnel”, “conversion”, “MAU”.
+
+**Why this must exist**: it prevents pollution across Company/Clients/Org and stops agents from making absurd assumptions (e.g., treating an engineer as a customer stakeholder).
+
+---
+
+## 2) Glossary: keep it minimal and *usage-driven*
+Agree. Don’t build a dictionary.
+
+### Glossary should be OPTIONAL + small by default
+**Include only terms that meet one of these:**
+- appear frequently across sources, *and*
+- are ambiguous / overloaded, *or*
+- are critical for decision-making (e.g., “promotion multiplier cap”, “favorite store persistence”, “pass1 vs pass2 meaning”)
+
+**Must NOT**
+- “domain glossary” unless you actually have recurring domain terms.
+
+**Why it exists at all**: agents fail on internal vocabulary mismatches; a tiny “top 20 ambiguous terms” helps a lot.
+
+---
+
+## 3) “North star metrics” should be OPTIONAL
+Agree. Don’t force it.
+
+- In `Company Overview`, make “Success metrics” **OPTIONAL** and only show if present.
+- If absent, don’t create filler; at most create a **gap verify card** only if PM/lead explicitly asked for it (otherwise ignore).
+
+---
+
+# Category & page agreement (more specific, with MUST vs OPTIONAL vs FORBIDDEN)
+
+Below is a tighter set that’s oriented around **what agents + eng/PM actually need**. I’ll focus on Company + Engineering since that’s your top users; Marketing/Legal can stay light for demo.
+
+---
+
+## A) Company
+
+### Page: `Company Overview` (concept hub)
+**MUST**
+- **What the company/product is** (1–3 paragraphs or bullets)
+- **Who we serve** but ONLY as:
+  - B2B customers (companies), or
+  - B2C user segments (not names)
+  - If unknown → omit (no filler)
+
+**OPTIONAL**
+- Success metrics (only if present)
+- High-level operating cadence (if present)
+
+**MUST-NOT**
+- Any internal team/person listed as a client/customer
+- Engineering implementation details
+
+**Why it must exist**: sets context for PM tradeoffs and agent prioritization.
+
+---
+
+### Page: `Org & Ownership Map`
+**MUST**
+- Teams and responsibilities (even if sparse)
+- Links to People entities
+
+**OPTIONAL**
+- Slack handles + emails (yes, include if present; extremely useful for routing verify/tickets)
+
+**MUST-NOT**
+- HR/confidential info
+
+**Why it must exist**: verification ownership routing and “who to ask” is foundational.
+
+---
+
+### Page: `Onboarding (Company)`
+**MUST-IF-PRESENT**
+- Where to find docs, how decisions are recorded, how to request changes
+
+**OPTIONAL**
+- Tool norms (Slack/Jira conventions)
+
+**Why it must exist**: reduces meetings; aligns with your mission.
+
+---
+
+### Page: `Customers / User Segments` (only if you actually have it in data)
+**MUST-IF-PRESENT**
+- For B2B: company list + POC (as `ExternalContact` linked to the company)
+- For B2C: segment list + definitions
+
+**MUST-NOT**
+- Internal people/teams
+
+**Why it exists**: ties customer feedback → tickets → decisions.
+
+---
+
+## B) Engineering (the critical one)
+
+### Engineering → Overview (concept hubs, human-readable)
+
+#### Page: `Architecture Overview`
+**MUST**
+- System/service map at high level (names + purpose + ownership if known)
+- “Key constraints & invariants” (only those supported by evidence or critical for agents)
+
+**OPTIONAL**
+- Known tradeoff patterns (if evidence exists)
+
+**MUST-NOT**
+- Ticket-by-ticket info
+- Implementation deep details (belongs in entity pages)
+
+**Why it must exist**: PM+Eng need a shared mental model; agents need the “shape” to choose the right entities.
+
+---
+
+#### Page: `Service Catalog & Ownership`
+**MUST**
+- List of services/systems with:
+  - owner (or “unknown” → verify card)
+  - purpose
+  - repo link if known
+
+**OPTIONAL**
+- Criticality tier, on-call rotation
+
+**MUST-NOT**
+- Full API specs inline
+
+**Why it must exist**: it’s the router for verification, ticket linking, and agent context selection.
+
+---
+
+#### Page: `Engineering Decision Records (Index)`
+**MUST**
+- Index/grouping of decisions by system/service/project
+- Conflicts must produce verify cards (no “winner” without verification)
+
+**OPTIONAL**
+- “Common tradeoffs” summary IF you can cite multiple decisions that show a pattern
+
+**MUST-NOT**
+- “We chose X” if conflict exists and not verified
+
+**Why it must exist**: you explicitly said agents fail on tradeoffs/decisions. This is where you centralize them.
+
+---
+
+#### Page: `Engineering Practices (How we work)`
+**MUST-IF-PRESENT**
+- PR/review norms, definition of done, release expectations
+
+**OPTIONAL**
+- Testing standards, incident process (but only if in data)
+
+**Why it exists**: agents need policy constraints (e.g., “no schema changes without migration plan”).
+
+---
+
+### Engineering → Projects & Tickets (work layer)
+
+#### Page type: `Ticket`
+**MUST**
+- Assignee(s), status, priority
+- Required links:
+  - at least one `Service/System`
+  - if it involves tradeoff → linked `Decision` or create a new “pending decision” verify card
+- Discussion thread
+
+**OPTIONAL**
+- Source classification (Jira vs conversation vs feedback)
+
+**Why it must exist**: execution pipeline depends on tickets being grounded to entities.
+
+---
+
+#### Page type: `How-to Implement` (linked 1:1 with ticket initially)
+**MUST**
+- Goal + non-goals
+- Plan (steps)
+- Rollout + testing + observability impacts (only if known; otherwise create verify/gap items)
+- “Open questions” section that can spawn verify cards
+
+**OPTIONAL**
+- Alternatives + tradeoffs (include when there’s evidence or debate)
+
+**Why it must exist**: this is the handoff artifact to Claude Code-type agents.
+
+---
+
+## C) Entity pages (AI-detail pages engineers can inspect)
+This answers your key point: *engineers want to see what the AI believes is true*.
+
+### Service entity page (AI view)
+**MUST**
+- Owner
+- Purpose
+- Repo(s)
+- Dependencies (as known)
+- Data stores used (linked DB entities if you add them)
+
+**MUST-IF-PRESENT**
+- How to run locally
+- Config/env vars (never secrets, only names)
+- Interfaces (endpoints/events)
+- Runbook behaviors
+
+**Why it must exist**: agents need this to implement safely; engineers use it to debug “why the agent did that”.
+
+### Database entity page (recommend making DB a first-class entity *now*)
+Because your example is Mongo connection/schema. If you don’t model DB entities, you’ll get messy service pages.
+
+**MUST**
+- DB type + purpose + owner
+- Where it’s used (linked services)
+- Connection approach (high-level, no secrets)
+
+**OPTIONAL**
+- Known collections/tables and key fields (only if evidence exists)
+
+**Why it must exist**: avoids stuffing infra detail into unrelated pages and makes agent retrieval cleaner.
+
+---
+
+## 4) What the LLM should do when info is missing (avoid yapping)
+Put this rule everywhere:
+
+- **If no evidence for a section → omit the section entirely**, *except* for a small set of operational fields:
+  - owner, linked entities, decision status, ticket links
+  - if those are missing → create verify card(s)
+
+And for “inference”:
+- If inferred and action-relevant (ownership, dependency, decision) → include but mark `inferred` and create verify card.
+- If inferred and low value (speculative metrics, generic best practices) → do not include.
+
+---
+
+## 5) Verification workflow requirements (explicit, as you requested)
+- **Every verify card must have ≥1 person**
+  - primary assignment: from ownership edges (service owner, project lead, ticket assignee)
+  - fallback: “KB triage owner” (so it never becomes unassigned)
+- **One verify card updates duplicates everywhere**
+  - occurrences reference a `factGroupId`
+  - approving/editing a card regenerates/patches all occurrences
+
+---
+
+### Three quick clarifying questions to finalize the template contract
+1) For Engineering, do you want **Database** and **Environment** as first-class entities in v1 of Arch2? (I recommend yes for DB at least.)
+2) For “decisions”, do you want a distinct object for **“Pending decision”** (unresolved tradeoff) separate from “Decision record”?
+3) When a section is empty: should the UI **hide it entirely**, or show a subtle “No data yet” placeholder only on **AI view** (not on human view)?
+
+
+
+this is must:
+Slack handles + emails (yes, include if present; extremely useful for routing verify/tickets)
+
+there is not how to find doc anymore, they ask in the chat of pidrax:
+Page: Onboarding (Company)
+MUST-IF-PRESENT
+Where to find docs, 
+
+
+wehre does the dicision and trade off detail go?
+
+1) For Engineering, do you want Database and Environment as first-class entities in v1 of Arch2? (I recommend yes for DB at least.) YES
+2) For “decisions”, do you want a distinct object for “Pending decision” (unresolved tradeoff) separate from “Decision record”? YES
+3) When a section is empty: should the UI hide it entirely, or show a subtle “No data yet” placeholder only on AI view (not on human view)? if it is a must, then the human should see that it is empty, if it is optional then hide it
+
+
+if you do not have any other question i want to discuss somehting
+
+
+
+### Updates based on your answers (locked)
+- **People pages MUST include** Slack handle + email if present. (Agreed—this is foundational for routing verify/tickets.)
+- **Onboarding page should NOT say “where to find docs.”** Instead it should say “use Pidrax chat” + how to ask/route questions.
+- **DB + Environment are first-class entities** in Arch2 v1.
+- **Decisions split into two objects**:
+  - **Pending Decision** (unresolved tradeoff / needs a call)
+  - **Decision Record** (resolved / chosen)
+- **Empty sections UX rule**:
+  - **MUST sections**: show “empty / unknown” (human sees the gap)
+  - **OPTIONAL sections**: hide entirely
+
+---
+
+## Where do decision + tradeoff details go? (clean, non-duplicative placement)
+They live in **three places**, each with a different purpose:
+
+### 1) **Decision entity pages (primary home)**
+This is the canonical place for tradeoffs.
+- **Decision Record** page template:
+  - Context
+  - Options considered
+  - Tradeoffs (pros/cons)
+  - Decision (chosen option) + rationale
+  - Implications (what this affects)
+  - Linked entities (services/systems/db/env)
+  - Evidence + verification status
+- **Pending Decision** page template:
+  - The question to decide
+  - Options + tradeoffs (even if incomplete)
+  - Who should decide (owner(s))
+  - Deadline/urgency (optional)
+  - Evidence
+  - Verify thread/discussion
+
+**Why**: agents and humans can reliably find “why we chose X” in one standard place.
+
+### 2) **Engineering → Overview → Decision Index (human hub)**
+This is *not* where details live; it’s the navigational hub.
+- Shows:
+  - Recent/top decisions
+  - Decisions grouped by service/system/project
+  - Conflicts/pending highlighted
+
+**Why**: reduces page sprawl while keeping decisions discoverable.
+
+### 3) **Inline “Decision refs” on Service/System/Project pages (secondary)**
+Service/System pages should include a small section:
+- “Key decisions affecting this entity” (links only, 1–5 items, not full tradeoffs)
+
+**Why**: keeps entity pages actionable without duplicating full rationale everywhere.
+
+---
+
+## Onboarding (Company) page template (revised)
+**MUST**
+- How to ask questions in Pidrax Chat (examples)
+- How to request a change (PR/edit flow)
+- How verification works (what to do when you’re assigned a card)
+- How to mention people / route to owners
+
+**OPTIONAL**
+- Tooling norms (if present in data)
+
+**MUST-NOT**
+- “Where docs live” (you’re replacing that with Pidrax chat)
+
+---
+
+## One small clarification (so templates don’t fight your UX)
+For MUST-but-empty fields like “Owner” or “Slack handle”:
+- Do you want the UI to show **“Unknown → Create verify card”** as a button inline?
+- Or show “Unknown” and rely on the Verify queue?
+
+If that’s good, go ahead—what’s the thing you want to discuss next?
+
+
+
+it should show “Unknown” and it should have created verify card itself and wait for it to be verified 
+
+create the detaield plan, explain everything we talked about here
+
+
+
+
+## Detailed plan (Architecture 2: graph-first, parallel to current, debuggable, human+AI views)
+
+### Goals (what we’re building)
+- **Primary users**: Engineering + PM.
+- **Main product goal**: a **company knowledge graph + verified claims** that captures both documented and “unwritten” knowledge (inferred from behavior like GitHub patterns), so humans and AI agents can execute work without meetings.
+- **Side effect**: replace Jira + Confluence with one system (KB + tickets + decisions + execution).
+- **Constraint**: Architecture 2 must run **alongside** Architecture 1:
+  - Arch1 stays at `/brewandgo` unchanged.
+  - Arch2 lives at `/brewandgo2` with **separate storage**, so either architecture can be deleted later.
+- **Ingestion for now**: use the same **input text endpoint** already powering `/brewandgo` (`/brewandgo/kb`), snapshot it, then run Arch2 off the snapshot.
+- **Freshness**: lunch + end-of-day batch runs.
+- **Trust model**:
+  - **Direct truth**: explicitly stated in input sources.
+  - **Inferred**: derived from code/behavior; always reviewable and typically generates verification.
+  - Conflicts never auto-resolve; they are routed to verification.
+
+---
+
+## 1) Final UX / navigation (what the product looks like)
+
+### Left menu (normal users)
+- **KB**
+  - Company
+  - Engineering
+  - Marketing (light demo)
+  - Legal (light demo)
+- **Verify**
+- **Tickets**
+- **How-to**
+- **Execute** (demo placeholder now; real later)
+- **Chat** (ask anything; preferred “onboarding” entry point)
+- **KB Admin** (visible to you now; later permissioned)
+
+### KB content structure (human projection)
+Within Company/Engineering/Marketing/Legal:
+- **Overview** (concept hubs; merged narrative; fewer pages)
+- **Projects & Tickets** (work layer: projects, tickets, how-to)
+
+### Human vs AI vs Sources (visibility + trust)
+Every relevant page supports views:
+- **Human view**: paragraphs/merged concepts; not overwhelming.
+- **AI view**: structured “belief state” (line-by-line facts/fields), designed for agent reliability.
+- **Sources view**: evidence excerpts.
+
+Important: **AI view is click-through** to entity pages (service/db/env/decision/ticket/etc.), not one mega-page.
+
+### Empty sections rule (prevent yapping)
+- **MUST sections**: shown even if missing → show `Unknown` (and the system auto-created verify cards).
+- **OPTIONAL sections**: hidden entirely if no evidence.
+
+### Editing and “how users report something wrong”
+- **PR-style edits** (GitHub docs-like):
+  - Any user can propose an edit anywhere.
+  - Saving creates a diff (“PR”) and a **review/verify card** for approval (anyone can approve for now).
+  - On approval, diff is converted into **claim/factgroup updates**, then impacted pages regenerate.
+- **No manual “request change” required for small edits** (PR flow covers it).
+- If someone doesn’t know how to fix it, they can still create a gap card (optional), but the default is PR-style edits.
+
+---
+
+## 2) Category boundaries + templates (LLM guardrails)
+
+### Company (human pages)
+#### `Company Overview`
+- **MUST**: what the company/product is.
+- **OPTIONAL**: who we serve **only as**:
+  - **B2B** customers = external companies; may have external contacts linked.
+  - **B2C** segments = grouped user cohorts (iOS users, Android users, etc.).
+- **OPTIONAL**: success metrics (do not force).
+- **MUST-NOT**: internal people/teams listed as clients/customers.
+
+#### `Org & People`
+- **MUST**: teams + responsibilities.
+- **MUST**: person entity pages include **slack handle + email if present**.
+
+#### `Onboarding (Company)`
+- **MUST**: how to use Pidrax Chat to ask questions, how PR edits work, how verification works, how mentions/notifications work.
+- **MUST-NOT**: “where docs live” (Pidrax chat is the entry point).
+
+### Engineering (human hubs) — two areas
+#### Engineering → Overview (concept hubs)
+- `Architecture Overview` (system map + constraints, no deep configs)
+- `Service Catalog & Ownership` (owner required; unknown triggers verify)
+- `Decision Index` (index only; detail lives on decision pages)
+- `Practices` (PR/review/process norms if present)
+
+#### Engineering → Projects & Tickets (work layer)
+- `Projects` pages (status, scope, risks; links to tickets/decisions/entities)
+- `Tickets` (Jira replacement; workflow, assignee, required entity links)
+- `How-to Implement` (linked to ticket; options/tradeoffs/plan/rollout/tests)
+
+### Marketing / Legal (demo-friendly, light)
+Keep minimal, populated only if evidence exists. No forced filler.
+
+---
+
+## 3) Fixing the “client vs internal people” problem (must-have taxonomy)
+Hard taxonomy + rules:
+- **Person**: internal employee/contractor.
+- **Team**: internal group.
+- **Customer (B2B)**: external company.
+- **ExternalContact**: a person only when linked to a B2B customer.
+- **UserSegment (B2C)**: groups of users, not named individuals.
+
+Hard rule: **no human name becomes a “client/customer”** unless tied to a customer company as an external contact. Ambiguity → default internal person + create verify card if needed.
+
+---
+
+## 4) Core truth layer (data model that powers both human + AI projections)
+
+### Entities (first-class)
+- person, team, system, service, integration, project, ticket
+- **database** (YES)
+- **environment** (YES)
+- decision_record, pending_decision
+- customer, user_segment (optional in demo, but taxonomy exists)
+
+### Graph edges (examples)
+- `OWNED_BY`, `MEMBER_OF`, `DEPENDS_ON`, `INTEGRATES_WITH`, `RUNS_IN_ENV`, `USES_DATABASE`, `AFFECTS`, `BLOCKS`, `DECIDED_IN`, etc.
+
+### Claim (atomic statement)
+Fields:
+- `truth_status`: `direct` vs `inferred`
+- `confidence`, `severity`
+- `entity_refs[]`
+- `evidence_refs[]` (source excerpts)
+- `owner_person_ids[]` (must be ≥1 for verify routing)
+
+### FactGroup + VerificationCard
+- FactGroup clusters duplicates/conflicts across pages.
+- VerificationCard is the actionable review item:
+  - must have **≥1 person assigned**
+  - actions: validate, edit (creates PR-style change), reject
+
+### Page + Occurrences (page-owned for speed)
+- Pages are optimized for human reading (they can duplicate content).
+- Every item occurrence references a `factGroupId`, so one verification updates duplicates everywhere.
+
+---
+
+## 5) Verification workflow (explicit requirements)
+- The system must ensure:
+  - **Every verify card has at least one person**.
+  - If “owner” is unknown, the page shows `Unknown`, and the system creates a verify card automatically for ownership resolution.
+- Verification operates on factgroups:
+  - validating/editing one card updates all occurrences across KB pages, entity pages, tickets, how-to.
+
+---
+
+## 6) Pass 1 / Pass 2 meaning
+### Pass 1 (high recall)
+- Generate comprehensive structured knowledge quickly.
+- It’s okay to be noisy; verification and Pass 2 refine.
+
+### Pass 2 (refine)
+- Dedupe into factgroups, detect conflicts, improve low-confidence by re-reading targeted evidence, propagate canonical updates across pages.
+- Pass 2 also exists to “take another pass” on low-confidence items to find better evidence.
+
+---
+
+## 7) Architecture 2 pipeline (step-addressable + reproducible)
+
+### Key principle: snapshot shared input, then run independently
+- Step 0 always creates an **Input Snapshot** from `/brewandgo/kb` into Arch2 storage.
+- Every other step reads from that snapshot so runs are reproducible.
+
+### Pass 1 steps (example breakdown)
+1) **Input Snapshot**
+   - store raw input bundle + metadata
+2) **Chunking + Embeddings (Arch2 Qdrant collection)**
+   - optional early; depends on your existing setup
+3) **Entity extraction**
+4) **Graph build + relationship resolution**
+5) **Gap detection (graph-based)**
+6) **Page plan**
+   - deterministic rules first (entity-driven)
+   - optional LLM for naming/grouping within strict schema
+7) **GraphRAG retrieval packs per page**
+   - graph neighborhood + scoped vector retrieval
+8) **Generate pages**
+   - human pages (concept hubs)
+   - AI entity pages (service/db/env/decision/ticket/etc.)
+9) **Create verify cards**
+   - inferred, conflicts, low-confidence, missing owner/evidence
+
+### Pass 2 steps
+1) **Cluster to FactGroups**
+2) **Conflict detection + verification grouping**
+3) **Low-confidence evidence upgrade**
+4) **Citation repair / consistency checks**
+5) **Propagate canonical updates**
+6) **Finalize pass2 outputs**
+
+---
+
+## 8) KB Admin (builder cockpit) + execution controls
+
+### KB Admin structure
+- **Runs list**: shows lunch/EOD runs, status, timing, cost, counts.
+- Run detail:
+  - Pass 1 → steps list
+  - Pass 2 → steps list
+  - Each step shows:
+    - “What we did” (human readable)
+    - prompts/templates used (versioned)
+    - output artifact preview + raw JSON
+    - logs/metrics (tokens/cost/time)
+
+### Runner controls (must support all options from day 1)
+- Run **Pass 1 end-to-end**
+- Run **Pass 2 end-to-end**
+- Run **one step only** (e.g., Pass 1 step 1 only)
+- Run **from step N to end** (“run the rest”)
+- **Rerun step N** multiple times while pinning upstream artifacts (step attempts)
+- Use cached artifacts automatically when available
+
+This enables fast iteration: fix a prompt/template for step 5, rerun step 5+ without redoing snapshot/entity extraction.
+
+---
+
+## 9) Storage separation (deletable architecture)
+Architecture 2 must have separate storage from Arch1:
+- Separate Mongo collections or separate DB (recommended).
+- Separate Qdrant collection for Arch2 embeddings.
+- Separate “run artifacts” store that includes prompts/templates + outputs.
+
+This is what lets you later delete Arch1 without losing Arch2.
+
+---
+
+## 10) What to implement first (order that de-risks everything)
+1) `/brewandgo2` UI shell + left menu + basic pages.
+2) **KB Admin** with Runs list + step runner controls (even if steps are stubbed).
+3) Step 0 input snapshot from `/brewandgo/kb` into Arch2.
+4) Entity extraction + graph build + store artifacts.
+5) Page planning (entity-driven) + generate a small initial set:
+   - Engineering: Architecture Overview + Service Catalog hub
+   - Entity pages: a few services + DB + env
+6) Verification cards (enforce ≥1 person; unknown owner creates card).
+7) Pass 2 dedupe + propagation.
+8) Tickets + How-to minimal, then workflow board.
+9) PR-style editing + review cards.
+
+---
+
+If you want to discuss something now, say what it is and I’ll adapt the plan/templates around it.
