@@ -9,10 +9,27 @@ export type LLMUsage = {
 
 type SDKUsage = { inputTokens?: number; outputTokens?: number };
 
+const MAX_RETRIES = 5;
+const BASE_DELAY_MS = 2000;
+
+function isRetryable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return lower.includes("overloaded") || lower.includes("529") ||
+    lower.includes("rate") || lower.includes("too many") ||
+    lower.includes("timeout") || lower.includes("econnreset") ||
+    lower.includes("503") || lower.includes("500");
+}
+
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Tries generateObject first (structured output via tool calling).
  * If the model cannot satisfy the schema, falls back to generateText
  * with strong JSON-only instructions and robust extraction.
+ * Retries with exponential backoff on transient errors (overloaded, rate limit, etc.).
  */
 export async function structuredGenerate<T>(options: {
     model: Parameters<typeof generateObject>[0]["model"];
@@ -25,35 +42,63 @@ export async function structuredGenerate<T>(options: {
 }): Promise<T> {
     const { model, system, prompt, schema, maxOutputTokens = 16384, logger, onUsage } = options;
 
-    try {
-        const { object, usage } = await generateObject({
-            model,
-            system,
-            prompt,
-            schema,
-            maxOutputTokens,
-        });
-        if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
-        return object;
-    } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.log(`generateObject failed (${msg}), falling back to generateText`);
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+            const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+            logger.log(`Retry ${attempt}/${MAX_RETRIES} in ${(delay / 1000).toFixed(1)}s...`);
+            await sleep(delay);
+        }
+
+        try {
+            try {
+                const { object, usage } = await generateObject({
+                    model,
+                    system,
+                    prompt,
+                    schema,
+                    maxOutputTokens,
+                });
+                if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
+                return object;
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (isRetryable(err)) throw err;
+                logger.log(`generateObject failed (${msg}), falling back to generateText`);
+            }
+
+            const jsonDirective =
+                "\n\nCRITICAL: Respond with ONLY valid JSON. " +
+                "No introductory text, no explanation, no markdown code fences. " +
+                "Start your response with { or [ and end with } or ]. Nothing else.";
+
+            const { text, usage } = await generateText({
+                model,
+                system: system + jsonDirective,
+                prompt,
+                maxOutputTokens,
+            });
+            if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
+
+            const raw = extractJson<T>(text, logger);
+
+            try {
+                return schema.parse(raw) as T;
+            } catch {
+                logger.log("Fallback JSON did not pass schema validation, returning raw");
+                return raw;
+            }
+        } catch (err) {
+            lastError = err;
+            if (!isRetryable(err) || attempt === MAX_RETRIES) {
+                const msg = err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed after ${attempt + 1} attempts. Last error: ${msg}`);
+            }
+        }
     }
 
-    const jsonDirective =
-        "\n\nCRITICAL: Respond with ONLY valid JSON. " +
-        "No introductory text, no explanation, no markdown code fences. " +
-        "Start your response with { or [ and end with } or ]. Nothing else.";
-
-    const { text, usage } = await generateText({
-        model,
-        system: system + jsonDirective,
-        prompt,
-        maxOutputTokens,
-    });
-    if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
-
-    return extractJson<T>(text, logger);
+    throw lastError;
 }
 
 function extractJson<T>(raw: string, logger: PrefixLogger): T {

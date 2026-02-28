@@ -1,6 +1,21 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-opus-4-6": { input: 15, output: 75 },
+  "gpt-4o": { input: 2.5, output: 10 },
+};
+
+export function calculateCostUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  const pricing = MODEL_PRICING[model] ?? MODEL_PRICING["claude-sonnet-4-6"];
+  return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+}
+
 function getAnthropicProvider() {
     const apiKey = process.env.ANTHROPIC_API_KEY || '';
     if (!apiKey) {
@@ -36,6 +51,14 @@ export function getFastModel() {
 /** @deprecated Use getReasoningModel() or getFastModel() explicitly. */
 export function getPrimaryModel() {
     return getReasoningModel();
+}
+
+/**
+ * Cross-check model for extraction validation — uses a different provider
+ * (OpenAI GPT-4o) to catch blindspots the primary model misses.
+ */
+export function getCrossCheckModel() {
+    return getOpenAIProvider()(process.env.CROSS_CHECK_MODEL || 'gpt-4o');
 }
 
 /**

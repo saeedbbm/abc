@@ -18,6 +18,11 @@ const suggestedPrompts = [
 
 export default function ChatPage() {
   const { companySlug } = useParams<{ companySlug: string }>();
+
+  if (companySlug === "brewandgo2") {
+    const KB2ChatPage = require("@/components/pidrax/kb2/KB2ChatPage").KB2ChatPage;
+    return <KB2ChatPage companySlug={companySlug} />;
+  }
   const demo = isDemo(companySlug);
   const [messages, setMessages] = useState<ChatMsg[]>(demo ? chatMessages : []);
   const [input, setInput] = useState('');

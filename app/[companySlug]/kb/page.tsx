@@ -30,8 +30,18 @@ const confidenceLabels: Record<string, string> = {
   'needs-verification': 'Needs verification',
 };
 
+function KB2Gate() {
+  const { companySlug } = useParams<{ companySlug: string }>();
+  if (companySlug === "brewandgo2") {
+    const KB2KBPage = require("@/components/pidrax/kb2/KB2KBPage").KB2KBPage;
+    return <KB2KBPage companySlug={companySlug} />;
+  }
+  return null;
+}
+
 export default function KBPage() {
   const { companySlug } = useParams<{ companySlug: string }>();
+  if (companySlug === "brewandgo2") return <KB2Gate />;
   const demo = isDemo(companySlug);
   const [documents, setDocuments] = useState<KBDocument[]>(demo ? kbDocuments : []);
   const [selectedDoc, setSelectedDoc] = useState<KBDocument | null>(demo ? kbDocuments[0] : null);

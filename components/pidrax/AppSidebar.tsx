@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench, Database, ListTree } from 'lucide-react';
+import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench, Database, ListTree, Play } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
 import { isDemo } from '@/lib/is-demo';
@@ -26,11 +26,29 @@ const pidraxNavItems: NavItem[] = [
   { segment: 'admin', icon: Settings, label: 'Admin' },
 ];
 
+const arch2NavItems: NavItem[] = [
+  { segment: 'kb', icon: BookOpen, label: 'KB' },
+  { segment: 'verify', icon: CheckCircle, label: 'Verify' },
+  { segment: 'tickets', icon: ClipboardList, label: 'Tickets' },
+  { segment: 'howto', icon: Wrench, label: 'How-to' },
+  { segment: 'execute', icon: Play, label: 'Execute' },
+  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
+  { segment: 'admin', icon: Settings, label: 'KB Admin' },
+];
+
+function isArch2(slug: string | undefined): boolean {
+  return slug === 'brewandgo2';
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const { companySlug } = useParams<{ companySlug: string }>();
 
-  const navItems = isDemo(companySlug) ? demoNavItems : pidraxNavItems;
+  const navItems = isArch2(companySlug)
+    ? arch2NavItems
+    : isDemo(companySlug)
+      ? demoNavItems
+      : pidraxNavItems;
 
   return (
     <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 bg-sidebar border-r border-sidebar-border">

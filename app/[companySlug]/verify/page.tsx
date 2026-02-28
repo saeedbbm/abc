@@ -497,6 +497,12 @@ function DemoVerifyView() {
 
 export default function VerifyPage() {
   const { companySlug } = useParams<{ companySlug: string }>();
+
+  if (companySlug === "brewandgo2") {
+    const KB2VerifyPage = require("@/components/pidrax/kb2/KB2VerifyPage").KB2VerifyPage;
+    return <KB2VerifyPage companySlug={companySlug} />;
+  }
+
   const demo = isDemo(companySlug);
 
   return (
