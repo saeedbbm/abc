@@ -3,6 +3,7 @@
  * One document per channel.
  */
 
+import { splitIntoSections } from "./confluence-parser";
 import type { KB2ParsedDocument } from "./confluence-parser";
 
 interface SlackMessage {
@@ -75,13 +76,15 @@ export function parseSlackApiResponse(json: unknown): KB2ParsedDocument[] {
           .filter(Boolean) as string[],
       );
 
+      const content = lines.join("\n").trim();
       return {
         id: `slack-${ch.channel.id ?? channelName}`,
         provider: "slack",
         sourceType: "slack_channel",
         sourceId: ch.channel.id ?? channelName,
         title: `#${channelName}`,
-        content: lines.join("\n").trim(),
+        content,
+        sections: splitIntoSections(content),
         metadata: {
           channelId: ch.channel.id,
           channelName,

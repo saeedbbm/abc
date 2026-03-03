@@ -6,7 +6,7 @@ import {
   kb2ClaimsCollection,
 } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type {
   KB2EntityPageType,
   KB2HumanPageType,
@@ -55,7 +55,13 @@ export const extractClaimsStep: StepFunction = async (ctx) => {
           source_item_index: ii,
           truth_status: "direct",
           confidence: item.confidence ?? "medium",
-          source_refs: [],
+          source_refs: (item.source_refs ?? []).map((r) => ({
+            source_type: r.source_type as any,
+            doc_id: r.doc_id,
+            title: r.title,
+            excerpt: (r as any).excerpt ?? "",
+            section_heading: (r as any).section_heading,
+          })),
         });
 
         await kb2EntityPagesCollection.updateOne(
@@ -109,6 +115,14 @@ Rules:
     }
 
     for (const claim of result.claims) {
+      const humanSourceRefs = page.paragraphs.flatMap((p) =>
+        (p.source_items ?? []).map(() => ({
+          source_type: "confluence" as const,
+          doc_id: page.page_id,
+          title: page.title,
+          excerpt: claim.text.slice(0, 200),
+        })),
+      ).slice(0, 3);
       claims.push({
         claim_id: randomUUID(),
         run_id: ctx.runId,
@@ -118,7 +132,7 @@ Rules:
         source_page_type: "human",
         truth_status: claim.truth_status,
         confidence: claim.confidence,
-        source_refs: [],
+        source_refs: humanSourceRefs,
       });
     }
 

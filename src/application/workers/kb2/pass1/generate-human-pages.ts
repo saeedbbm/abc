@@ -2,13 +2,20 @@ import { z } from "zod";
 import {
   kb2EntityPagesCollection,
   kb2HumanPagesCollection,
+  kb2GraphNodesCollection,
 } from "@/lib/mongodb";
 import { getFastModel, getReasoningModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { STANDARD_HUMAN_PAGES } from "@/src/entities/models/kb2-templates";
-import type { KB2EntityPageType, KB2HumanPageType, KB2HumanPageLayer } from "@/src/entities/models/kb2-types";
+import { PROJECT_CATEGORIES, classifyProjectCategory } from "./page-plan";
+import type { KB2EntityPageType, KB2GraphNodeType, KB2HumanPageType, KB2HumanPageLayer } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
+
+const PROPOSED_TICKET_CATEGORIES = new Set([
+  "proposed_ticket",
+  "proposed_from_feedback",
+]);
 
 const CATEGORIES_NEEDING_REASONING = new Set([
   "architecture_overview",
@@ -35,11 +42,24 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
   const entityPages = (await kb2EntityPagesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
   if (entityPages.length === 0) throw new Error("No entity pages found — run step 11 first");
 
+  const graphNodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const nodeById = new Map<string, KB2GraphNodeType>();
+  for (const n of graphNodes) nodeById.set(n.node_id, n);
+
+  const proposedTicketNodeIds = new Set(
+    graphNodes
+      .filter((n) => PROPOSED_TICKET_CATEGORIES.has(n.attributes?.discovery_category))
+      .map((n) => n.node_id),
+  );
+  const filteredEntityPages = entityPages.filter(
+    (ep) => !proposedTicketNodeIds.has(ep.node_id),
+  );
+
   const planArtifact = await ctx.getStepArtifact("pass1", 9);
   const humanPlans = planArtifact?.human_pages ?? [];
 
   const entityPageByNodeType = new Map<string, KB2EntityPageType[]>();
-  for (const ep of entityPages) {
+  for (const ep of filteredEntityPages) {
     const arr = entityPageByNodeType.get(ep.node_type) ?? [];
     arr.push(ep);
     entityPageByNodeType.set(ep.node_type, arr);
@@ -65,9 +85,18 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
     const modelName = useReasoning ? "claude-opus-4-6" : "claude-sonnet-4-6";
 
     const relatedPages: KB2EntityPageType[] = [];
+    const isProjectCategory = PROJECT_CATEGORIES.has(plan.category);
     for (const entityType of hpDef.relatedEntityTypes) {
       const pagesOfType = entityPageByNodeType.get(entityType) ?? [];
-      relatedPages.push(...pagesOfType);
+      if (isProjectCategory && entityType === "project") {
+        const filtered = pagesOfType.filter((ep) => {
+          const node = nodeById.get(ep.node_id);
+          return node && classifyProjectCategory(node) === plan.category;
+        });
+        relatedPages.push(...filtered);
+      } else {
+        relatedPages.push(...pagesOfType);
+      }
     }
     const cappedPages = relatedPages.slice(0, 25);
 

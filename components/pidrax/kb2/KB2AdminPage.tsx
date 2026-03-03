@@ -29,6 +29,8 @@ import {
   Hash,
   Braces,
 } from "lucide-react";
+import { KB2RightPanel } from "./KB2RightPanel";
+import { SplitLayout } from "./SplitLayout";
 
 const KB2GraphExplorer = dynamic(
   () =>
@@ -440,6 +442,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   const pass2RunSteps = runSteps.filter((s) => s.pass === "pass2");
 
   return (
+    <SplitLayout
+      autoSaveId="admin"
+      mainContent={
     <div className="flex h-full flex-col">
       {/* Header + input status + pipeline controls */}
       <div className="border-b p-4 space-y-3">
@@ -832,6 +837,17 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         </div>
       </div>
     </div>
+      }
+      rightPanel={
+        <KB2RightPanel
+          companySlug={companySlug}
+          autoContext={{ type: "admin", id: "admin", title: "KB Admin" }}
+          sourceRefs={[]}
+          relatedEntityPages={[]}
+          defaultTab="sources"
+        />
+      }
+    />
   );
 }
 

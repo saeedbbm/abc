@@ -5,7 +5,7 @@ import {
   kb2InputSnapshotsCollection,
 } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import { PrefixLogger } from "@/lib/utils";
@@ -38,7 +38,11 @@ RULES:
 - Each discovery must have clear evidence from the source documents
 - Set confidence to "medium" for inferred items, "high" only for clearly mentioned but untracked items
 - For proposed items, set confidence to "low" since they need human verification
-- Reference existing entity names in related_entities when applicable`;
+- Reference existing entity names in related_entities when applicable
+- Source document types: Confluence = documented technical content, Jira = project tracking/ticketing, Slack = team conversations, GitHub = code/PRs, Customer Feedback = external user reports
+- If evidence comes from Confluence AND Jira, the project is DOCUMENTED
+- If evidence comes only from Jira, the project exists but may be UNDOCUMENTED (no Confluence docs)
+- If evidence comes only from Slack/GitHub, it is fully DISCOVERED/UNDOCUMENTED`;
 
 export const discoveryStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-discovery");
@@ -127,7 +131,10 @@ export const discoveryStep: StepFunction = async (ctx) => {
         related_entities: disc.related_entities,
       },
       source_refs: [{
-        source_type: "slack" as any,
+        source_type: (() => {
+          const sourceDoc = docs.find((d: any) => d.title === disc.source_document || d.sourceId === disc.source_document);
+          return (sourceDoc?.provider ?? "slack") as any;
+        })(),
         doc_id: disc.source_document,
         title: disc.source_document,
         excerpt: disc.evidence.slice(0, 300),

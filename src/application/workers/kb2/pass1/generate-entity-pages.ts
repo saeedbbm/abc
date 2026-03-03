@@ -5,7 +5,7 @@ import {
   kb2EntityPagesCollection,
 } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import {
   getEntityTemplate,
   getSectionInstructionsKB2,
@@ -22,7 +22,7 @@ const GeneratedSectionSchema = z.object({
     items: z.array(z.object({
       text: z.string(),
       confidence: KB2ConfidenceEnum,
-      source_title: z.string().describe("Title of the source document this fact comes from"),
+      source_titles: z.array(z.string()).describe("Titles of ALL source documents this fact comes from"),
     })),
   })),
 });
@@ -69,7 +69,7 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
       "## Graph Context",
       ...pack.graph_context,
       "",
-      "## Available Source Documents (use these titles for source_title)",
+      "## Available Source Documents (use these titles for source_titles)",
       sourceRefsList || "(no sources listed)",
       "",
       "## Document Snippets",
@@ -92,7 +92,7 @@ ${sectionInstructions}
 
 Rules:
 - Each item must be a standalone factual statement.
-- For source_title: specify the title of the source document this fact comes from (from the "Available Source Documents" list).
+- For source_titles: list ALL source document titles that support this fact (from the "Available Source Documents" list). Include every source that mentions this fact.
 - Rate confidence: high = multiple sources confirm, medium = single source, low = inferred/uncertain.
 - Only include information supported by the provided context.
 - If a section has no relevant data, return it with an empty items array.`,
@@ -122,18 +122,37 @@ ${context}`,
           section_name: s.section_name,
           requirement: spec?.requirement ?? "OPTIONAL",
           items: s.items.map((item) => {
-            const matchedRef = node.source_refs.find((r) =>
-              r.title.toLowerCase() === (item.source_title ?? "").toLowerCase(),
-            ) ?? node.source_refs[0];
+            const titles = item.source_titles ?? [];
+            const normalize = (s: string) => s.toLowerCase().replace(/[—–\-_]/g, " ").replace(/['"]/g, "").replace(/\s+/g, " ").trim();
+            const matched = titles
+              .map((t) => {
+                const norm = normalize(t);
+                return node.source_refs.find((r) => {
+                  const refNorm = normalize(r.title);
+                  return refNorm === norm || refNorm.includes(norm) || norm.includes(refNorm);
+                });
+              })
+              .filter(Boolean) as typeof node.source_refs;
+            if (matched.length === 0 && titles.length > 0) {
+              console.warn(`[gen-entity-pages] No source match for "${node.display_name}" item titles: ${titles.join(", ")} | Available: ${node.source_refs.map(r => r.title).join(", ")}`);
+            }
+            const refs = matched;
             return {
               text: item.text,
               confidence: item.confidence,
-              source_refs: matchedRef ? [{ source_type: matchedRef.source_type, doc_id: matchedRef.doc_id, title: matchedRef.title }] : [],
+              source_refs: refs.map((r) => ({
+                source_type: r.source_type,
+                doc_id: r.doc_id,
+                title: r.title,
+                section_heading: r.section_heading,
+                excerpt: r.excerpt,
+              })),
             };
           }),
         };
       }),
       linked_human_page_ids: [],
+      manual_overrides: {},
     };
 
     pages.push(page);

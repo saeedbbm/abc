@@ -1,8 +1,9 @@
+import { randomUUID } from "crypto";
 import { z } from "zod";
-import { kb2GraphNodesCollection } from "@/lib/mongodb";
+import { kb2GraphNodesCollection, kb2VerificationCardsCollection } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
-import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import type { KB2GraphNodeType, KB2VerificationCardType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
@@ -38,11 +39,19 @@ function aliasOverlap(a: KB2GraphNodeType, b: KB2GraphNodeType): boolean {
   return false;
 }
 
+function substringMatch(a: string, b: string): boolean {
+  const la = a.toLowerCase().trim();
+  const lb = b.toLowerCase().trim();
+  if (la === lb) return false;
+  return (la.length >= 3 && lb.includes(la)) || (lb.length >= 3 && la.includes(lb));
+}
+
 interface CandidatePair {
   nodeA: KB2GraphNodeType;
   nodeB: KB2GraphNodeType;
   reason: string;
   score: number;
+  ambiguous?: boolean;
 }
 
 const MergeDecisionSchema = z.object({
@@ -50,6 +59,7 @@ const MergeDecisionSchema = z.object({
     entity_a: z.string(),
     entity_b: z.string(),
     should_merge: z.boolean(),
+    unsure: z.boolean().optional().describe("Set true if you cannot confidently decide"),
     canonical_name: z.string().optional(),
     reason: z.string(),
   })),
@@ -83,6 +93,11 @@ export const entityResolutionStep: StepFunction = async (ctx) => {
 
         if (aliasOverlap(a, b)) {
           candidates.push({ nodeA: a, nodeB: b, reason: "alias overlap", score: 1.0 });
+          continue;
+        }
+
+        if (substringMatch(a.display_name, b.display_name)) {
+          candidates.push({ nodeA: a, nodeB: b, reason: `substring match: "${a.display_name}" / "${b.display_name}"`, score: 0.8, ambiguous: true });
           continue;
         }
 
@@ -152,7 +167,8 @@ RULES:
 - Do NOT merge if they are genuinely different things (e.g. "brewgo-api" and "brewgo-app" are different repos)
 - Do NOT merge if one is a component/part of the other (e.g. "Redis" the database vs "ElastiCache Redis" the cloud resource)
 - When merging, pick the most precise/canonical name as the canonical_name
-- Be conservative — only merge when confident they are the same entity`,
+- Be conservative — only merge when confident they are the same entity
+- If you are unsure (e.g. "Priya" might or might not be "Priya Nair"), set unsure: true and should_merge: false. A human will review.`,
       prompt: pairsText,
       schema: MergeDecisionSchema,
       logger,
@@ -166,7 +182,35 @@ RULES:
       ctx.logLLMCall(stepId, "claude-sonnet-4-6", pairsText, JSON.stringify(result, null, 2), usageData.promptTokens, usageData.completionTokens, cost, durationMs);
     }
 
+    const ambiguousCards: KB2VerificationCardType[] = [];
     for (const decision of result.decisions ?? []) {
+      if (!decision.should_merge && decision.unsure) {
+        const pair = batch.find((p) =>
+          (p.nodeA.display_name === decision.entity_a && p.nodeB.display_name === decision.entity_b) ||
+          (p.nodeA.display_name === decision.entity_b && p.nodeB.display_name === decision.entity_a),
+        );
+        if (pair && !mergedNodeIds.has(pair.nodeA.node_id) && !mergedNodeIds.has(pair.nodeB.node_id)) {
+          ambiguousCards.push({
+            card_id: randomUUID(),
+            run_id: ctx.runId,
+            card_type: "duplicate_cluster",
+            severity: "S3",
+            title: `Possible duplicate: "${pair.nodeA.display_name}" and "${pair.nodeB.display_name}"`,
+            explanation: `These two ${pair.nodeA.type} entities might be the same. ${decision.reason}`,
+            canonical_text: JSON.stringify({
+              entity_a: { node_id: pair.nodeA.node_id, display_name: pair.nodeA.display_name, aliases: pair.nodeA.aliases },
+              entity_b: { node_id: pair.nodeB.node_id, display_name: pair.nodeB.display_name, aliases: pair.nodeB.aliases },
+            }),
+            page_occurrences: [],
+            source_refs: [...pair.nodeA.source_refs.slice(0, 3), ...pair.nodeB.source_refs.slice(0, 3)],
+            assigned_to: [],
+            claim_ids: [],
+            status: "open",
+            discussion: [],
+          });
+        }
+        continue;
+      }
       if (!decision.should_merge) continue;
 
       const pair = batch.find((p) =>
@@ -211,6 +255,10 @@ RULES:
         canonicalName,
         reason: decision.reason,
       });
+    }
+
+    if (ambiguousCards.length > 0) {
+      await kb2VerificationCardsCollection.insertMany(ambiguousCards);
     }
   }
 

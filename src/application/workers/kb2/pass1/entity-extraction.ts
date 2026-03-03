@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { kb2InputSnapshotsCollection, kb2GraphNodesCollection } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { CLASSIFICATION_RULES } from "@/src/entities/models/kb2-templates";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
@@ -201,12 +201,25 @@ export const entityExtractionStep: StepFunction = async (ctx) => {
       : null;
     const sourceDocs = matchedDoc ? [matchedDoc] : batchDocs.slice(0, 1);
 
-    const refs = sourceDocs.map((d) => ({
-      source_type: d.provider as any,
-      doc_id: d.sourceId,
-      title: d.title,
-      excerpt,
-    }));
+    const refs = sourceDocs.map((d) => {
+      let section_heading: string | undefined;
+      if (excerpt && d.sections?.length) {
+        const excerptLower = excerpt.toLowerCase();
+        for (const sec of d.sections) {
+          if (sec.content.toLowerCase().includes(excerptLower)) {
+            section_heading = sec.heading;
+            break;
+          }
+        }
+      }
+      return {
+        source_type: d.provider as any,
+        doc_id: d.sourceId,
+        title: d.title,
+        excerpt,
+        section_heading,
+      };
+    });
 
     if (nodeMap.has(key)) {
       const existing = nodeMap.get(key)!;

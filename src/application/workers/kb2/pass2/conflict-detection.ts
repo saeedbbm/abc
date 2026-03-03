@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getFastModel } from "@/lib/ai-model";
 import { PrefixLogger } from "@/lib/utils";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import {
   kb2FactGroupsCollection,
   kb2ClaimsCollection,

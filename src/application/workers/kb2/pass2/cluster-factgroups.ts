@@ -3,7 +3,7 @@ import { embedMany } from "ai";
 import { getEmbeddingModel, getFastModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import {
   kb2ClaimsCollection,
   kb2FactGroupsCollection,

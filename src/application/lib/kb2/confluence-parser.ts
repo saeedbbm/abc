@@ -3,6 +3,13 @@
  * Handles the body.storage.value HTML → readable text conversion.
  */
 
+export interface KB2ParsedSection {
+  heading: string;
+  content: string;
+  start_offset: number;
+  end_offset: number;
+}
+
 export interface KB2ParsedDocument {
   id: string;
   provider: string;
@@ -10,7 +17,38 @@ export interface KB2ParsedDocument {
   sourceId: string;
   title: string;
   content: string;
+  sections: KB2ParsedSection[];
   metadata: Record<string, any>;
+}
+
+export function splitIntoSections(content: string): KB2ParsedSection[] {
+  const headingRe = /^(#{1,4})\s+(.+)$/gm;
+  const sections: KB2ParsedSection[] = [];
+  let lastHeading = "(intro)";
+  let lastStart = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = headingRe.exec(content)) !== null) {
+    if (match.index > lastStart) {
+      sections.push({
+        heading: lastHeading,
+        content: content.slice(lastStart, match.index).trim(),
+        start_offset: lastStart,
+        end_offset: match.index,
+      });
+    }
+    lastHeading = match[2].trim();
+    lastStart = match.index;
+  }
+  if (lastStart < content.length) {
+    sections.push({
+      heading: lastHeading,
+      content: content.slice(lastStart).trim(),
+      start_offset: lastStart,
+      end_offset: content.length,
+    });
+  }
+  return sections.filter((s) => s.content.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +229,7 @@ export function parseConfluenceApiResponse(json: unknown): KB2ParsedDocument[] {
         sourceId: page.id,
         title: page.title,
         content,
+        sections: splitIntoSections(content),
         metadata: {
           pageId: page.id,
           author,

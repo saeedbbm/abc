@@ -14,6 +14,7 @@ import {
   kb2LLMCallsCollection,
   kb2TicketsCollection,
   kb2HowtoCollection,
+  kb2PeopleCollection,
 } from "@/lib/mongodb";
 
 export async function GET(
@@ -60,6 +61,50 @@ export async function GET(
       const doc = await kb2InputSnapshotsCollection.findOne(filter, { sort: { created_at: -1 } });
       return Response.json({ snapshot: doc });
     }
+    case "people": {
+      const people = await kb2PeopleCollection.find({ company_slug: companySlug }).toArray();
+      if (people.length > 0) {
+        return Response.json({ people });
+      }
+
+      // Derive from person-type ENTITY PAGES (verified KB team members only)
+      // Use the same run_id resolution as entity_pages query
+      const peopleFilter: Record<string, any> = { node_type: "person" };
+      if (!filter.run_id) {
+        const runIdsWithEP = await kb2EntityPagesCollection.distinct("run_id");
+        if (runIdsWithEP.length > 0) {
+          const latestRun = await kb2RunsCollection.findOne(
+            { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
+            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+          );
+          if (latestRun) peopleFilter.run_id = latestRun.run_id;
+        }
+      } else {
+        peopleFilter.run_id = filter.run_id;
+      }
+
+      const personPages = await kb2EntityPagesCollection.find(peopleFilter).toArray();
+
+      const seen = new Set<string>();
+      const derived = personPages
+        .filter((p: any) => {
+          const key = (p.title ?? "").toLowerCase().trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((p: any) => ({
+          person_id: p.page_id,
+          display_name: p.title,
+          aliases: [],
+          email: "",
+          slack_handle: "",
+          github_handle: "",
+          source_node_id: p.node_id,
+          company_slug: companySlug,
+        }));
+      return Response.json({ people: derived });
+    }
     case "parsed_doc": {
       const docId = request.nextUrl.searchParams.get("doc_id");
       if (!docId) return Response.json({ error: "doc_id required" }, { status: 400 });
@@ -101,7 +146,18 @@ export async function GET(
       return Response.json({ groups });
     }
     case "verify_cards": {
-      const cards = await kb2VerificationCardsCollection.find(filter).toArray();
+      const vcFilter = { ...filter };
+      if (!vcFilter.run_id) {
+        const runIdsWithCards = await kb2VerificationCardsCollection.distinct("run_id");
+        if (runIdsWithCards.length > 0) {
+          const latestRun = await kb2RunsCollection.findOne(
+            { run_id: { $in: runIdsWithCards }, company_slug: companySlug, status: "completed" },
+            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+          );
+          if (latestRun) vcFilter.run_id = latestRun.run_id;
+        }
+      }
+      const cards = await kb2VerificationCardsCollection.find(vcFilter).toArray();
       return Response.json({ cards });
     }
     case "entity_pages": {
@@ -151,12 +207,68 @@ export async function GET(
       return Response.json({ calls });
     }
     case "tickets": {
-      const tickets = await kb2TicketsCollection.find(filter).sort({ created_at: -1 }).toArray();
+      const tFilter = { ...filter };
+      if (!tFilter.run_id) {
+        const runIdsWithTickets = await kb2TicketsCollection.distinct("run_id");
+        if (runIdsWithTickets.length > 0) {
+          const latestRun = await kb2RunsCollection.findOne(
+            { run_id: { $in: runIdsWithTickets }, company_slug: companySlug, status: "completed" },
+            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+          );
+          if (latestRun) tFilter.run_id = latestRun.run_id;
+        }
+      }
+      const tickets = await kb2TicketsCollection.find(tFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ tickets });
     }
     case "howto": {
-      const howtos = await kb2HowtoCollection.find(filter).sort({ created_at: -1 }).toArray();
+      const htFilter = { ...filter };
+      if (!htFilter.run_id) {
+        const runIdsWithHowto = await kb2HowtoCollection.distinct("run_id");
+        if (runIdsWithHowto.length > 0) {
+          const latestRun = await kb2RunsCollection.findOne(
+            { run_id: { $in: runIdsWithHowto }, company_slug: companySlug, status: "completed" },
+            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+          );
+          if (latestRun) htFilter.run_id = latestRun.run_id;
+        }
+      }
+      const howtos = await kb2HowtoCollection.find(htFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ howtos });
+    }
+    case "parsed_doc": {
+      const docId = request.nextUrl.searchParams.get("doc_id");
+      if (!docId) return Response.json({ error: "Missing doc_id" }, { status: 400 });
+
+      // Try the latest snapshot first (may be from a specific run)
+      const latestRun = await kb2RunsCollection.findOne(
+        { company_slug: companySlug, status: "completed" },
+        { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+      );
+      const snapshotFilter: Record<string, any> = { company_slug: companySlug };
+      if (latestRun) snapshotFilter.run_id = latestRun.run_id;
+
+      let snapshot = await kb2InputSnapshotsCollection.findOne(snapshotFilter, { sort: { created_at: -1 } });
+      if (!snapshot) {
+        snapshot = await kb2InputSnapshotsCollection.findOne(
+          { company_slug: companySlug },
+          { sort: { created_at: -1 } },
+        );
+      }
+
+      if (snapshot?.parsed_documents) {
+        const docIdLower = docId.toLowerCase();
+        const doc = (snapshot.parsed_documents as any[]).find((d: any) => {
+          const sid = (d.sourceId ?? "").toLowerCase();
+          const did = (d.doc_id ?? d.id ?? "").toLowerCase();
+          const title = (d.title ?? "").toLowerCase();
+          return sid === docIdLower || did === docIdLower || title === docIdLower
+            || sid.includes(docIdLower) || docIdLower.includes(sid);
+        });
+        if (doc) return Response.json({ document: doc });
+      }
+
+      return Response.json({ error: "Document not found" }, { status: 404 });
     }
     default:
       return Response.json({ error: `Unknown type: ${type}` }, { status: 400 });

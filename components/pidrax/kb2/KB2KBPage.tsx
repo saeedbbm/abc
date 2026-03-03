@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,11 +22,19 @@ import {
   BookOpen,
   Cpu,
   FileText,
-  ExternalLink,
-  X,
-  Loader2,
+  Edit3,
 } from "lucide-react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { KB2RightPanel, SourceRef, RelatedEntityPage, AutoContext } from "./KB2RightPanel";
+import { SplitLayout } from "./SplitLayout";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +57,8 @@ interface ItemSourceRef {
   source_type: string;
   doc_id: string;
   title: string;
+  section_heading?: string;
+  excerpt?: string;
 }
 
 interface EntityPage {
@@ -121,7 +131,11 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
   const [viewTab, setViewTab] = useState("human");
   const [sidebarMode, setSidebarMode] = useState<"human" | "ai">("human");
 
-  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; source_refs: { source_type: string; doc_id: string; title: string; excerpt: string }[] }>>({});
+  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; truth_status?: string; attributes?: Record<string, any>; source_refs: { source_type: string; doc_id: string; title: string; excerpt: string }[] }>>({});
+
+  const [rightPanelContext, setRightPanelContext] = useState<AutoContext | null>(null);
+  const [rightPanelSources, setRightPanelSources] = useState<SourceRef[]>([]);
+  const [rightPanelRelated, setRightPanelRelated] = useState<RelatedEntityPage[]>([]);
 
   const fetchPages = useCallback(async () => {
     const [hRes, eRes, nRes] = await Promise.all([
@@ -136,10 +150,18 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
     setEntityPages(eData.pages ?? []);
     const nodeMap: typeof graphNodes = {};
     for (const n of nData.nodes ?? []) {
-      nodeMap[n.node_id] = { display_name: n.display_name, type: n.type, source_refs: n.source_refs ?? [] };
+      nodeMap[n.node_id] = { display_name: n.display_name, type: n.type, truth_status: n.truth_status, attributes: n.attributes, source_refs: n.source_refs ?? [] };
     }
     setGraphNodes(nodeMap);
-    if (hData.pages?.length > 0) setSelectedPage(hData.pages[0]);
+    if (hData.pages?.length > 0) {
+      const firstPage = hData.pages[0] as HumanPage;
+      setSelectedPage(firstPage);
+      setRightPanelContext({
+        type: "human_page",
+        id: firstPage.page_id,
+        title: firstPage.title,
+      });
+    }
   }, [companySlug]);
 
   useEffect(() => {
@@ -184,6 +206,34 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       )
     : [];
 
+  const sourceRefsForEntity = (ep: EntityPage): SourceRef[] =>
+    (graphNodes[ep.node_id]?.source_refs ?? []).map((ref) => ({
+      source_type: ref.source_type,
+      doc_id: ref.doc_id,
+      title: ref.title,
+      excerpt: ref.excerpt,
+    }));
+
+  const relatedPagesForHuman = (page: HumanPage): RelatedEntityPage[] => {
+    const related = entityPages.filter(
+      (ep) =>
+        page.linked_entity_page_ids.includes(ep.page_id) ||
+        page.linked_entity_page_ids.includes(ep.node_id),
+    );
+    return related.map((ep) => ({
+      page_id: ep.page_id,
+      title: ep.title,
+      node_type: ep.node_type,
+      sections: ep.sections.map((section) => ({
+        section_name: section.section_name,
+        items: section.items.map((item) => ({
+          text: item.text,
+          confidence: item.confidence,
+        })),
+      })),
+    }));
+  };
+
   const navigateToEntity = (refText: string) => {
     const ep = entityPages.find((e) =>
       e.title.toLowerCase().includes(refText.toLowerCase()),
@@ -193,6 +243,9 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
     if (ep) {
       setSelectedEntityPage(ep);
       setViewTab("ai");
+      setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
+      setRightPanelSources(sourceRefsForEntity(ep));
+      setRightPanelRelated([]);
     }
   };
 
@@ -238,7 +291,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-1 min-w-0">
       {/* Left nav tree */}
       <div className="w-64 border-r flex flex-col">
         <div className="p-4 border-b">
@@ -246,13 +299,53 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
             <h2 className="text-sm font-medium">Knowledge Base</h2>
             <div className="ml-auto flex rounded-md border text-[10px] overflow-hidden">
               <button
-                onClick={() => setSidebarMode("human")}
+                onClick={() => {
+                  setSidebarMode("human");
+                  const page = selectedPage ?? humanPages[0];
+                  setSelectedEntityPage(null);
+                  if (page) {
+                    setSelectedPage(page);
+                    setViewTab("human");
+                    setRightPanelContext({
+                      type: "human_page",
+                      id: page.page_id,
+                      title: page.title,
+                    });
+                    setRightPanelSources([]);
+                    setRightPanelRelated(relatedPagesForHuman(page));
+                  } else {
+                    setRightPanelContext(null);
+                    setRightPanelSources([]);
+                    setRightPanelRelated([]);
+                  }
+                }}
                 className={`px-2 py-0.5 transition-colors ${sidebarMode === "human" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
               >
                 <BookOpen className="h-3 w-3 inline mr-0.5" />Human
               </button>
               <button
-                onClick={() => setSidebarMode("ai")}
+                onClick={() => {
+                  setSidebarMode("ai");
+                  const ep = selectedEntityPage ?? linkedEntityPages[0] ?? entityPages[0];
+                  if (ep) {
+                    setSelectedEntityPage(ep);
+                    setSelectedPage(null);
+                    setViewTab("ai");
+                    setRightPanelContext({
+                      type: "entity_page",
+                      id: ep.page_id,
+                      title: ep.title,
+                    });
+                    setRightPanelSources(sourceRefsForEntity(ep));
+                    setRightPanelRelated([]);
+                  } else {
+                    setSelectedPage(null);
+                    setSelectedEntityPage(null);
+                    setRightPanelContext(null);
+                    setRightPanelSources([]);
+                    setRightPanelRelated([]);
+                  }
+                }}
                 className={`px-2 py-0.5 transition-colors border-l ${sidebarMode === "ai" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
               >
                 <Cpu className="h-3 w-3 inline mr-0.5" />AI
@@ -298,6 +391,9 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                                 setSelectedPage(p);
                                 setSelectedEntityPage(null);
                                 setViewTab("human");
+                                setRightPanelContext({ type: "human_page", id: p.page_id, title: p.title });
+                                setRightPanelSources([]);
+                                setRightPanelRelated(relatedPagesForHuman(p));
                               }}
                               className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
                                 selectedPage?.page_id === p.page_id
@@ -321,6 +417,94 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                 const pages = entityPagesByType[t] ?? [];
                 if (pages.length === 0) return null;
                 const isExpanded = expandedTypes.has(t);
+
+                if (t === "project") {
+                  const PROJECT_SUB_GROUPS = [
+                    "Past Documented",
+                    "Past Undocumented",
+                    "Ongoing Documented",
+                    "Ongoing Undocumented",
+                    "Proposed",
+                  ] as const;
+                  const subGroups: Record<string, EntityPage[]> = {};
+                  for (const label of PROJECT_SUB_GROUPS) subGroups[label] = [];
+                  for (const ep of pages) {
+                    const node = graphNodes[ep.node_id];
+                    const disc = node?.attributes?.discovery_category ?? "";
+                    const status = (node?.attributes?.status ?? "").toLowerCase();
+                    const isDone = ["done", "completed", "closed", "past"].some((s) => status.includes(s));
+
+                    if (disc === "proposed_project") {
+                      subGroups["Proposed"].push(ep);
+                    } else if (disc === "past_undocumented") {
+                      subGroups["Past Undocumented"].push(ep);
+                    } else if (disc === "ongoing_undocumented") {
+                      subGroups["Ongoing Undocumented"].push(ep);
+                    } else if (node?.truth_status === "inferred") {
+                      subGroups[isDone ? "Past Undocumented" : "Ongoing Undocumented"].push(ep);
+                    } else {
+                      subGroups[isDone ? "Past Documented" : "Ongoing Documented"].push(ep);
+                    }
+                  }
+                  return (
+                    <div key={t} className="mb-1">
+                      <button
+                        onClick={() => toggleType(t)}
+                        className="flex items-center gap-1 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
+                      >
+                        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        {ENTITY_TYPE_LABELS[t] ?? t}
+                        <Badge variant="secondary" className="ml-auto text-[10px]">{pages.length}</Badge>
+                      </button>
+                      {isExpanded && (
+                        <div className="ml-4 space-y-1">
+                          {PROJECT_SUB_GROUPS.map((sg) => {
+                            const sgPages = subGroups[sg];
+                            if (sgPages.length === 0) return null;
+                            const sgKey = `project_${sg}`;
+                            const sgExpanded = expandedTypes.has(sgKey);
+                            return (
+                              <div key={sg}>
+                                <button
+                                  onClick={() => toggleType(sgKey)}
+                                  className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded hover:bg-accent/50 text-muted-foreground"
+                                >
+                                  {sgExpanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                  {sg}
+                                  <Badge variant="outline" className="ml-auto text-[9px]">{sgPages.length}</Badge>
+                                </button>
+                                {sgExpanded && (
+                                  <div className="ml-4 space-y-0.5">
+                                    {sgPages.map((ep) => (
+                                      <button
+                                        key={ep.page_id}
+                                        onClick={() => {
+                                          setSelectedEntityPage(ep);
+                                          setSelectedPage(null);
+                                          setViewTab("ai");
+                                          setSidebarMode("ai");
+                                          setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
+                                          setRightPanelSources(sourceRefsForEntity(ep));
+                                          setRightPanelRelated([]);
+                                        }}
+                                        className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
+                                          selectedEntityPage?.page_id === ep.page_id ? "bg-accent font-medium" : "hover:bg-accent/50"
+                                        }`}
+                                      >
+                                        {ep.title}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={t} className="mb-1">
                     <button
@@ -345,6 +529,11 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                             onClick={() => {
                               setSelectedEntityPage(ep);
                               setSelectedPage(null);
+                              setViewTab("ai");
+                              setSidebarMode("ai");
+                              setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
+                              setRightPanelSources(sourceRefsForEntity(ep));
+                              setRightPanelRelated([]);
                             }}
                             className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
                               selectedEntityPage?.page_id === ep.page_id
@@ -365,8 +554,11 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
         </ScrollArea>
       </div>
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main content area + right panel */}
+      <SplitLayout
+        autoSaveId="kb-v3"
+        mainContent={
+        <div className="flex flex-col h-full">
         {selectedPage || selectedEntityPage ? (
           selectedEntityPage ? (
             <div className="flex-1 min-h-0">
@@ -378,6 +570,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                   setSelectedEntityPage(null);
                   setViewTab("human");
                 }}
+                onItemClick={(refs) => setRightPanelSources(refs)}
               />
             </div>
           ) : (
@@ -449,12 +642,22 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                       No linked entity pages found.
                     </p>
                   ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-3">
                       {linkedEntityPages.map((ep) => (
                         <Card
                           key={ep.page_id}
                           className="cursor-pointer hover:bg-accent/50 transition-colors"
-                          onClick={() => setSelectedEntityPage(ep)}
+                          onClick={() => {
+                            setSelectedEntityPage(ep);
+                            setViewTab("ai");
+                            setRightPanelContext({
+                              type: "entity_page",
+                              id: ep.page_id,
+                              title: ep.title,
+                            });
+                            setRightPanelSources(sourceRefsForEntity(ep));
+                            setRightPanelRelated([]);
+                          }}
                         >
                           <CardHeader className="py-3">
                             <div className="flex items-center gap-2">
@@ -553,132 +756,24 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
             </p>
           </div>
         )}
-      </div>
+        </div>
+        }
+        rightPanel={
+          <KB2RightPanel
+            companySlug={companySlug}
+            autoContext={rightPanelContext}
+            sourceRefs={rightPanelSources}
+            relatedEntityPages={rightPanelRelated}
+            defaultTab="sources"
+          />
+        }
+      />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Source document panel (right side of split)
-// ---------------------------------------------------------------------------
-
-interface SourcePanelState {
-  docId: string;
-  title: string;
-  sourceType: string;
-  highlightText: string;
-}
-
-function SourcePanel({
-  companySlug,
-  source,
-  onClose,
-}: {
-  companySlug: string;
-  source: SourcePanelState;
-  onClose: () => void;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const highlightRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setContent(null);
-    fetch(`/api/${companySlug}/kb2?type=parsed_doc&doc_id=${encodeURIComponent(source.docId)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        setContent(data.doc?.content ?? null);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) { setContent(null); setLoading(false); }
-      });
-    return () => { cancelled = true; };
-  }, [companySlug, source.docId]);
-
-  useEffect(() => {
-    if (content && highlightRef.current) {
-      setTimeout(() => highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-    }
-  }, [content]);
-
-  const PROVIDER_ICONS: Record<string, string> = {
-    confluence: "📄", jira: "🎫", slack: "💬", github: "🔧", customerFeedback: "📣", human_verification: "✅",
-  };
-
-  const renderContent = () => {
-    if (loading) {
-      return (
-        <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading source document...
-        </div>
-      );
-    }
-    if (!content) {
-      return <p className="text-xs text-muted-foreground p-4">Source document not found.</p>;
-    }
-
-    if (!source.highlightText || source.highlightText.length < 8) {
-      return (
-        <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words font-mono p-4">{content}</pre>
-      );
-    }
-
-    const searchText = source.highlightText.slice(0, 150);
-    const idx = content.toLowerCase().indexOf(searchText.toLowerCase());
-    if (idx === -1) {
-      const words = searchText.split(/\s+/).filter((w) => w.length > 4);
-      const fuzzyWord = words[0];
-      const fuzzyIdx = fuzzyWord ? content.toLowerCase().indexOf(fuzzyWord.toLowerCase()) : -1;
-      if (fuzzyIdx === -1) {
-        return (
-          <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words font-mono p-4">{content}</pre>
-        );
-      }
-      const start = Math.max(0, fuzzyIdx - 50);
-      const end = Math.min(content.length, fuzzyIdx + fuzzyWord.length + 50);
-      return (
-        <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words font-mono p-4">
-          {content.slice(0, start)}
-          <span ref={highlightRef} className="bg-yellow-200 dark:bg-yellow-800/60 px-0.5 rounded">{content.slice(start, end)}</span>
-          {content.slice(end)}
-        </pre>
-      );
-    }
-
-    return (
-      <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words font-mono p-4">
-        {content.slice(0, idx)}
-        <span ref={highlightRef} className="bg-yellow-200 dark:bg-yellow-800/60 px-0.5 rounded">{content.slice(idx, idx + searchText.length)}</span>
-        {content.slice(idx + searchText.length)}
-      </pre>
-    );
-  };
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/30 shrink-0">
-        <span className="text-sm">{PROVIDER_ICONS[source.sourceType] ?? "📎"}</span>
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-semibold truncate">{source.title}</div>
-          <div className="text-[10px] text-muted-foreground">{source.sourceType}</div>
-        </div>
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={onClose}>
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <ScrollArea className="flex-1">
-        {renderContent()}
-      </ScrollArea>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Entity page detail view (with split-pane source viewer)
+// Entity page detail view
 // ---------------------------------------------------------------------------
 
 function EntityPageView({
@@ -686,176 +781,190 @@ function EntityPageView({
   page,
   sourceRefs,
   onBack,
+  onItemClick,
 }: {
   companySlug: string;
   page: EntityPage;
   sourceRefs: { source_type: string; doc_id: string; title: string; excerpt: string }[];
   onBack?: () => void;
+  onItemClick?: (refs: SourceRef[]) => void;
 }) {
-  const [activeSource, setActiveSource] = useState<SourcePanelState | null>(null);
   const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
+  const [verifyFormKey, setVerifyFormKey] = useState<string | null>(null);
+  const [verifyTitle, setVerifyTitle] = useState("");
+  const [verifyDescription, setVerifyDescription] = useState("");
+  const [verifyReviewer, setVerifyReviewer] = useState("");
+  const [peopleList, setPeopleList] = useState<{ id: string; name: string }[]>([]);
 
-  const openSource = (ref: ItemSourceRef, itemText: string, itemKey: string) => {
-    setActiveSource({
-      docId: ref.doc_id,
-      title: ref.title,
-      sourceType: ref.source_type,
-      highlightText: itemText,
+  useEffect(() => {
+    fetch(`/api/${companySlug}/kb2?type=people`)
+      .then((r) => r.json())
+      .then((data) => {
+        const raw = data.people ?? [];
+        setPeopleList(raw.map((p: any) => ({
+          id: p.person_id ?? p.id ?? p.node_id ?? "",
+          name: p.display_name ?? p.name ?? "",
+        })).filter((p: any) => p.name));
+      })
+      .catch(() => {});
+  }, [companySlug]);
+
+  const handleAddToVerify = async (sectionName: string, itemText: string) => {
+    if (!verifyReviewer) return;
+    await fetch(`/api/${companySlug}/kb2/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "create",
+        card: {
+          card_type: "edit_proposal",
+          title: verifyTitle || `Review: ${page.title} — ${sectionName}`,
+          description: verifyDescription || `Item: "${itemText}"`,
+          severity: "S3",
+          assigned_to: [verifyReviewer],
+          page_occurrences: [{ page_id: page.page_id, page_type: "entity", page_title: page.title, section: sectionName }],
+          source_refs: [],
+        },
+      }),
     });
-    setSelectedItemKey(itemKey);
-  };
-
-  const closeSource = () => {
-    setActiveSource(null);
-    setSelectedItemKey(null);
+    setVerifyFormKey(null);
+    setVerifyTitle("");
+    setVerifyDescription("");
+    setVerifyReviewer("");
   };
 
   const visibleSections = page.sections.filter(
     (s) => s.requirement === "MUST" || s.items.length > 0
   );
 
-  const PROVIDER_ICONS: Record<string, string> = {
-    confluence: "📄", jira: "🎫", slack: "💬", github: "🔧", customerFeedback: "📣", human_verification: "✅",
-  };
-
-  const uniqueSources = sourceRefs.reduce((acc, ref) => {
-    const key = `${ref.source_type}:${ref.title}`;
-    if (!acc.has(key)) acc.set(key, ref);
-    return acc;
-  }, new Map<string, typeof sourceRefs[number]>());
-
-  const entityContent = (
-    <div className="p-6">
-      {onBack && (
-        <Button variant="ghost" size="sm" onClick={onBack} className="mb-4">
-          &larr; Back to human view
-        </Button>
-      )}
-      <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-lg font-semibold">{page.title}</h2>
-        <Badge variant="outline">{page.node_type}</Badge>
-      </div>
-      {visibleSections.map((section) => (
-        <div key={section.section_name} className="mb-5">
-          <div className="flex items-center gap-2 mb-2 border-b pb-1">
-            <h3 className="text-sm font-semibold">{section.section_name}</h3>
-            <Badge
-              variant={section.requirement === "MUST" ? "default" : "secondary"}
-              className="text-[9px]"
-            >
-              {section.requirement}
-            </Badge>
-          </div>
-          {section.items.length === 0 ? (
-            <p className="text-xs text-red-400 italic">Unknown</p>
-          ) : (
-            <ul className="space-y-0.5">
-              {section.items.map((item, idx) => {
-                const itemKey = `${section.section_name}-${idx}`;
-                const hasItemSources = (item.source_refs ?? []).length > 0;
-                const isSelected = selectedItemKey === itemKey;
-                return (
-                  <li key={idx} className="text-sm">
-                    <div
-                      className={`flex items-start gap-2 px-2 py-1.5 rounded transition-colors ${
-                        isSelected
-                          ? "bg-primary/10 ring-1 ring-primary/30"
-                          : hasItemSources
-                            ? "cursor-pointer hover:bg-accent/40"
-                            : ""
-                      }`}
-                      onClick={() => {
-                        if (hasItemSources && item.source_refs?.[0]) {
-                          openSource(item.source_refs[0], item.text, itemKey);
-                        }
-                      }}
-                    >
-                      {hasItemSources && (
-                        <FileText className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                      )}
-                      <span className="flex-1">{item.text}</span>
-                      <Badge
-                        variant={
-                          item.confidence === "low"
-                            ? "destructive"
-                            : item.confidence === "medium"
-                              ? "secondary"
-                              : "default"
-                        }
-                        className="text-[9px] shrink-0"
-                      >
-                        {item.confidence}
-                      </Badge>
-                    </div>
-                    {hasItemSources && item.source_refs && item.source_refs.length > 1 && isSelected && (
-                      <div className="ml-7 mt-1 mb-1 flex gap-1 flex-wrap">
-                        {item.source_refs.map((ref, ri) => (
-                          <button
-                            key={ri}
-                            onClick={(e) => { e.stopPropagation(); openSource(ref, item.text, itemKey); }}
-                            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                              activeSource?.docId === ref.doc_id
-                                ? "bg-primary/10 border-primary/30 text-primary"
-                                : "bg-muted/30 border-border/30 hover:bg-accent/40"
-                            }`}
-                          >
-                            {PROVIDER_ICONS[ref.source_type] ?? "📎"} {ref.title}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      ))}
-
-      {uniqueSources.size > 0 && (
-        <div className="mt-8 pt-4 border-t">
-          <h3 className="text-sm font-semibold mb-3">Sources ({uniqueSources.size})</h3>
-          <div className="space-y-1.5">
-            {Array.from(uniqueSources.values()).map((ref, i) => (
-              <div
-                key={i}
-                className="text-xs bg-muted/30 rounded px-3 py-2 border border-border/30 cursor-pointer hover:bg-accent/30 transition-colors"
-                onClick={() => setActiveSource({ docId: ref.doc_id, title: ref.title, sourceType: ref.source_type, highlightText: "" })}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span>{PROVIDER_ICONS[ref.source_type] ?? "📎"}</span>
-                  <span className="font-medium">{ref.title}</span>
-                  <span className="text-muted-foreground">({ref.source_type})</span>
-                  <ExternalLink className="h-2.5 w-2.5 text-muted-foreground ml-auto" />
-                </div>
-                {ref.excerpt && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{ref.excerpt}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  if (!activeSource) {
-    return <ScrollArea className="h-full">{entityContent}</ScrollArea>;
-  }
-
   return (
-    <PanelGroup direction="horizontal" className="h-full">
-      <Panel defaultSize={55} minSize={30}>
-        <ScrollArea className="h-full">{entityContent}</ScrollArea>
-      </Panel>
-      <PanelResizeHandle className="w-1.5 bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
-      <Panel defaultSize={45} minSize={20}>
-        <SourcePanel
-          companySlug={companySlug}
-          source={activeSource}
-          onClose={closeSource}
-        />
-      </Panel>
-    </PanelGroup>
+    <ScrollArea className="h-full">
+      <div className="p-6">
+        {onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack} className="mb-4">
+            &larr; Back to human view
+          </Button>
+        )}
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-lg font-semibold">{page.title}</h2>
+          <Badge variant="outline">{page.node_type}</Badge>
+        </div>
+        {visibleSections.map((section) => {
+          const si = page.sections.indexOf(section);
+          return (
+            <div key={section.section_name} className="mb-5">
+              <div className="flex items-center gap-2 mb-2 border-b pb-1">
+                <h3 className="text-sm font-semibold">{section.section_name}</h3>
+                <Badge
+                  variant={section.requirement === "MUST" ? "default" : "secondary"}
+                  className="text-[9px]"
+                >
+                  {section.requirement}
+                </Badge>
+              </div>
+              {section.items.length === 0 ? (
+                <p className="text-xs text-red-400 italic">Unknown</p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {section.items.map((item, idx) => {
+                    const itemKey = `${section.section_name}-${idx}`;
+                    const hasItemSources = (item.source_refs ?? []).length > 0;
+                    const isSelected = selectedItemKey === itemKey;
+                    const showVerifyForm = verifyFormKey === itemKey;
+                    return (
+                      <li key={idx} className="text-sm">
+                        <div
+                          className={`group flex items-start gap-2 px-2 py-1.5 rounded transition-colors ${
+                            isSelected
+                              ? "bg-primary/10 ring-1 ring-primary/30"
+                              : "cursor-pointer hover:bg-accent/40"
+                          }`}
+                          onClick={() => {
+                            if (!showVerifyForm) {
+                              setSelectedItemKey(itemKey);
+                              if (item.source_refs) onItemClick?.(item.source_refs);
+                            }
+                          }}
+                        >
+                          {hasItemSources && (
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                          )}
+                          <span className="flex-1">{item.text}</span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Badge
+                              variant={
+                                item.confidence === "low"
+                                  ? "destructive"
+                                  : item.confidence === "medium"
+                                    ? "secondary"
+                                    : "default"
+                              }
+                              className="text-[9px]"
+                            >
+                              {item.confidence}
+                            </Badge>
+                            {isSelected && !showVerifyForm && (
+                              <button
+                                className="transition-opacity"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setVerifyFormKey(itemKey);
+                                  setVerifyTitle("");
+                                  setVerifyDescription("");
+                                }}
+                                title="Edit in Verify"
+                              >
+                                <Edit3 className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {showVerifyForm && (
+                          <div className="mt-2 ml-6 space-y-2 p-2 bg-muted/30 rounded border" onClick={(e) => e.stopPropagation()}>
+                            <div>
+                              <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Reviewer *</label>
+                              <Select value={verifyReviewer} onValueChange={setVerifyReviewer}>
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue placeholder="Select reviewer..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {peopleList.map((p) => (
+                                    <SelectItem key={p.id || p.name} value={p.name}>{p.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <Input
+                              placeholder="Title (optional)"
+                              value={verifyTitle}
+                              onChange={(e) => setVerifyTitle(e.target.value)}
+                              className="text-sm h-8"
+                            />
+                            <Textarea
+                              placeholder="Describe what should change..."
+                              value={verifyDescription}
+                              onChange={(e) => setVerifyDescription(e.target.value)}
+                              className="text-sm min-h-[60px]"
+                            />
+                            <div className="flex gap-1.5 items-center">
+                              <Button size="sm" className="h-6 text-[11px] px-2" disabled={!verifyReviewer} onClick={() => handleAddToVerify(section.section_name, item.text)}>
+                                Add to Verify
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={() => { setVerifyFormKey(null); setVerifyTitle(""); setVerifyDescription(""); setVerifyReviewer(""); }}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
   );
 }

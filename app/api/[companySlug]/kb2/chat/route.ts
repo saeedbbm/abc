@@ -9,9 +9,17 @@ import {
   kb2HumanPagesCollection,
   kb2GraphNodesCollection,
   kb2GraphEdgesCollection,
+  kb2TicketsCollection,
+  kb2VerificationCardsCollection,
 } from "@/lib/mongodb";
 
 const KB2_COLLECTION = "kb2_embeddings";
+
+interface ContextItem {
+  type: string;
+  id: string;
+  title: string;
+}
 
 function extractSearchTerms(question: string): string[] {
   return question
@@ -21,19 +29,69 @@ function extractSearchTerms(question: string): string[] {
     .filter((t) => t.length > 2);
 }
 
+async function loadContextItems(items: ContextItem[]): Promise<string> {
+  const parts: string[] = [];
+
+  for (const item of items) {
+    try {
+      if (item.type === "entity_page") {
+        const page = await kb2EntityPagesCollection.findOne({ page_id: item.id });
+        if (page) {
+          const sections = ((page as any).sections ?? [])
+            .map((s: any) => `### ${s.section_name}\n${(s.items ?? []).map((i: any) => `- ${i.text}`).join("\n")}`)
+            .join("\n");
+          parts.push(`[Entity Page: ${page.title}]\n${sections}`);
+        }
+      } else if (item.type === "ticket") {
+        const ticket = await kb2TicketsCollection.findOne({ ticket_id: item.id });
+        if (ticket) {
+          parts.push(`[Ticket: ${ticket.title}]\nDescription: ${(ticket as any).description ?? ""}\nPriority: ${(ticket as any).priority}\nStatus: ${(ticket as any).workflow_state}`);
+        }
+      } else if (item.type === "verify_card") {
+        const card = await kb2VerificationCardsCollection.findOne({ card_id: item.id });
+        if (card) {
+          parts.push(`[Verify Card: ${(card as any).title ?? item.title}]\nType: ${(card as any).card_type}\nSeverity: ${(card as any).severity}\nDescription: ${(card as any).description ?? ""}`);
+        }
+      } else if (item.type === "human_page") {
+        const page = await kb2HumanPagesCollection.findOne({ page_id: item.id });
+        if (page) {
+          const body = ((page as any).paragraphs ?? []).map((p: any) => `### ${p.heading}\n${p.body}`).join("\n");
+          parts.push(`[KB Page: ${page.title}]\n${body}`);
+        }
+      }
+    } catch {
+      // skip failed loads
+    }
+  }
+
+  return parts.join("\n\n");
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   await params;
-  const { question } = await request.json();
+  const body = await request.json();
+
+  const message: string = body.message ?? body.question ?? "";
+  const contextItems: ContextItem[] = body.context_items ?? [];
+  const conversationHistory: { role: string; content: string }[] = body.conversation_history ?? [];
 
   const sources: { title: string; type: string }[] = [];
   const contextParts: string[] = [];
 
-  // ---- Layer 1: Graph-aware retrieval ----
+  // Load explicitly referenced context items
+  if (contextItems.length > 0) {
+    const itemContext = await loadContextItems(contextItems);
+    if (itemContext) {
+      contextParts.push(`=== Referenced Items ===\n${itemContext}`);
+    }
+  }
+
+  // Graph-aware retrieval
   try {
-    const terms = extractSearchTerms(question);
+    const terms = extractSearchTerms(message);
     if (terms.length > 0) {
       const orConditions = terms.flatMap((term) => [
         { display_name: { $regex: term, $options: "i" } },
@@ -101,7 +159,7 @@ export async function POST(
     // Graph query may fail if collections don't exist yet
   }
 
-  // ---- Layer 2: Generated pages ----
+  // Generated pages
   try {
     const entityPages = await kb2EntityPagesCollection.find({}).limit(20).toArray();
     const humanPages = await kb2HumanPagesCollection.find({}).limit(10).toArray();
@@ -122,11 +180,11 @@ export async function POST(
     // Pages may not exist yet
   }
 
-  // ---- Layer 3: Vector search (embeddings) ----
+  // Vector search (embeddings)
   try {
     const { embeddings } = await embedMany({
       model: getEmbeddingModel(),
-      values: [question],
+      values: [message],
     });
 
     const results = await qdrantClient.search(KB2_COLLECTION, {
@@ -153,16 +211,25 @@ export async function POST(
 
   const ragContext = contextParts.join("\n\n").slice(0, 30000);
 
+  const historyMessages = conversationHistory.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
   const { text } = await generateText({
     model: getFastModel(),
-    system: `You are a helpful assistant that answers questions about the company using the provided knowledge base context. The context comes from three layers:
-1. Knowledge Graph — structured entities and their relationships (most authoritative)
-2. KB Pages — generated summaries of entities and topics
-3. Document Chunks — raw text from source documents (most detailed)
+    system: `You are a helpful assistant that answers questions about the company using the provided knowledge base context. The context comes from multiple layers:
+1. Referenced Items — specific pages, tickets, or cards the user is looking at (most relevant)
+2. Knowledge Graph — structured entities and their relationships (most authoritative)
+3. KB Pages — generated summaries of entities and topics
+4. Document Chunks — raw text from source documents (most detailed)
 
-Prefer graph and page information for factual answers. Use document chunks for specific details, quotes, and context.
+Prefer referenced items and graph information for factual answers. Use document chunks for specific details, quotes, and context.
 Be concise and cite sources when possible. If you don't have enough information, say so.`,
-    prompt: `Context:\n${ragContext}\n\nQuestion: ${question}`,
+    messages: [
+      ...historyMessages,
+      { role: "user" as const, content: `Context:\n${ragContext}\n\nQuestion: ${message}` },
+    ],
     maxOutputTokens: 2048,
   });
 

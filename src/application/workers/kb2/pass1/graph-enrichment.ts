@@ -5,7 +5,7 @@ import {
   kb2GraphEdgesCollection,
 } from "@/lib/mongodb";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/workers/test/structured-generate";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { KB2EdgeTypeEnum } from "@/src/entities/models/kb2-types";
 import type { KB2GraphNodeType, KB2GraphEdgeType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";

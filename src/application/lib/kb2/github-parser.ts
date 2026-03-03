@@ -3,6 +3,7 @@
  * Produces one document per: file with content, PR, and standalone commit.
  */
 
+import { splitIntoSections } from "./confluence-parser";
 import type { KB2ParsedDocument } from "./confluence-parser";
 
 interface GHFile {
@@ -68,13 +69,15 @@ export function parseGithubApiResponse(json: unknown): KB2ParsedDocument[] {
 
     // Repo overview doc (directory tree)
     if (repo.directory_tree?.entries?.length) {
+      const treeContent = `# ${repoName} — Directory Structure\n\n${buildTreeText(repo.directory_tree.entries)}`;
       docs.push({
         id: `github-${repoName}-tree`,
         provider: "github",
         sourceType: "repo_tree",
         sourceId: `${repoName}/tree`,
         title: `${repoName} — Directory Structure`,
-        content: `# ${repoName} — Directory Structure\n\n${buildTreeText(repo.directory_tree.entries)}`,
+        content: treeContent,
+        sections: splitIntoSections(treeContent),
         metadata: { repo: repoName, type: "tree", fileCount: repo.directory_tree.entries.filter((e) => e.type === "file").length },
       });
     }
@@ -83,13 +86,15 @@ export function parseGithubApiResponse(json: unknown): KB2ParsedDocument[] {
     for (const file of repo.files ?? []) {
       if (!file.content) continue;
       const lang = file.language ?? file.path.split(".").pop() ?? "";
+      const fileContent = `# ${repoName}/${file.path}\n\n\`\`\`${lang}\n${file.content}\`\`\``;
       docs.push({
         id: `github-${repoName}-${file.path.replace(/\//g, "-")}`,
         provider: "github",
         sourceType: "file",
         sourceId: `${repoName}/${file.path}`,
         title: `${repoName}/${file.path}`,
-        content: `# ${repoName}/${file.path}\n\n\`\`\`${lang}\n${file.content}\`\`\``,
+        content: fileContent,
+        sections: splitIntoSections(fileContent),
         metadata: { repo: repoName, path: file.path, language: lang },
       });
     }
@@ -119,13 +124,15 @@ export function parseGithubApiResponse(json: unknown): KB2ParsedDocument[] {
         }
       }
 
+      const prContent = parts.join("\n").trim();
       docs.push({
         id: `github-${repoName}-pr-${pr.number}`,
         provider: "github",
         sourceType: "pull_request",
         sourceId: `${repoName}/pull/${pr.number}`,
         title: `${repoName} PR #${pr.number}: ${pr.title}`,
-        content: parts.join("\n").trim(),
+        content: prContent,
+        sections: splitIntoSections(prContent),
         metadata: {
           repo: repoName, prNumber: pr.number, state: pr.state,
           author: pr.author, base: pr.base, head: pr.head,

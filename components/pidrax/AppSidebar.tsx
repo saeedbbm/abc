@@ -1,32 +1,12 @@
 "use client";
 
-import { BookOpen, MessageSquare, CheckCircle, Settings, ClipboardList, Wrench, Database, ListTree, Play } from 'lucide-react';
+import { BookOpen, MessageSquare, CheckCircle, Settings, Settings2, ClipboardList, Wrench, Play } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
-import { isDemo } from '@/lib/is-demo';
 
 type NavItem = { segment: string; icon: any; label: string };
 
-const demoNavItems: NavItem[] = [
-  { segment: 'kb', icon: BookOpen, label: 'KB' },
-  { segment: 'verify', icon: CheckCircle, label: 'Verify' },
-  { segment: 'pm', icon: ClipboardList, label: 'PM' },
-  { segment: 'implement', icon: Wrench, label: 'Implement' },
-  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
-  { segment: 'admin', icon: Settings, label: 'Admin' },
-];
-
-const pidraxNavItems: NavItem[] = [
-  { segment: 'kb', icon: Database, label: 'Input Data' },
-  { segment: 'pass1', icon: BookOpen, label: 'Pass 1' },
-  { segment: 'pass2', icon: ListTree, label: 'Pass 2' },
-  { segment: 'verify', icon: CheckCircle, label: 'Verify' },
-  { segment: 'pm', icon: ClipboardList, label: 'PM' },
-  { segment: 'chat', icon: MessageSquare, label: 'Chat' },
-  { segment: 'admin', icon: Settings, label: 'Admin' },
-];
-
-const arch2NavItems: NavItem[] = [
+const navItems: NavItem[] = [
   { segment: 'kb', icon: BookOpen, label: 'KB' },
   { segment: 'verify', icon: CheckCircle, label: 'Verify' },
   { segment: 'tickets', icon: ClipboardList, label: 'Tickets' },
@@ -34,21 +14,12 @@ const arch2NavItems: NavItem[] = [
   { segment: 'execute', icon: Play, label: 'Execute' },
   { segment: 'chat', icon: MessageSquare, label: 'Chat' },
   { segment: 'admin', icon: Settings, label: 'KB Admin' },
+  { segment: 'settings', icon: Settings2, label: 'Settings' },
 ];
-
-function isArch2(slug: string | undefined): boolean {
-  return slug === 'brewandgo2';
-}
 
 export function AppSidebar() {
   const pathname = usePathname();
   const { companySlug } = useParams<{ companySlug: string }>();
-
-  const navItems = isArch2(companySlug)
-    ? arch2NavItems
-    : isDemo(companySlug)
-      ? demoNavItems
-      : pidraxNavItems;
 
   return (
     <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 bg-sidebar border-r border-sidebar-border">

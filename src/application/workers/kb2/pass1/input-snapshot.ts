@@ -31,13 +31,14 @@ function parseGenericSource(source: string, data: unknown): KB2ParsedDocument[] 
       sourceId: `${source}-0`,
       title: `${source} (raw)`,
       content: text,
+      sections: [{ heading: `${source} (raw)`, content: text, start_offset: 0, end_offset: text.length }],
       metadata: {},
     },
   ];
 }
 
 export const inputSnapshotStep: StepFunction = async (ctx) => {
-  const companySlug = "brewandgo2";
+  const companySlug = ctx.companySlug;
 
   const rawInputs = await kb2RawInputsCollection
     .find({ company_slug: companySlug })

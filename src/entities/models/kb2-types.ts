@@ -93,6 +93,7 @@ export const KB2EvidenceRef = z.object({
   doc_id: z.string(),
   title: z.string(),
   excerpt: z.string(),
+  section_heading: z.string().optional(),
 });
 export type KB2EvidenceRefType = z.infer<typeof KB2EvidenceRef>;
 
@@ -154,11 +155,14 @@ export const KB2VerificationCard = z.object({
   explanation: z.string(),
   canonical_text: z.string().optional(),
   proposed_text: z.string().optional(),
+  recommended_action: z.string().optional(),
   page_occurrences: z.array(z.object({
     page_id: z.string(),
     page_type: z.enum(["entity", "human"]),
+    page_title: z.string().optional(),
     section: z.string().optional(),
   })).default([]),
+  source_refs: z.array(KB2EvidenceRef).default([]),
   assigned_to: z.array(z.string()).default([]),
   claim_ids: z.array(z.string()).default([]),
   status: KB2VerifyCardStatusEnum.default("open"),
@@ -187,10 +191,17 @@ export const KB2EntityPage = z.object({
         source_type: z.string(),
         doc_id: z.string(),
         title: z.string(),
+        section_heading: z.string().optional(),
+        excerpt: z.string().optional(),
       })).default([]),
     })),
   })),
   linked_human_page_ids: z.array(z.string()).default([]),
+  manual_overrides: z.record(z.string(), z.object({
+    edited_by: z.string(),
+    edited_at: z.string(),
+    original_text: z.string(),
+  })).default({}),
 });
 export type KB2EntityPageType = z.infer<typeof KB2EntityPage>;
 
@@ -264,6 +275,14 @@ export const KB2LLMCall = z.object({
 });
 export type KB2LLMCallType = z.infer<typeof KB2LLMCall>;
 
+export const KB2TicketComment = z.object({
+  id: z.string(),
+  author: z.string(),
+  text: z.string(),
+  source: z.enum(["manual", "ai_summary"]).default("manual"),
+  timestamp: z.string(),
+});
+
 export const KB2Ticket = z.object({
   ticket_id: z.string(),
   run_id: z.string().optional(),
@@ -275,9 +294,26 @@ export const KB2Ticket = z.object({
   priority: z.enum(["P0", "P1", "P2", "P3"]).default("P2"),
   workflow_state: KB2WorkflowStateEnum.default("backlog"),
   linked_entity_ids: z.array(z.string()).default([]),
+  linked_entity_names: z.array(z.string()).default([]),
+  parent_ticket_id: z.string().optional(),
+  subtask_ids: z.array(z.string()).default([]),
+  labels: z.array(z.string()).default([]),
+  comments: z.array(KB2TicketComment).default([]),
   created_at: z.string(),
 });
 export type KB2TicketType = z.infer<typeof KB2Ticket>;
+
+export const KB2ImpactCard = z.object({
+  id: z.string(),
+  summary: z.string(),
+  reason: z.string(),
+  recommended_action: z.string(),
+  target_type: z.enum(["entity_page", "human_page", "ticket", "entity", "claim"]),
+  target_id: z.string(),
+  severity: KB2SeverityEnum,
+  accepted: z.boolean().optional(),
+});
+export type KB2ImpactCardType = z.infer<typeof KB2ImpactCard>;
 
 export const KB2Howto = z.object({
   howto_id: z.string(),

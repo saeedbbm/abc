@@ -2,6 +2,7 @@
  * Parses Zendesk-style customer feedback ticket exports into structured documents.
  */
 
+import { splitIntoSections } from "./confluence-parser";
 import type { KB2ParsedDocument } from "./confluence-parser";
 
 interface ZendeskTicket {
@@ -57,13 +58,15 @@ export function parseFeedbackApiResponse(json: unknown): KB2ParsedDocument[] {
         customMap[cf.id] = cf.value;
       }
 
+      const content = parts.join("\n").trim();
       return {
         id: `feedback-${ticket.id}`,
         provider: "customerFeedback",
         sourceType: ticket.type ?? "ticket",
         sourceId: String(ticket.id),
         title: ticket.subject,
-        content: parts.join("\n").trim(),
+        content,
+        sections: splitIntoSections(content),
         metadata: {
           ticketId: ticket.id,
           status: ticket.status,

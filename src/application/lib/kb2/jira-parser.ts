@@ -2,6 +2,7 @@
  * Parses real Jira REST API responses into structured documents.
  */
 
+import { splitIntoSections } from "./confluence-parser";
 import type { KB2ParsedDocument } from "./confluence-parser";
 
 interface JiraComment {
@@ -79,13 +80,15 @@ export function parseJiraApiResponse(json: unknown): KB2ParsedDocument[] {
         }
       }
 
+      const content = parts.join("\n").trim();
       return {
         id: `jira-${issue.key}`,
         provider: "jira",
         sourceType: f.issuetype?.name?.toLowerCase() ?? "issue",
         sourceId: issue.key,
         title: `${issue.key}: ${f.summary}`,
-        content: parts.join("\n").trim(),
+        content,
+        sections: splitIntoSections(content),
         metadata: {
           key: issue.key,
           issueType: f.issuetype?.name,
