@@ -105,19 +105,6 @@ export async function GET(
         }));
       return Response.json({ people: derived });
     }
-    case "parsed_doc": {
-      const docId = request.nextUrl.searchParams.get("doc_id");
-      if (!docId) return Response.json({ error: "doc_id required" }, { status: 400 });
-      const latestSnapshot = await kb2InputSnapshotsCollection.findOne(
-        filter.run_id ? filter : { company_slug: companySlug },
-        { sort: { created_at: -1 } },
-      );
-      if (!latestSnapshot?.parsed_documents) return Response.json({ doc: null });
-      const parsedDoc = (latestSnapshot.parsed_documents as any[]).find(
-        (d: any) => d.sourceId === docId || d.id === docId || d.title === docId,
-      );
-      return Response.json({ doc: parsedDoc ?? null });
-    }
     case "graph_nodes": {
       const gnFilter = { ...filter };
       if (!gnFilter.run_id) {

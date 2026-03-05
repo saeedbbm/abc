@@ -13,8 +13,9 @@ const LLM_BATCH_SIZE = 15;
 function tokenize(s: string): Set<string> {
   return new Set(
     s.toLowerCase()
-      .replace(/[^a-z0-9\s-_]/g, "")
-      .split(/[\s\-_]+/)
+      .replace(/[._@]/g, " ")
+      .replace(/[^a-z0-9\s\-]/g, "")
+      .split(/[\s\-]+/)
       .filter((t) => t.length > 1),
   );
 }
