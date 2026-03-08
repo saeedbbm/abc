@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { normalizeForMatch } from "@/lib/utils";
 import {
   Tabs,
   TabsList,
@@ -73,6 +75,7 @@ interface KB2RightPanelProps {
   sourceRefs: SourceRef[];
   relatedEntityPages: RelatedEntityPage[];
   defaultTab?: "sources" | "kb" | "chat";
+  runId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +107,11 @@ const CONFIDENCE_COLORS: Record<string, string> = {
 function SourcesTab({
   companySlug,
   sourceRefs,
+  runId,
 }: {
   companySlug: string;
   sourceRefs: SourceRef[];
+  runId?: string;
 }) {
   const [openSet, setOpenSet] = useState<Set<number>>(new Set());
   const [fullDocs, setFullDocs] = useState<Record<string, { title: string; content: string; provider?: string } | null>>({});
@@ -125,12 +130,16 @@ function SourcesTab({
   useEffect(() => {
     for (const idx of openSet) {
       const ref = sourceRefs[idx];
-      if (!ref?.doc_id || fetchedRef.current.has(ref.doc_id)) continue;
-      fetchedRef.current.add(ref.doc_id);
-      const docId = ref.doc_id;
+      if (!ref?.doc_id) continue;
+      const cacheKey = `${ref.source_type ?? ""}:${ref.doc_id}`;
+      if (fetchedRef.current.has(cacheKey)) continue;
+      fetchedRef.current.add(cacheKey);
 
-      setLoadingDocs((prev) => new Set(prev).add(docId));
-      fetch(`/api/${companySlug}/kb2?type=parsed_doc&doc_id=${encodeURIComponent(docId)}`)
+      setLoadingDocs((prev) => new Set(prev).add(cacheKey));
+      const params = new URLSearchParams({ type: "parsed_doc", doc_id: ref.doc_id });
+      if (ref.source_type) params.set("source_type", ref.source_type);
+      if (runId) params.set("run_id", runId);
+      fetch(`/api/${companySlug}/kb2?${params}`)
         .then(async (res) => {
           if (res.ok) {
             const data = await res.json();
@@ -139,18 +148,18 @@ function SourcesTab({
             if (!content && doc?.sections?.length) {
               content = doc.sections.map((s: any) => `## ${s.heading}\n${s.content}`).join("\n\n");
             }
-            setFullDocs((prev) => ({ ...prev, [docId]: { title: doc?.title ?? "", content, provider: doc?.provider } }));
+            setFullDocs((prev) => ({ ...prev, [cacheKey]: { title: doc?.title ?? "", content, provider: doc?.provider } }));
           } else {
-            setFullDocs((prev) => ({ ...prev, [docId]: null }));
+            setFullDocs((prev) => ({ ...prev, [cacheKey]: null }));
           }
         })
         .catch(() => {
-          setFullDocs((prev) => ({ ...prev, [docId]: null }));
+          setFullDocs((prev) => ({ ...prev, [cacheKey]: null }));
         })
         .finally(() => {
           setLoadingDocs((prev) => {
             const next = new Set(prev);
-            next.delete(docId);
+            next.delete(cacheKey);
             return next;
           });
         });
@@ -158,25 +167,151 @@ function SourcesTab({
   }, [openSet, sourceRefs, companySlug]);
 
   useEffect(() => {
+    setOpenSet(new Set());
     fetchedRef.current.clear();
     setFullDocs({});
   }, [sourceRefs]);
 
-  const highlightExcerpt = (content: string, excerpt?: string): React.ReactNode => {
+  const highlightExcerpt = (content: string, excerpt?: string, sectionHeading?: string): React.ReactNode => {
     if (!excerpt || !content) return <span className="whitespace-pre-wrap">{content}</span>;
-    const cleanExcerpt = excerpt.slice(0, 200).trim();
-    const idx = content.toLowerCase().indexOf(cleanExcerpt.toLowerCase().slice(0, 60));
-    if (idx === -1) return <span className="whitespace-pre-wrap">{content}</span>;
-    const before = content.slice(0, idx);
-    const match = content.slice(idx, idx + cleanExcerpt.length);
-    const after = content.slice(idx + cleanExcerpt.length);
-    return (
+
+    const wrapMatch = (text: string, start: number, len: number) => (
       <span className="whitespace-pre-wrap">
-        {before}
-        <mark className="bg-yellow-200 dark:bg-yellow-900/60 rounded px-0.5">{match}</mark>
-        {after}
+        {text.slice(0, start)}
+        <mark className="bg-yellow-200 dark:bg-yellow-900/60 rounded px-0.5">{text.slice(start, start + len)}</mark>
+        {text.slice(start + len)}
       </span>
     );
+
+    const cleanExcerpt = excerpt.slice(0, 300).trim();
+    const contentLower = content.toLowerCase();
+    const excerptLower = cleanExcerpt.toLowerCase();
+
+    // 1. Exact substring match
+    const fullIdx = contentLower.indexOf(excerptLower);
+    if (fullIdx !== -1) return wrapMatch(content, fullIdx, cleanExcerpt.length);
+
+    // 2. Whitespace-normalized match: collapse all whitespace to single spaces
+    //    and find the excerpt, then map position back to the original string
+    const normalize = (s: string) => s.replace(/\s+/g, " ");
+    const normContent = normalize(contentLower);
+    const normExcerpt = normalize(excerptLower);
+    const normIdx = normContent.indexOf(normExcerpt);
+    if (normIdx !== -1) {
+      let normPos = 0;
+      let origStart = 0;
+      for (let ci = 0; ci < content.length && normPos < normIdx; ci++) {
+        if (/\s/.test(content[ci])) {
+          if (ci === 0 || !/\s/.test(content[ci - 1])) normPos++;
+        } else {
+          normPos++;
+        }
+        origStart = ci + 1;
+      }
+      let origEnd = origStart;
+      let matchedNorm = 0;
+      for (let ci = origStart; ci < content.length && matchedNorm < normExcerpt.length; ci++) {
+        if (/\s/.test(content[ci])) {
+          if (ci === origStart || !/\s/.test(content[ci - 1])) matchedNorm++;
+        } else {
+          matchedNorm++;
+        }
+        origEnd = ci + 1;
+      }
+      return wrapMatch(content, origStart, origEnd - origStart);
+    }
+
+    // 3. Format-stripped normalized match (handles heading underlines, quote markers, etc.)
+    const normFull = normalizeForMatch(content);
+    const normExcerptFull = normalizeForMatch(cleanExcerpt);
+    if (normFull.includes(normExcerptFull)) {
+      const paragraphs: { text: string; start: number; end: number }[] = [];
+      const paraRe = /(?:\S[\s\S]*?)(?=\n\s*\n|$)/g;
+      let pm: RegExpExecArray | null;
+      while ((pm = paraRe.exec(content)) !== null) {
+        paragraphs.push({ text: pm[0], start: pm.index, end: pm.index + pm[0].length });
+      }
+      if (paragraphs.length > 0) {
+        let bestStart = -1;
+        let bestEnd = -1;
+        for (let i = 0; i < paragraphs.length; i++) {
+          let combined = "";
+          for (let j = i; j < paragraphs.length; j++) {
+            combined += (j > i ? " " : "") + paragraphs[j].text;
+            if (normalizeForMatch(combined).includes(normExcerptFull)) {
+              bestStart = paragraphs[i].start;
+              bestEnd = paragraphs[j].end;
+              break;
+            }
+          }
+          if (bestStart !== -1) break;
+        }
+        if (bestStart !== -1) {
+          return wrapMatch(content, bestStart, bestEnd - bestStart);
+        }
+      }
+    }
+
+    // 4. Section-scoped normalized match
+    if (sectionHeading) {
+      const headingIdx = contentLower.indexOf(sectionHeading.toLowerCase());
+      if (headingIdx !== -1) {
+        const sectionEnd = Math.min(headingIdx + 800, content.length);
+        const sectionSlice = content.slice(headingIdx, sectionEnd);
+        const normSection = normalize(sectionSlice.toLowerCase());
+        const normSectionIdx = normSection.indexOf(normExcerpt);
+        if (normSectionIdx !== -1) {
+          let normPos = 0;
+          let secStart = 0;
+          for (let ci = 0; ci < sectionSlice.length && normPos < normSectionIdx; ci++) {
+            if (/\s/.test(sectionSlice[ci])) {
+              if (ci === 0 || !/\s/.test(sectionSlice[ci - 1])) normPos++;
+            } else {
+              normPos++;
+            }
+            secStart = ci + 1;
+          }
+          let secEnd = secStart;
+          let matchedNorm = 0;
+          for (let ci = secStart; ci < sectionSlice.length && matchedNorm < normExcerpt.length; ci++) {
+            if (/\s/.test(sectionSlice[ci])) {
+              if (ci === secStart || !/\s/.test(sectionSlice[ci - 1])) matchedNorm++;
+            } else {
+              matchedNorm++;
+            }
+            secEnd = ci + 1;
+          }
+          return wrapMatch(content, headingIdx + secStart, secEnd - secStart);
+        }
+      }
+    }
+
+    // 5. Sentence-level best match (high threshold to avoid wrong highlights)
+    const excerptWords = new Set(excerptLower.split(/\s+/).filter((w) => w.length > 3));
+    if (excerptWords.size >= 3) {
+      const sentences = content.split(/(?<=[.!?\n])\s+/);
+      let bestScore = 0;
+      let bestStart = 0;
+      let bestLen = 0;
+      let pos = 0;
+      for (const sent of sentences) {
+        const sentWords = sent.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+        const overlap = sentWords.filter((w) => excerptWords.has(w)).length;
+        const score = excerptWords.size > 0 ? overlap / excerptWords.size : 0;
+        if (score > bestScore) {
+          bestScore = score;
+          bestStart = content.indexOf(sent, pos);
+          bestLen = sent.length;
+        }
+        pos += sent.length + 1;
+      }
+      if (bestScore >= 0.5 && bestStart >= 0) {
+        return wrapMatch(content, bestStart, bestLen);
+      }
+    }
+
+    // 6. No confident match -- show content without highlight rather than highlight wrong spot
+    return <span className="whitespace-pre-wrap">{content}</span>;
   };
 
   if (sourceRefs.length === 0) {
@@ -191,11 +326,12 @@ function SourcesTab({
     <div className="space-y-2">
       {sourceRefs.map((ref, idx) => {
         const isOpen = openSet.has(idx);
-        const fullDoc = fullDocs[ref.doc_id];
-        const isLoading = loadingDocs.has(ref.doc_id);
+        const cacheKey = `${ref.source_type ?? ""}:${ref.doc_id}`;
+        const fullDoc = fullDocs[cacheKey];
+        const isLoading = loadingDocs.has(cacheKey);
         return (
           <Collapsible
-            key={`${ref.doc_id}-${idx}`}
+            key={`${ref.source_type ?? ""}-${ref.doc_id}-${idx}`}
             open={isOpen}
             onOpenChange={() => toggle(idx)}
           >
@@ -232,7 +368,7 @@ function SourcesTab({
                     <div className="rounded bg-muted/40 p-3 max-h-96 overflow-y-auto">
                       <p className="text-xs font-medium mb-2">{fullDoc.title}</p>
                       <div className="text-xs text-muted-foreground leading-relaxed">
-                        {highlightExcerpt(fullDoc.content, ref.excerpt)}
+                        {highlightExcerpt(fullDoc.content, ref.excerpt, ref.section_heading)}
                       </div>
                     </div>
                   )}
@@ -356,9 +492,11 @@ interface MentionSearchResult {
 function ChatTab({
   companySlug,
   autoContext,
+  onSourcesReceived,
 }: {
   companySlug: string;
   autoContext: AutoContext | null;
+  onSourcesReceived?: (inputSources: SourceRef[], kbPages: RelatedEntityPage[]) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [mentionedItems, setMentionedItems] = useState<AutoContext[]>([]);
@@ -496,6 +634,23 @@ function ChatTab({
         ...prev,
         { role: "assistant", content: data.answer ?? "No response." },
       ]);
+
+      const iSources: SourceRef[] = (data.input_sources ?? []).map((s: any) => ({
+        source_type: s.source_type ?? "unknown",
+        doc_id: s.doc_id ?? "",
+        title: s.title ?? "Unknown",
+        excerpt: s.excerpt,
+      }));
+      const kPages: RelatedEntityPage[] = (data.kb_sources ?? []).map((p: any) => ({
+        page_id: p.page_id,
+        title: p.title,
+        node_type: p.node_type ?? "unknown",
+        sections: (p.sections ?? []).map((s: any) => ({
+          section_name: s.section_name,
+          items: (s.items ?? []).map((i: any) => ({ text: i.text, confidence: i.confidence ?? "medium" })),
+        })),
+      }));
+      onSourcesReceived?.(iSources, kPages);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -592,7 +747,13 @@ function ChatTab({
                     : "bg-muted text-foreground"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === "user" ? (
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:mb-2 [&_p]:last:mb-0 [&_ol]:mb-2 [&_ul]:mb-2 [&_li]:mb-0.5 [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-medium [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_code]:text-xs [&_code]:bg-muted-foreground/10 [&_code]:px-1 [&_code]:rounded">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -710,8 +871,19 @@ function KB2RightPanel({
   sourceRefs,
   relatedEntityPages,
   defaultTab = "sources",
+  runId,
 }: KB2RightPanelProps) {
   const [activeTab, setActiveTab] = useState(defaultTab);
+  const [chatSources, setChatSources] = useState<SourceRef[]>([]);
+  const [chatKbPages, setChatKbPages] = useState<RelatedEntityPage[]>([]);
+
+  const activeSources = sourceRefs.length > 0 ? sourceRefs : chatSources;
+  const activeKbPages = relatedEntityPages.length > 0 ? relatedEntityPages : chatKbPages;
+
+  const handleChatSources = useCallback((iSources: SourceRef[], kPages: RelatedEntityPage[]) => {
+    setChatSources(iSources);
+    setChatKbPages(kPages);
+  }, []);
 
   return (
     <Tabs
@@ -727,12 +899,12 @@ function KB2RightPanel({
           >
             <FileText className="h-3.5 w-3.5" />
             Sources
-            {sourceRefs.length > 0 && (
+            {activeSources.length > 0 && (
               <Badge
                 variant="secondary"
                 className="ml-1 text-[10px] px-1 py-0"
               >
-                {sourceRefs.length}
+                {activeSources.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -742,12 +914,12 @@ function KB2RightPanel({
           >
             <BookOpen className="h-3.5 w-3.5" />
             AI KB Pages
-            {relatedEntityPages.length > 0 && (
+            {activeKbPages.length > 0 && (
               <Badge
                 variant="secondary"
                 className="ml-1 text-[10px] px-1 py-0"
               >
-                {relatedEntityPages.length}
+                {activeKbPages.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -766,7 +938,8 @@ function KB2RightPanel({
           <div className="p-3">
             <SourcesTab
               companySlug={companySlug}
-              sourceRefs={sourceRefs}
+              sourceRefs={activeSources}
+              runId={runId}
             />
           </div>
         </ScrollArea>
@@ -775,13 +948,13 @@ function KB2RightPanel({
       <TabsContent value="kb" className="flex-1 mt-0 min-h-0">
         <ScrollArea className="h-full">
           <div className="p-3">
-            <KBPagesTab relatedEntityPages={relatedEntityPages} />
+            <KBPagesTab relatedEntityPages={activeKbPages} />
           </div>
         </ScrollArea>
       </TabsContent>
 
       <TabsContent value="chat" className="flex-1 mt-0 min-h-0">
-        <ChatTab companySlug={companySlug} autoContext={autoContext} />
+        <ChatTab companySlug={companySlug} autoContext={autoContext} onSourcesReceived={handleChatSources} />
       </TabsContent>
     </Tabs>
   );

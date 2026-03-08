@@ -68,6 +68,7 @@
     "react-dom": "^19.1.0",
     "react-force-graph-3d": "^1.29.1",
     "react-hook-form": "^7.61.1",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.9",
     "recharts": "^2.15.4",
     "sonner": "^1.7.4",

@@ -12,6 +12,7 @@ import {
   kb2TicketsCollection,
   kb2VerificationCardsCollection,
 } from "@/lib/mongodb";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 const KB2_COLLECTION = "kb2_embeddings";
 
@@ -71,14 +72,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
-  await params;
+  const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const body = await request.json();
 
   const message: string = body.message ?? body.question ?? "";
   const contextItems: ContextItem[] = body.context_items ?? [];
   const conversationHistory: { role: string; content: string }[] = body.conversation_history ?? [];
 
-  const sources: { title: string; type: string }[] = [];
+  const inputSources: { source_type: string; doc_id: string; title: string; excerpt?: string }[] = [];
+  const kbSources: { page_id: string; title: string; node_type: string; sections: { section_name: string; items: { text: string; confidence: string }[] }[] }[] = [];
+  const seenDocIds = new Set<string>();
+  const seenPageIds = new Set<string>();
   const contextParts: string[] = [];
 
   // Load explicitly referenced context items
@@ -100,7 +105,7 @@ export async function POST(
 
       const matchingNodes = await kb2GraphNodesCollection
         .find({ $or: orConditions })
-        .limit(20)
+        .limit(config?.pipeline_settings?.chat?.graph_node_limit ?? 20)
         .toArray();
 
       if (matchingNodes.length > 0) {
@@ -112,7 +117,7 @@ export async function POST(
               { target_node_id: { $in: [...nodeIds] } },
             ],
           })
-          .limit(50)
+          .limit(config?.pipeline_settings?.chat?.edge_limit ?? 50)
           .toArray();
 
         const allRelatedIds = new Set<string>();
@@ -150,19 +155,25 @@ export async function POST(
         if (graphContext) {
           contextParts.push(`=== Knowledge Graph ===\n${graphContext}`);
           for (const n of matchingNodes) {
-            sources.push({ title: (n as any).display_name, type: `graph:${(n as any).type}` });
+            for (const ref of ((n as any).source_refs ?? [])) {
+              const docId = ref.doc_id ?? ref.title;
+              if (!seenDocIds.has(docId)) {
+                seenDocIds.add(docId);
+                inputSources.push({ source_type: ref.source_type ?? "unknown", doc_id: docId, title: ref.title, excerpt: ref.excerpt });
+              }
+            }
           }
         }
       }
     }
-  } catch {
-    // Graph query may fail if collections don't exist yet
+  } catch (err) {
+    console.error("[kb2/chat] Graph retrieval failed:", err);
   }
 
   // Generated pages
   try {
-    const entityPages = await kb2EntityPagesCollection.find({}).limit(20).toArray();
-    const humanPages = await kb2HumanPagesCollection.find({}).limit(10).toArray();
+    const entityPages = await kb2EntityPagesCollection.find({}).limit(config?.pipeline_settings?.chat?.entity_page_limit ?? 20).toArray();
+    const humanPages = await kb2HumanPagesCollection.find({}).limit(config?.pipeline_settings?.chat?.human_page_limit ?? 10).toArray();
 
     const pageContext = [
       ...entityPages.map((p: any) =>
@@ -171,13 +182,29 @@ export async function POST(
       ...humanPages.map((p: any) =>
         `[Page: ${p.title}] ${p.paragraphs?.map((pg: any) => pg.body).join(" ")}`,
       ),
-    ].join("\n\n").slice(0, 15000);
+    ].join("\n\n").slice(0, config?.pipeline_settings?.chat?.page_context_length ?? 15000);
 
     if (pageContext) {
       contextParts.push(`=== KB Pages ===\n${pageContext}`);
     }
-  } catch {
-    // Pages may not exist yet
+
+    for (const ep of entityPages) {
+      const pid = (ep as any).page_id;
+      if (!seenPageIds.has(pid)) {
+        seenPageIds.add(pid);
+        kbSources.push({
+          page_id: pid,
+          title: (ep as any).title,
+          node_type: (ep as any).node_type,
+          sections: ((ep as any).sections ?? []).map((s: any) => ({
+            section_name: s.section_name,
+            items: (s.items ?? []).map((i: any) => ({ text: i.text, confidence: i.confidence ?? "medium" })),
+          })),
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[kb2/chat] KB pages retrieval failed:", err);
   }
 
   // Vector search (embeddings)
@@ -189,15 +216,24 @@ export async function POST(
 
     const results = await qdrantClient.search(KB2_COLLECTION, {
       vector: embeddings[0],
-      limit: 10,
+      limit: config?.pipeline_settings?.chat?.vector_limit ?? 10,
       with_payload: true,
-      score_threshold: 0.5,
+      score_threshold: config?.pipeline_settings?.chat?.vector_score_threshold ?? 0.5,
     });
 
     const vectorContext = results
       .map((r: any) => {
         const payload = r.payload || {};
-        sources.push({ title: payload.title || "Unknown", type: payload.provider || "kb2" });
+        const docId = payload.doc_id ?? payload.title ?? "unknown";
+        if (!seenDocIds.has(docId)) {
+          seenDocIds.add(docId);
+          inputSources.push({
+            source_type: payload.provider || "unknown",
+            doc_id: docId,
+            title: payload.title || "Unknown",
+            excerpt: (payload.text || payload.content || "").slice(0, 300),
+          });
+        }
         return `[${payload.provider}] ${payload.title}: ${(payload.text || payload.content || "").slice(0, 1000)}`;
       })
       .join("\n\n");
@@ -205,11 +241,11 @@ export async function POST(
     if (vectorContext) {
       contextParts.push(`=== Document Chunks ===\n${vectorContext}`);
     }
-  } catch {
-    // Vector search may fail if collection doesn't exist yet
+  } catch (err) {
+    console.error("[kb2/chat] Vector search failed:", err);
   }
 
-  const ragContext = contextParts.join("\n\n").slice(0, 30000);
+  const ragContext = contextParts.join("\n\n").slice(0, config?.pipeline_settings?.chat?.rag_context_length ?? 30000);
 
   const historyMessages = conversationHistory.map((m) => ({
     role: m.role as "user" | "assistant",
@@ -217,21 +253,23 @@ export async function POST(
   }));
 
   const { text } = await generateText({
-    model: getFastModel(),
-    system: `You are a helpful assistant that answers questions about the company using the provided knowledge base context. The context comes from multiple layers:
-1. Referenced Items — specific pages, tickets, or cards the user is looking at (most relevant)
-2. Knowledge Graph — structured entities and their relationships (most authoritative)
-3. KB Pages — generated summaries of entities and topics
-4. Document Chunks — raw text from source documents (most detailed)
+    model: getFastModel(config?.pipeline_settings?.models),
+    system: config?.prompts?.chat?.system ?? `You are a helpful assistant that answers questions about the company using ONLY the provided knowledge base context.
 
-Prefer referenced items and graph information for factual answers. Use document chunks for specific details, quotes, and context.
-Be concise and cite sources when possible. If you don't have enough information, say so.`,
+Rules:
+- Answer ONLY based on the provided context. Do NOT fabricate answers, processes, or steps that are not in the context.
+- If the context does not contain relevant information, say clearly: "I don't have enough information about this in the knowledge base."
+- Do NOT list or append sources/references at the end of your answer — sources are displayed separately in the UI.
+- Do NOT use excessive markdown bold. Use bold sparingly for key terms only.
+- Use short paragraphs and bullet points for readability.
+- If you reference a ticket (e.g. PAW-19), mention it naturally in the text.
+- When referencing people or entities from the context, use the information as it appears — do not speculate about what they would do unless the context says so.`,
     messages: [
       ...historyMessages,
       { role: "user" as const, content: `Context:\n${ragContext}\n\nQuestion: ${message}` },
     ],
-    maxOutputTokens: 2048,
+    maxOutputTokens: config?.pipeline_settings?.chat?.max_output_tokens ?? 2048,
   });
 
-  return Response.json({ answer: text, sources });
+  return Response.json({ answer: text, input_sources: inputSources, kb_sources: kbSources });
 }

@@ -1,15 +1,12 @@
 import { randomUUID } from "crypto";
 import { embedMany } from "ai";
-import { kb2InputSnapshotsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { getEmbeddingModel } from "@/lib/ai-model";
 import { qdrantClient } from "@/lib/qdrant";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
 const KB2_COLLECTION = "kb2_embeddings";
-const CHUNK_SIZE = 1000;
-const CHUNK_OVERLAP = 200;
-const EMBED_BATCH = 96;
 
 interface TextChunk {
   chunkId: string;
@@ -31,11 +28,16 @@ function chunkText(text: string, size: number, overlap: number): string[] {
 }
 
 export const embedDocumentsStep: StepFunction = async (ctx) => {
-  const snapshot = await kb2InputSnapshotsCollection.findOne({ run_id: ctx.runId });
+  const CHUNK_SIZE = ctx.config?.pipeline_settings?.embed?.chunk_size ?? 1000;
+  const CHUNK_OVERLAP = ctx.config?.pipeline_settings?.embed?.chunk_overlap ?? 200;
+  const EMBED_BATCH = ctx.config?.pipeline_settings?.embed?.embed_batch_size ?? 96;
+
+  const tc = getTenantCollections(ctx.companySlug);
+  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
-  ctx.onProgress(`Chunking ${docs.length} documents...`, 5);
+  await ctx.onProgress(`Chunking ${docs.length} documents...`, 5);
 
   const allChunks: TextChunk[] = [];
   for (let i = 0; i < docs.length; i++) {
@@ -53,7 +55,7 @@ export const embedDocumentsStep: StepFunction = async (ctx) => {
     }
   }
 
-  ctx.onProgress(`Embedding ${allChunks.length} chunks...`, 15);
+  await ctx.onProgress(`Embedding ${allChunks.length} chunks...`, 15);
   const embeddingModel = getEmbeddingModel();
   let embeddedCount = 0;
 
@@ -81,13 +83,29 @@ export const embedDocumentsStep: StepFunction = async (ctx) => {
     embeddedCount += batch.length;
 
     const pct = Math.round(15 + (embeddedCount / allChunks.length) * 80);
-    ctx.onProgress(`Embedded ${embeddedCount}/${allChunks.length} chunks`, pct);
+    await ctx.onProgress(`Embedded ${embeddedCount}/${allChunks.length} chunks`, pct);
   }
 
-  ctx.onProgress(`Embedded all ${allChunks.length} chunks`, 100);
+  await ctx.onProgress(`Embedded all ${allChunks.length} chunks`, 100);
+
+  const byProvider: Record<string, { docs: number; chunks: number }> = {};
+  const byDoc: { title: string; provider: string; contentLen: number; chunks: number }[] = [];
+
+  for (const doc of docs) {
+    const docChunks = allChunks.filter((c) => c.docId === doc.sourceId);
+    byDoc.push({ title: doc.title, provider: doc.provider, contentLen: doc.content.length, chunks: docChunks.length });
+    if (!byProvider[doc.provider]) byProvider[doc.provider] = { docs: 0, chunks: 0 };
+    byProvider[doc.provider].docs++;
+    byProvider[doc.provider].chunks += docChunks.length;
+  }
+
   return {
     total_documents: docs.length,
     total_chunks: allChunks.length,
+    chunk_size: CHUNK_SIZE,
+    chunk_overlap: CHUNK_OVERLAP,
     qdrant_collection: KB2_COLLECTION,
+    by_provider: byProvider,
+    by_document: byDoc,
   };
 };

@@ -101,12 +101,12 @@ export const ENTITY_PAGE_TEMPLATES: Partial<Record<KB2NodeType, KB2PageTemplate>
     ],
   },
 
-  client: {
-    description: "Structured reference for an external customer (B2B company or B2C user segment).",
+  client_company: {
+    description: "Structured reference for an external B2B customer or partner organization.",
     includeRules: "Customer relationship, products used, contacts, feedback patterns.",
     excludeRules: "Internal team details.",
     sections: [
-      { name: "Identity", intent: "Name, type (B2B company / B2C segment), account tier, platform (iOS/Android/web)", requirement: "MUST", maxBullets: 5 },
+      { name: "Identity", intent: "Company name, account tier, industry, relationship type (customer/partner)", requirement: "MUST", maxBullets: 5 },
       { name: "Products Used", intent: "Which of our products/services they use", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
       { name: "Key Contacts", intent: "Client-side contacts + internal point of contact", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
       { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
@@ -114,7 +114,18 @@ export const ENTITY_PAGE_TEMPLATES: Partial<Record<KB2NodeType, KB2PageTemplate>
     ],
   },
 
-  person: {
+  client_person: {
+    description: "Structured reference for an individual external customer or end-user segment.",
+    includeRules: "Customer identity, platform, feedback, behavior patterns.",
+    excludeRules: "Internal team details, PII.",
+    sections: [
+      { name: "Identity", intent: "Name or segment label, platform (iOS/Android/web), type (individual/segment)", requirement: "MUST", maxBullets: 5 },
+      { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
+      { name: "Associated Company", intent: "Client company they belong to (for B2B)", requirement: "OPTIONAL", maxBullets: 3 },
+    ],
+  },
+
+  team_member: {
     description: "Entity page for an internal team member.",
     includeRules: "Stable attributes: what they own, what they know, contact info.",
     excludeRules: "Daily standup status, personal info.",
@@ -220,6 +231,35 @@ export const ENTITY_PAGE_TEMPLATES: Partial<Record<KB2NodeType, KB2PageTemplate>
       { name: "Resolution", intent: "How it was resolved or current status", requirement: "OPTIONAL", maxBullets: 4 },
     ],
   },
+
+  decision: {
+    description: "Entity page for an architecture decision, technology choice, or design tradeoff.",
+    includeRules: "The choice made, why, what was rejected, and the consequences.",
+    excludeRules: "Implementation details of the chosen option. Link to project/repo pages.",
+    sections: [
+      { name: "Identity", intent: "Decision title, status (decided/pending/superseded), date, scope", requirement: "MUST", maxBullets: 5 },
+      { name: "Context", intent: "What problem or constraint led to this decision", requirement: "MUST", maxBullets: 4 },
+      { name: "Decision", intent: "What was chosen and why", requirement: "MUST", maxBullets: 4 },
+      { name: "Alternatives Considered", intent: "Options that were rejected and why", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+      { name: "Consequences", intent: "Accepted tradeoffs, downsides, and tech debt from this choice", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+      { name: "Affected Systems", intent: "Repos, databases, infra impacted by this decision", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+      { name: "Decision Makers", intent: "Who made the call, who was consulted", requirement: "OPTIONAL", maxBullets: 4 },
+    ],
+  },
+
+  process: {
+    description: "Entity page for a repeatable team workflow, procedure, or practice.",
+    includeRules: "Steps, triggers, ownership, tools involved.",
+    excludeRules: "One-time incidents or project-specific tasks.",
+    sections: [
+      { name: "Identity", intent: "Process name, owner (person/team), status (active/deprecated/informal)", requirement: "MUST", maxBullets: 4 },
+      { name: "Purpose", intent: "What this process achieves and when it's used", requirement: "MUST", maxBullets: 3 },
+      { name: "Trigger", intent: "What initiates this process", requirement: "MUST_IF_PRESENT", maxBullets: 3 },
+      { name: "Steps", intent: "Key steps in order", requirement: "MUST_IF_PRESENT", maxBullets: 10 },
+      { name: "Tools & Systems", intent: "Repos, integrations, dashboards used during this process", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+      { name: "Known Issues", intent: "Pain points, bottlenecks, proposed improvements", requirement: "OPTIONAL", maxBullets: 5 },
+    ],
+  },
 };
 
 export interface HumanPageCategory {
@@ -231,19 +271,20 @@ export interface HumanPageCategory {
 }
 
 export const STANDARD_HUMAN_PAGES: HumanPageCategory[] = [
-  { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client"] },
-  { category: "org_structure", layer: "company", title: "Org Structure", description: "Teams, reporting, on-call, cross-team dependencies", relatedEntityTypes: ["team", "person"] },
-  { category: "onboarding", layer: "company", title: "Onboarding", description: "Getting started guide for new employees", relatedEntityTypes: ["person", "team", "repository", "environment"] },
+  { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client_company"] },
+  { category: "org_structure", layer: "company", title: "Org Structure", description: "Teams, reporting, on-call, cross-team dependencies", relatedEntityTypes: ["team", "team_member"] },
+  { category: "onboarding", layer: "company", title: "Onboarding", description: "Getting started guide for new employees", relatedEntityTypes: ["team_member", "team", "repository", "environment"] },
   { category: "architecture_overview", layer: "engineering", title: "System Architecture", description: "High-level architecture, repository map, data flow, infrastructure", relatedEntityTypes: ["repository", "infrastructure", "cloud_resource", "database", "integration", "environment"] },
-  { category: "decisions_tradeoffs", layer: "engineering", title: "Other Decisions & Tradeoffs", description: "Architectural and design decisions not tied to a specific project", relatedEntityTypes: ["repository", "infrastructure", "database", "environment"] },
+  { category: "decisions_tradeoffs", layer: "engineering", title: "Other Decisions & Tradeoffs", description: "Architectural and design decisions not tied to a specific project", relatedEntityTypes: ["decision", "repository", "infrastructure", "database", "environment"] },
+  { category: "processes", layer: "engineering", title: "Team Processes & Workflows", description: "Repeatable workflows, procedures, and practices", relatedEntityTypes: ["process", "team"] },
   { category: "environments_deploy", layer: "engineering", title: "Environments & Deployment", description: "Dev/staging/prod, CI/CD pipelines, deploy process", relatedEntityTypes: ["environment", "pipeline", "repository"] },
-  { category: "past_documented", layer: "engineering", title: "Past Projects (Documented)", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project", "person"] },
-  { category: "past_undocumented", layer: "engineering", title: "Past Projects (Discovered)", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "person"] },
-  { category: "ongoing_documented", layer: "engineering", title: "Ongoing Projects (Documented)", description: "Active projects with explicit documentation", relatedEntityTypes: ["project", "person"] },
-  { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Projects (Discovered)", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "person"] },
-  { category: "proposed_projects", layer: "engineering", title: "Proposed Projects", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project", "person"] },
+  { category: "past_documented", layer: "engineering", title: "Past Projects (Documented)", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project", "team_member"] },
+  { category: "past_undocumented", layer: "engineering", title: "Past Projects (Discovered)", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"] },
+  { category: "ongoing_documented", layer: "engineering", title: "Ongoing Projects (Documented)", description: "Active projects with explicit documentation", relatedEntityTypes: ["project", "team_member"] },
+  { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Projects (Discovered)", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"] },
+  { category: "proposed_projects", layer: "engineering", title: "Proposed Projects", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project", "team_member"] },
   { category: "tech_stack", layer: "engineering", title: "Tech Stack & Libraries", description: "Languages, frameworks, key dependencies with versions", relatedEntityTypes: ["library", "repository"] },
-  { category: "client_overview", layer: "marketing", title: "Client Overview", description: "Customer segments, key accounts, feedback themes", relatedEntityTypes: ["client"] },
+  { category: "client_overview", layer: "marketing", title: "Client Overview", description: "Customer segments, key accounts, feedback themes", relatedEntityTypes: ["client_company", "client_person"] },
 ];
 
 export const INTERNAL_PERSON_SIGNALS = [
@@ -264,8 +305,8 @@ export const B2C_SEGMENT_SIGNALS = [
 ] as const;
 
 export const CLASSIFICATION_RULES = {
-  person_vs_customer: `HARD RULE: A name is an internal PERSON if any of: ${INTERNAL_PERSON_SIGNALS.join("; ")}. A name is a CLIENT if any of: ${B2B_CUSTOMER_SIGNALS.join("; ")}. When ambiguous, default to PERSON if they have a Slack handle or Jira assignment.`,
-  b2c_vs_b2b: `For B2C products: group end-users into CLIENT entities by platform or behavior segment. For B2B: each client company is a CLIENT entity with point-of-contact info in attributes.`,
+  person_vs_customer: `HARD RULE: A name is an internal TEAM_MEMBER if any of: ${INTERNAL_PERSON_SIGNALS.join("; ")}. A name is a CLIENT_PERSON if any of: ${B2B_CUSTOMER_SIGNALS.join("; ")}. When ambiguous, default to TEAM_MEMBER if they have a Slack handle or Jira assignment.`,
+  b2c_vs_b2b: `For B2C products: group end-users into CLIENT_PERSON entities by platform or behavior segment. For B2B: each client organization is a CLIENT_COMPANY entity with point-of-contact info in attributes.`,
 } as const;
 
 export function getEntityTemplate(nodeType: KB2NodeType): KB2PageTemplate | undefined {

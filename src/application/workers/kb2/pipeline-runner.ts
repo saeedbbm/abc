@@ -3,10 +3,13 @@ import {
   kb2RunsCollection,
   kb2RunStepsCollection,
   kb2LLMCallsCollection,
+  getTenantCollections,
 } from "@/lib/mongodb";
 import type { KB2RunType, KB2RunStepType } from "@/src/entities/models/kb2-types";
+import type { CompanyConfigData } from "@/src/entities/models/kb2-company-config";
+import { getCompanyConfig, getActiveConfigVersion } from "@/src/application/lib/kb2/company-config";
 
-export type ProgressCallback = (detail: string, percent: number) => void;
+export type ProgressCallback = (detail: string, percent: number) => void | Promise<void>;
 
 export type LogLLMCallFn = (
   stepId: string,
@@ -17,14 +20,18 @@ export type LogLLMCallFn = (
   outputTokens: number,
   costUsd: number,
   durationMs: number,
+  callId?: string,
 ) => Promise<void>;
 
 export interface StepContext {
   runId: string;
   companySlug: string;
+  configVersion: number | null;
+  config: CompanyConfigData | null;
   onProgress: ProgressCallback;
   logLLMCall: LogLLMCallFn;
   getStepArtifact: (pass: "pass1" | "pass2", stepNumber: number) => Promise<any>;
+  signal: AbortSignal;
 }
 
 export type StepFunction = (ctx: StepContext) => Promise<any>;
@@ -36,6 +43,18 @@ interface StepDef {
 
 const pass1Steps: StepDef[] = [];
 const pass2Steps: StepDef[] = [];
+
+const runningPipelines = new Set<string>();
+const pipelineAbortControllers = new Map<string, AbortController>();
+
+export function cancelPipeline(companySlug: string): boolean {
+  const ctrl = pipelineAbortControllers.get(companySlug);
+  if (ctrl) {
+    ctrl.abort();
+    return true;
+  }
+  return false;
+}
 
 export function registerPass1Step(name: string, fn: StepFunction) {
   pass1Steps.push({ name, fn });
@@ -190,158 +209,206 @@ function generateRunTitle(opts: RunOptions, pass1Steps: StepDef[], pass2Steps: S
 }
 
 export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
-  const runId = opts.reuseRunId ?? randomUUID();
-  const onProgress = opts.onProgress ?? (() => {});
-  const title = generateRunTitle(opts, pass1Steps, pass2Steps);
-
-  const logLLMCall: LogLLMCallFn = async (
-    stepId, model, prompt, response, inputTokens, outputTokens, costUsd, durationMs,
-  ) => {
-    await kb2LLMCallsCollection.insertOne({
-      call_id: randomUUID(),
-      run_id: runId,
-      step_id: stepId,
-      model,
-      prompt: prompt.slice(0, 50000),
-      response: response.slice(0, 50000),
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      cost_usd: costUsd,
-      duration_ms: durationMs,
-      timestamp: new Date().toISOString(),
-    });
-  };
-
-  const getStepArtifact = async (pass: "pass1" | "pass2", stepNumber: number): Promise<any> => {
-    const stepDoc = await kb2RunStepsCollection.findOne({
-      run_id: runId,
-      pass,
-      step_number: stepNumber,
-    });
-    return stepDoc?.artifact;
-  };
-
-  const ctx: StepContext = { runId, companySlug: opts.companySlug, onProgress, logLLMCall, getStepArtifact };
-
-  await kb2RunsCollection.updateOne(
-    { run_id: runId },
-    {
-      $set: {
-        run_id: runId,
-        company_slug: opts.companySlug,
-        status: "running",
-        title,
-        started_at: new Date().toISOString(),
-      },
-      $setOnInsert: { stats: {} },
-    },
-    { upsert: true },
-  );
+  if (runningPipelines.has(opts.companySlug)) {
+    throw new Error(`Pipeline already running for ${opts.companySlug}. Wait for it to finish or cancel it.`);
+  }
+  runningPipelines.add(opts.companySlug);
+  const abortCtrl = new AbortController();
+  pipelineAbortControllers.set(opts.companySlug, abortCtrl);
 
   try {
-    const passesToRun = opts.pass === "all" || !opts.pass ? ["pass1", "pass2"] : [opts.pass];
+    const tc = getTenantCollections(opts.companySlug);
+    const runId = opts.reuseRunId ?? randomUUID();
+    const onProgress = opts.onProgress ?? (() => {});
+    const title = generateRunTitle(opts, pass1Steps, pass2Steps);
 
-    for (const passKey of passesToRun) {
-      const steps = passKey === "pass1" ? pass1Steps : pass2Steps;
-      const totalSteps = steps.length;
+    const getStepArtifact = async (pass: "pass1" | "pass2", stepNumber: number): Promise<any> => {
+      const stepDoc = await tc.run_steps.findOne(
+        { run_id: runId, pass, step_number: stepNumber },
+        { sort: { execution_number: -1 } },
+      );
+      return stepDoc?.artifact;
+    };
 
-      let startIdx = 0;
-      let endIdx = totalSteps;
+    const config = await getCompanyConfig(opts.companySlug);
+    const configVersion = await getActiveConfigVersion(opts.companySlug);
 
-      if (opts.step !== undefined) {
-        startIdx = opts.step - 1;
-        endIdx = opts.step;
-      } else if (opts.fromStep !== undefined) {
-        startIdx = opts.fromStep - 1;
-      }
-
-      startIdx = Math.max(0, Math.min(startIdx, totalSteps));
-      endIdx = Math.max(startIdx, Math.min(endIdx, totalSteps));
-
-      await kb2RunsCollection.updateOne({ run_id: runId }, {
-        $set: { current_pass: passKey, total_steps: totalSteps },
+    let currentExecutionId = "";
+    const logLLMCall: LogLLMCallFn = async (
+      stepId, model, prompt, response, inputTokens, outputTokens, costUsd, durationMs, callId?,
+    ) => {
+      await tc.llm_calls.insertOne({
+        call_id: callId ?? randomUUID(),
+        run_id: runId,
+        step_id: stepId,
+        execution_id: currentExecutionId,
+        model,
+        prompt: prompt.slice(0, 50000),
+        response: response.slice(0, 50000),
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: costUsd,
+        duration_ms: durationMs,
+        timestamp: new Date().toISOString(),
       });
+    };
 
-      for (let i = startIdx; i < endIdx; i++) {
-        const stepDef = steps[i];
-        const stepId = `${passKey}-step-${i + 1}`;
-        const stepNumber = i + 1;
+    const ctx: StepContext = { runId, companySlug: opts.companySlug, configVersion, config, onProgress, logLLMCall, getStepArtifact, signal: abortCtrl.signal };
 
-        await kb2RunsCollection.updateOne({ run_id: runId }, { $set: { current_step: stepNumber } });
-
-        const stepDoc: Partial<KB2RunStepType> = {
-          step_id: stepId,
+    await tc.runs.updateOne(
+      { run_id: runId },
+      {
+        $set: {
           run_id: runId,
-          pass: passKey as "pass1" | "pass2",
-          step_number: stepNumber,
-          name: stepDef.name,
+          company_slug: opts.companySlug,
           status: "running",
+          title,
           started_at: new Date().toISOString(),
-        };
+          config_version: configVersion,
+          config_snapshot: config ? {
+            models: config.pipeline_settings?.models,
+            profile_name: config.profile?.company_name,
+            se_context_preview: config.profile?.company_context?.slice(0, 200),
+          } : null,
+        },
+        $setOnInsert: { stats: {} },
+      },
+      { upsert: true },
+    );
 
-        await kb2RunStepsCollection.updateOne(
-          { run_id: runId, step_id: stepId },
-          { $set: stepDoc },
-          { upsert: true },
-        );
+    try {
+      const passesToRun = opts.pass === "all" || !opts.pass ? ["pass1", "pass2"] : [opts.pass];
 
-        onProgress(`[${passKey} Step ${stepNumber}/${totalSteps}] Starting: ${stepDef.name}`, 0);
+      for (const passKey of passesToRun) {
+        const steps = passKey === "pass1" ? pass1Steps : pass2Steps;
+        const totalSteps = steps.length;
 
-        const stepStart = Date.now();
-        try {
-          const artifact = await stepDef.fn(ctx);
-          const durationMs = Date.now() - stepStart;
+        let startIdx = 0;
+        let endIdx = totalSteps;
 
-          const llmCalls = await kb2LLMCallsCollection.countDocuments({ run_id: runId, step_id: stepId });
-          const llmAgg = await kb2LLMCallsCollection.aggregate([
-            { $match: { run_id: runId, step_id: stepId } },
-            { $group: { _id: null, tokens_in: { $sum: "$input_tokens" }, tokens_out: { $sum: "$output_tokens" }, cost: { $sum: "$cost_usd" } } },
-          ]).toArray();
-          const agg = llmAgg[0] || { tokens_in: 0, tokens_out: 0, cost: 0 };
+        if (opts.step !== undefined) {
+          startIdx = opts.step - 1;
+          endIdx = opts.step;
+        } else if (opts.fromStep !== undefined) {
+          startIdx = opts.fromStep - 1;
+        }
 
-          await kb2RunStepsCollection.updateOne(
-            { run_id: runId, step_id: stepId },
-            {
-              $set: {
-                status: "completed",
-                completed_at: new Date().toISOString(),
-                duration_ms: durationMs,
-                summary: generateStepSummary(stepDef.name, artifact),
-                artifact,
-                metrics: {
-                  llm_calls: llmCalls,
-                  input_tokens: agg.tokens_in,
-                  output_tokens: agg.tokens_out,
-                  cost_usd: agg.cost,
+        startIdx = Math.max(0, Math.min(startIdx, totalSteps));
+        endIdx = Math.max(startIdx, Math.min(endIdx, totalSteps));
+
+        await tc.runs.updateOne({ run_id: runId }, {
+          $set: { current_pass: passKey, total_steps: totalSteps },
+        });
+
+        for (let i = startIdx; i < endIdx; i++) {
+          if (abortCtrl.signal.aborted) {
+            throw new Error("Pipeline cancelled by user");
+          }
+
+          const stepDef = steps[i];
+          const stepId = `${passKey}-step-${i + 1}`;
+          const stepNumber = i + 1;
+
+          await tc.runs.updateOne({ run_id: runId }, { $set: { current_step: stepNumber } });
+
+          const executionId = randomUUID();
+          currentExecutionId = executionId;
+          const executionNumber = (await tc.run_steps.countDocuments({ run_id: runId, step_id: stepId })) + 1;
+
+          let parentExecutionId: string | null = null;
+          if (i > 0) {
+            const prevStepId = `${passKey}-step-${i}`;
+            const prevExec = await tc.run_steps.findOne(
+              { run_id: runId, step_id: prevStepId },
+              { sort: { execution_number: -1 } },
+            );
+            parentExecutionId = prevExec?.execution_id ?? null;
+          }
+
+          await tc.run_steps.insertOne({
+            step_id: stepId,
+            run_id: runId,
+            pass: passKey as "pass1" | "pass2",
+            step_number: stepNumber,
+            name: stepDef.name,
+            status: "running",
+            execution_id: executionId,
+            execution_number: executionNumber,
+            parent_execution_id: parentExecutionId,
+            started_at: new Date().toISOString(),
+          });
+
+          await onProgress(`[${passKey} Step ${stepNumber}/${totalSteps}] Starting: ${stepDef.name}`, 0);
+
+          const stepStart = Date.now();
+          try {
+            const artifact = await stepDef.fn(ctx);
+            const durationMs = Date.now() - stepStart;
+
+            if (abortCtrl.signal.aborted) {
+              throw new Error("Pipeline cancelled by user");
+            }
+
+            const llmCalls = await tc.llm_calls.countDocuments({ run_id: runId, step_id: stepId, execution_id: executionId });
+            const llmAgg = await tc.llm_calls.aggregate([
+              { $match: { run_id: runId, step_id: stepId, execution_id: executionId } },
+              { $group: { _id: null, tokens_in: { $sum: "$input_tokens" }, tokens_out: { $sum: "$output_tokens" }, cost: { $sum: "$cost_usd" } } },
+            ]).toArray();
+            const agg = llmAgg[0] || { tokens_in: 0, tokens_out: 0, cost: 0 };
+
+            await tc.run_steps.updateOne(
+              { execution_id: executionId },
+              {
+                $set: {
+                  status: "completed",
+                  completed_at: new Date().toISOString(),
+                  duration_ms: durationMs,
+                  summary: generateStepSummary(stepDef.name, artifact),
+                  artifact,
+                  metrics: {
+                    llm_calls: llmCalls,
+                    input_tokens: agg.tokens_in,
+                    output_tokens: agg.tokens_out,
+                    cost_usd: agg.cost,
+                  },
                 },
               },
-            },
-          );
+            );
 
-          onProgress(
-            `[${passKey} Step ${stepNumber}/${totalSteps}] Completed: ${stepDef.name} (${(durationMs / 1000).toFixed(1)}s)`,
-            Math.round((stepNumber / totalSteps) * 100),
-          );
-        } catch (err: any) {
-          await kb2RunStepsCollection.updateOne(
-            { run_id: runId, step_id: stepId },
-            { $set: { status: "failed", completed_at: new Date().toISOString(), duration_ms: Date.now() - stepStart, summary: err.message } },
-          );
-          throw err;
+            await onProgress(
+              `[${passKey} Step ${stepNumber}/${totalSteps}] Completed: ${stepDef.name} (${(durationMs / 1000).toFixed(1)}s)`,
+              Math.round((stepNumber / totalSteps) * 100),
+            );
+          } catch (err: any) {
+            const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");
+            await tc.run_steps.updateOne(
+              { execution_id: executionId },
+              { $set: { status: isCancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), duration_ms: Date.now() - stepStart, summary: isCancelled ? "Cancelled by user" : err.message } },
+            );
+            throw err;
+          }
         }
+      }
+
+      await tc.runs.updateOne({ run_id: runId }, {
+        $set: { status: "completed", completed_at: new Date().toISOString() },
+        $unset: { error: "" },
+      });
+    } catch (err: any) {
+      const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");
+      const status = isCancelled ? "cancelled" : "failed";
+      await tc.runs.updateOne({ run_id: runId }, {
+        $set: { status, completed_at: new Date().toISOString(), error: err.message },
+      });
+      if (isCancelled) {
+        await onProgress("Pipeline cancelled by user", 100);
       }
     }
 
-    await kb2RunsCollection.updateOne({ run_id: runId }, {
-      $set: { status: "completed", completed_at: new Date().toISOString() },
-      $unset: { error: "" },
-    });
-  } catch (err: any) {
-    await kb2RunsCollection.updateOne({ run_id: runId }, {
-      $set: { status: "failed", completed_at: new Date().toISOString(), error: err.message },
-    });
+    const finalRun = await tc.runs.findOne({ run_id: runId });
+    return finalRun as unknown as KB2RunType;
+  } finally {
+    runningPipelines.delete(opts.companySlug);
+    pipelineAbortControllers.delete(opts.companySlug);
   }
-
-  const finalRun = await kb2RunsCollection.findOne({ run_id: runId });
-  return finalRun as unknown as KB2RunType;
 }

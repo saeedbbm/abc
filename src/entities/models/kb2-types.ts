@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 export const KB2NodeTypeEnum = z.enum([
-  "person",
+  "team_member",
   "team",
-  "client",
+  "client_company",
+  "client_person",
   "repository",
   "integration",
   "infrastructure",
@@ -12,6 +13,8 @@ export const KB2NodeTypeEnum = z.enum([
   "database",
   "environment",
   "project",
+  "decision",
+  "process",
   "ticket",
   "pull_request",
   "pipeline",
@@ -153,6 +156,20 @@ export const KB2VerificationCard = z.object({
   severity: KB2SeverityEnum,
   title: z.string(),
   explanation: z.string(),
+  problem_explanation: z.string().optional(),
+  supporting_evidence: z.array(z.object({
+    text: z.string(),
+    source_title: z.string().optional(),
+    confidence: z.string().optional(),
+  })).default([]),
+  missing_evidence: z.array(z.string()).default([]),
+  affected_entities: z.array(z.object({
+    entity_name: z.string(),
+    entity_type: z.string().optional(),
+    relationship: z.string().optional(),
+  })).default([]),
+  required_data: z.array(z.string()).default([]),
+  verification_question: z.string().optional(),
   canonical_text: z.string().optional(),
   proposed_text: z.string().optional(),
   recommended_action: z.string().optional(),
@@ -236,6 +253,16 @@ export const KB2Run = z.object({
   total_steps: z.number().optional(),
   stats: z.record(z.string(), z.number()).default({}),
   error: z.string().optional(),
+  config_version: z.number().optional(),
+  config_snapshot: z.object({
+    models: z.object({
+      fast: z.string(),
+      reasoning: z.string(),
+      judge: z.string(),
+    }).optional(),
+    profile_name: z.string().optional(),
+    se_context_preview: z.string().optional(),
+  }).optional(),
 });
 export type KB2RunType = z.infer<typeof KB2Run>;
 
@@ -246,6 +273,9 @@ export const KB2RunStep = z.object({
   step_number: z.number(),
   name: z.string(),
   status: z.enum(["pending", "running", "completed", "failed"]),
+  execution_id: z.string(),
+  execution_number: z.number(),
+  parent_execution_id: z.string().nullable().optional(),
   started_at: z.string().optional(),
   completed_at: z.string().optional(),
   duration_ms: z.number().optional(),

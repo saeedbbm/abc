@@ -6,6 +6,7 @@ import { kb2GraphNodesCollection, kb2TicketsCollection } from "@/lib/mongodb";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { PrefixLogger } from "@/lib/utils";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 export const maxDuration = 120;
 
@@ -27,7 +28,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
-  await params;
+  const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const logger = new PrefixLogger("kb2-ticket-gen");
 
   try {
@@ -39,11 +41,11 @@ export async function POST(
     const nodes = (await kb2GraphNodesCollection
       .find({})
       .sort({ _id: -1 })
-      .limit(200)
+      .limit(config?.pipeline_settings?.ticket_generation?.node_limit ?? 200)
       .toArray()) as unknown as KB2GraphNodeType[];
 
     const people = nodes
-      .filter((n) => n.type === "person")
+      .filter((n) => n.type === "team_member")
       .map((n) => `${n.display_name}${n.attributes?.role ? ` — ${n.attributes.role}` : ""}`)
       .join("\n");
 
@@ -55,16 +57,16 @@ export async function POST(
     const existingTickets = await kb2TicketsCollection
       .find({})
       .sort({ created_at: -1 })
-      .limit(50)
+      .limit(config?.pipeline_settings?.ticket_generation?.existing_tickets_limit ?? 50)
       .toArray();
     const existingTitles = existingTickets.map((t: any) => t.title).join("\n");
 
-    const model = getFastModel();
+    const model = getFastModel(config?.pipeline_settings?.models);
     const startMs = Date.now();
 
     const result = await structuredGenerate({
       model,
-      system: `You are a product management AI for a software company knowledge base.
+      system: config?.prompts?.ticket_generation?.system ?? `You are a product management AI for a software company knowledge base.
 Given customer feedback text, generate actionable engineering tickets.
 
 Rules:
@@ -75,7 +77,7 @@ Rules:
 - Do NOT create tickets that duplicate existing ones
 - Generate 1-8 tickets depending on feedback complexity`,
       prompt: `CUSTOMER FEEDBACK:
-${feedback.substring(0, 15000)}
+${feedback.substring(0, config?.pipeline_settings?.ticket_generation?.feedback_max_length ?? 15000)}
 
 TEAM MEMBERS:
 ${people || "(unknown)"}

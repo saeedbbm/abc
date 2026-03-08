@@ -1,10 +1,15 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import type { ModelSettings } from "@/src/entities/models/kb2-company-config";
+
+const DEFAULT_FAST = "claude-sonnet-4-6";
+const DEFAULT_REASONING = "claude-opus-4-6";
+const DEFAULT_JUDGE = "gpt-4o";
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-opus-4-6": { input: 15, output: 75 },
-  "gpt-4o": { input: 2.5, output: 10 },
+  [DEFAULT_FAST]: { input: 3, output: 15 },
+  [DEFAULT_REASONING]: { input: 15, output: 75 },
+  [DEFAULT_JUDGE]: { input: 2.5, output: 10 },
 };
 
 export function calculateCostUsd(
@@ -12,7 +17,7 @@ export function calculateCostUsd(
   inputTokens: number,
   outputTokens: number,
 ): number {
-  const pricing = MODEL_PRICING[model] ?? MODEL_PRICING["claude-sonnet-4-6"];
+  const pricing = MODEL_PRICING[model] ?? MODEL_PRICING[DEFAULT_FAST];
   return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
 }
 
@@ -32,39 +37,43 @@ function getOpenAIProvider() {
     return createOpenAI({ apiKey });
 }
 
-/**
- * Reasoning model for high-stakes decisions: planning, classification,
- * ticket extraction. Claude Opus 4.6.
- */
-export function getReasoningModel() {
-    return getAnthropicProvider()('claude-opus-4-6');
+function resolveModel(name: string) {
+    if (name.startsWith("claude")) return getAnthropicProvider()(name);
+    return getOpenAIProvider()(name);
 }
 
-/**
- * Fast model for page generation (template filling), entity extraction,
- * and other high-volume tasks. Claude Sonnet 4.6.
- */
-export function getFastModel() {
-    return getAnthropicProvider()('claude-sonnet-4-6');
+export function getReasoningModel(models?: ModelSettings) {
+    const name = models?.reasoning ?? DEFAULT_REASONING;
+    return resolveModel(name);
+}
+
+export function getReasoningModelName(models?: ModelSettings): string {
+    return models?.reasoning ?? DEFAULT_REASONING;
+}
+
+export function getFastModel(models?: ModelSettings) {
+    const name = models?.fast ?? DEFAULT_FAST;
+    return resolveModel(name);
+}
+
+export function getFastModelName(models?: ModelSettings): string {
+    return models?.fast ?? DEFAULT_FAST;
 }
 
 /** @deprecated Use getReasoningModel() or getFastModel() explicitly. */
-export function getPrimaryModel() {
-    return getReasoningModel();
+export function getPrimaryModel(models?: ModelSettings) {
+    return getReasoningModel(models);
 }
 
-/**
- * Cross-check model for extraction validation — uses a different provider
- * (OpenAI GPT-4o) to catch blindspots the primary model misses.
- */
-export function getCrossCheckModel() {
-    return getOpenAIProvider()(process.env.CROSS_CHECK_MODEL || 'gpt-4o');
+export function getCrossCheckModel(models?: ModelSettings) {
+    const name = models?.judge ?? process.env.CROSS_CHECK_MODEL ?? DEFAULT_JUDGE;
+    return resolveModel(name);
 }
 
-/**
- * Embedding model — stays on OpenAI text-embedding-3-small (1536-dim).
- * Anthropic doesn't offer embeddings, so we keep OpenAI for this.
- */
+export function getCrossCheckModelName(models?: ModelSettings): string {
+    return models?.judge ?? process.env.CROSS_CHECK_MODEL ?? DEFAULT_JUDGE;
+}
+
 export function getEmbeddingModel() {
     return getOpenAIProvider().embedding(
         process.env.EMBEDDING_MODEL || 'text-embedding-3-small'

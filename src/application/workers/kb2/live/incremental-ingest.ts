@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { kb2InputSnapshotsCollection, kb2GraphNodesCollection, kb2VerificationCardsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { PrefixLogger } from "@/lib/utils";
@@ -64,8 +64,10 @@ export async function processIncrementalDocument(opts: {
   source_type: string;
   document: any;
   run_id?: string;
+  companySlug: string;
 }): Promise<IncrementalIngestResult> {
-  const { source_type, document, run_id } = opts;
+  const { source_type, document, run_id, companySlug } = opts;
+  const tc = getTenantCollections(companySlug);
 
   const parser = SOURCE_PARSERS[source_type];
   if (!parser) {
@@ -77,7 +79,7 @@ export async function processIncrementalDocument(opts: {
     return { new_entities: 0, updated_entities: 0, conflicts: 0, impact_cards: [] };
   }
 
-  const latestSnapshot = await kb2InputSnapshotsCollection
+  const latestSnapshot = await tc.input_snapshots
     .find({})
     .sort({ created_at: -1 })
     .limit(1)
@@ -122,7 +124,7 @@ export async function processIncrementalDocument(opts: {
 
   const lookupRunId = run_id ?? latestSnapshot[0]?.run_id;
   const existingNodes = lookupRunId
-    ? await kb2GraphNodesCollection.find({ run_id: lookupRunId }).toArray()
+    ? await tc.graph_nodes.find({ run_id: lookupRunId }).toArray()
     : [];
 
   const existingNodesByName = new Map<string, (typeof existingNodes)[number]>();
@@ -210,7 +212,7 @@ export async function processIncrementalDocument(opts: {
       target_type: card.target_type,
       target_id: card.target_id,
     }));
-    await kb2VerificationCardsCollection.insertMany(cardsToInsert);
+    await tc.verification_cards.insertMany(cardsToInsert);
   }
 
   return {

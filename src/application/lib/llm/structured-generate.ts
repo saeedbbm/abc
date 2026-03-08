@@ -39,12 +39,15 @@ export async function structuredGenerate<T>(options: {
     maxOutputTokens?: number;
     logger: PrefixLogger;
     onUsage?: (usage: LLMUsage) => void;
+    signal?: AbortSignal;
 }): Promise<T> {
-    const { model, system, prompt, schema, maxOutputTokens = 16384, logger, onUsage } = options;
+    const { model, system, prompt, schema, maxOutputTokens = 16384, logger, onUsage, signal } = options;
 
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (signal?.aborted) throw new Error("Pipeline cancelled by user");
+
         if (attempt > 0) {
             const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
             logger.log(`Retry ${attempt}/${MAX_RETRIES} in ${(delay / 1000).toFixed(1)}s...`);
@@ -59,10 +62,12 @@ export async function structuredGenerate<T>(options: {
                     prompt,
                     schema,
                     maxOutputTokens,
+                    abortSignal: signal,
                 });
                 if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
                 return object;
             } catch (err) {
+                if (signal?.aborted) throw new Error("Pipeline cancelled by user");
                 const msg = err instanceof Error ? err.message : String(err);
                 if (isRetryable(err)) throw err;
                 logger.log(`generateObject failed (${msg}), falling back to generateText`);
@@ -78,6 +83,7 @@ export async function structuredGenerate<T>(options: {
                 system: system + jsonDirective,
                 prompt,
                 maxOutputTokens,
+                abortSignal: signal,
             });
             if (usage && onUsage) onUsage({ promptTokens: (usage as SDKUsage).inputTokens ?? 0, completionTokens: (usage as SDKUsage).outputTokens ?? 0 });
 
@@ -90,6 +96,7 @@ export async function structuredGenerate<T>(options: {
                 return raw;
             }
         } catch (err) {
+            if (signal?.aborted) throw new Error("Pipeline cancelled by user");
             lastError = err;
             if (!isRetryable(err) || attempt === MAX_RETRIES) {
                 const msg = err instanceof Error ? err.message : String(err);

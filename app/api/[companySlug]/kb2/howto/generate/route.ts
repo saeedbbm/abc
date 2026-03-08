@@ -9,6 +9,7 @@ import {
   kb2GraphEdgesCollection,
   kb2HowtoCollection,
 } from "@/lib/mongodb";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 const HOWTO_TEMPLATE_SECTIONS = [
   "Overview",
@@ -25,8 +26,11 @@ export async function POST(
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const body = await request.json();
   const { ticket_id, project_node_id } = body;
+
+  const templateSections = config?.pipeline_settings?.howto?.sections ?? HOWTO_TEMPLATE_SECTIONS;
 
   const contextParts: string[] = [];
   let title = "How-to Guide";
@@ -50,7 +54,7 @@ export async function POST(
 
     const edges = await kb2GraphEdgesCollection
       .find({ $or: [{ source_node_id: project_node_id }, { target_node_id: project_node_id }] })
-      .limit(20)
+      .limit(config?.pipeline_settings?.howto_on_demand?.edges_limit ?? 20)
       .toArray();
 
     const relatedIds = new Set<string>();
@@ -63,7 +67,7 @@ export async function POST(
     if (relatedIds.size > 0) {
       const relatedNodes = await kb2GraphNodesCollection
         .find({ node_id: { $in: [...relatedIds] } })
-        .limit(10)
+        .limit(config?.pipeline_settings?.howto_on_demand?.related_nodes_limit ?? 10)
         .toArray();
       const relContext = relatedNodes
         .map((n: any) => `- ${n.type}: ${n.display_name}`)
@@ -75,18 +79,18 @@ export async function POST(
   const context = contextParts.join("\n\n");
 
   const { text } = await generateText({
-    model: getFastModel(),
-    system: `You generate structured implementation guides. Output EXACTLY these sections separated by "## Section Name" headers:
-${HOWTO_TEMPLATE_SECTIONS.map((s) => `- ${s}`).join("\n")}
+    model: getFastModel(config?.pipeline_settings?.models),
+    system: config?.prompts?.howto_on_demand?.system ?? `You generate structured implementation guides. Output EXACTLY these sections separated by "## Section Name" headers:
+${templateSections.map((s) => `- ${s}`).join("\n")}
 
 For the "Prompt Section", write a structured prompt that could be given to an AI coding agent to implement this task. Include file paths, patterns to follow, and test commands.
 
 Be concise but thorough. Use bullet points and code blocks where appropriate.`,
     prompt: `Generate an implementation guide based on this context:\n\n${context}`,
-    maxOutputTokens: 4096,
+    maxOutputTokens: config?.pipeline_settings?.howto_on_demand?.max_output_tokens ?? 4096,
   });
 
-  const sections = HOWTO_TEMPLATE_SECTIONS.map((name) => {
+  const sections = templateSections.map((name) => {
     const regex = new RegExp(`##\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n([\\s\\S]*?)(?=##\\s|$)`);
     const match = text.match(regex);
     return { section_name: name, content: match?.[1]?.trim() ?? "" };

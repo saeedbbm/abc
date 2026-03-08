@@ -1,9 +1,5 @@
 import { randomUUID } from "crypto";
-import {
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-  kb2InputSnapshotsCollection,
-} from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import type { KB2GraphNodeType, KB2GraphEdgeType, KB2EdgeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
@@ -15,13 +11,14 @@ interface EmbeddedRelationship {
 }
 
 export const graphBuildStep: StepFunction = async (ctx) => {
-  const nodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const tc = getTenantCollections(ctx.companySlug);
+  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
   if (nodes.length === 0) throw new Error("No graph nodes found — run step 3 first");
 
-  const snapshot = await kb2InputSnapshotsCollection.findOne({ run_id: ctx.runId });
+  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
   const docs = (snapshot?.parsed_documents ?? []) as KB2ParsedDocument[];
 
-  ctx.onProgress(`Building graph from ${nodes.length} nodes...`, 10);
+  await ctx.onProgress(`Building graph from ${nodes.length} nodes...`, 10);
 
   const edges: KB2GraphEdgeType[] = [];
   const nodeByName = new Map<string, KB2GraphNodeType>();
@@ -60,7 +57,7 @@ export const graphBuildStep: StepFunction = async (ctx) => {
     }
   }
 
-  ctx.onProgress("Scanning documents for MENTIONED_IN edges...", 50);
+  await ctx.onProgress("Scanning documents for MENTIONED_IN edges...", 50);
 
   for (const doc of docs) {
     const contentLower = doc.content.toLowerCase();
@@ -90,14 +87,14 @@ export const graphBuildStep: StepFunction = async (ctx) => {
   }
 
   if (edges.length > 0) {
-    await kb2GraphEdgesCollection.deleteMany({ run_id: ctx.runId });
-    await kb2GraphEdgesCollection.insertMany(edges);
+    await tc.graph_edges.deleteMany({ run_id: ctx.runId });
+    await tc.graph_edges.insertMany(edges);
   }
 
   const relEdges = edges.filter((e) => e.type !== "MENTIONED_IN");
   const mentionEdges = edges.filter((e) => e.type === "MENTIONED_IN");
 
-  ctx.onProgress(`Built graph: ${edges.length} edges`, 100);
+  await ctx.onProgress(`Built graph: ${edges.length} edges`, 100);
   return {
     total_edges: edges.length,
     relationship_edges: relEdges.length,

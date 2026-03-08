@@ -3,6 +3,7 @@ import { kb2HowtoCollection, kb2TicketsCollection } from "@/lib/mongodb";
 import { getFastModel } from "@/lib/ai-model";
 import { generateText } from "ai";
 import { spawn } from "child_process";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 export const maxDuration = 300;
 
@@ -11,6 +12,7 @@ export async function POST(
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const body = await request.json();
   const { agentId, task, repo, branch, mode, howtoId, ticketId } = body;
 
@@ -93,7 +95,7 @@ export async function POST(
 
           if (!usedCLI) {
             // Fallback: use AI SDK to simulate agent behavior
-            const model = getFastModel();
+            const model = getFastModel(config?.pipeline_settings?.models);
             send({ type: "output", line: '$ claude --dangerously-skip-permissions -p "..."' });
             send({ type: "output", line: "" });
             send({ type: "output", line: "Claude Code v1.12.0" });
@@ -103,7 +105,7 @@ export async function POST(
 
             const result = await generateText({
               model,
-              system: `You are simulating a coding agent's terminal output. Given a task, generate realistic terminal output showing the agent reading KB context, planning changes, writing code, running tests, and creating a PR. Output should look like timestamped terminal lines. Keep it concise (20-30 lines).`,
+              system: config?.prompts?.execute_coding?.system ?? `You are simulating a coding agent's terminal output. Given a task, generate realistic terminal output showing the agent reading KB context, planning changes, writing code, running tests, and creating a PR. Output should look like timestamped terminal lines. Keep it concise (20-30 lines).`,
               prompt: `Task: ${fullPrompt}\nGenerate realistic terminal output for this coding task.`,
             });
 
@@ -122,10 +124,10 @@ export async function POST(
         } else {
           // Generic agent - use AI to generate output
           send({ type: "progress", detail: `Running ${agentId}...`, percent: 30 });
-          const model = getFastModel();
+          const model = getFastModel(config?.pipeline_settings?.models);
           const result = await generateText({
             model,
-            system: `You are simulating an AI agent's terminal output. Generate realistic terminal output for the given task. Keep it concise.`,
+            system: config?.prompts?.execute_generic?.system ?? `You are simulating an AI agent's terminal output. Generate realistic terminal output for the given task. Keep it concise.`,
             prompt: `Agent: ${agentId}\nTask: ${fullPrompt}`,
           });
 

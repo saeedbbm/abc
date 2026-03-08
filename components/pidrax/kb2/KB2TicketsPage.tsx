@@ -32,7 +32,11 @@ import {
   Calendar,
   Tag,
   ArrowLeft,
+  ChevronRight,
+  ChevronDown,
+  Search,
 } from "lucide-react";
+import { useMemo } from "react";
 
 interface TicketComment {
   id: string;
@@ -639,6 +643,88 @@ function TicketCreateView({
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar helpers
+// ---------------------------------------------------------------------------
+
+const getTicketKey = (t: Ticket) => {
+  const match = t.ticket_id?.match(/^[A-Z]+-\d+/);
+  if (match) return match[0];
+  const titleMatch = t.title?.match(/^([A-Z]+-\d+)/);
+  if (titleMatch) return titleMatch[1];
+  return null;
+};
+
+const formatTicketLabel = (t: Ticket) => {
+  const key = getTicketKey(t);
+  if (key) return `${key}: ${t.title.replace(/^[A-Z]+-\d+[:\s]*/, "")}`;
+  return t.title;
+};
+
+function TicketGroup({
+  label,
+  tickets,
+  selectedTicketId,
+  onSelect,
+}: {
+  label: string;
+  tickets: Ticket[];
+  selectedTicketId: string | null;
+  onSelect: (t: Ticket) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:bg-muted/50 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        )}
+        <span className="flex-1 text-left">{label}</span>
+        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+          {tickets.length}
+        </Badge>
+      </button>
+      {open && (
+        <div className="pb-1">
+          {tickets.length === 0 ? (
+            <p className="px-3 py-1.5 text-[11px] text-muted-foreground/60 italic">
+              None
+            </p>
+          ) : (
+            tickets.map((t) => {
+              const isSelected = t.ticket_id === selectedTicketId;
+              return (
+                <button
+                  key={t.ticket_id}
+                  onClick={() => onSelect(t)}
+                  className={`w-full text-left px-3 py-1.5 flex items-center gap-2 text-xs transition-colors ${
+                    isSelected
+                      ? "bg-accent text-accent-foreground"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full shrink-0 ${PRIORITY_COLORS[t.priority] ?? "bg-muted-foreground/40"}`}
+                  />
+                  <span className="flex-1 truncate">
+                    {formatTicketLabel(t)}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -795,6 +881,56 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
 
   const goBackToBoard = () => {
     setViewMode("board");
+  };
+
+  // ---------------------------------------------------------------------------
+  // Sidebar search + temporal grouping
+  // ---------------------------------------------------------------------------
+
+  const [sidebarSearch, setSidebarSearch] = useState("");
+
+  const sidebarFiltered = useMemo(() => {
+    if (!sidebarSearch.trim()) return filteredTickets;
+    const q = sidebarSearch.toLowerCase();
+    return filteredTickets.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.ticket_id.toLowerCase().includes(q) ||
+        t.priority.toLowerCase().includes(q),
+    );
+  }, [filteredTickets, sidebarSearch]);
+
+  const pastTickets = useMemo(
+    () => sidebarFiltered.filter((t) => t.workflow_state === "done" || t.status === "closed"),
+    [sidebarFiltered],
+  );
+  const ongoingTickets = useMemo(
+    () => sidebarFiltered.filter((t) => ["in_progress", "review", "todo"].includes(t.workflow_state)),
+    [sidebarFiltered],
+  );
+  const proposedTickets = useMemo(
+    () =>
+      sidebarFiltered.filter(
+        (t) =>
+          (t.source === "feedback" || t.source === "conversation") &&
+          t.workflow_state === "backlog",
+      ),
+    [sidebarFiltered],
+  );
+  const backlogTickets = useMemo(
+    () =>
+      sidebarFiltered.filter(
+        (t) =>
+          t.workflow_state === "backlog" &&
+          t.source !== "feedback" &&
+          t.source !== "conversation",
+      ),
+    [sidebarFiltered],
+  );
+
+  const handleSidebarSelect = (ticket: Ticket) => {
+    setSelectedTicket(ticket);
+    setViewMode("detail");
   };
 
   // ---------------------------------------------------------------------------
@@ -1097,10 +1233,10 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   );
 
   // ---------------------------------------------------------------------------
-  // Render
+  // Render — right-side content area
   // ---------------------------------------------------------------------------
 
-  const mainContent = (() => {
+  const contentArea = (() => {
     switch (viewMode) {
       case "detail":
         return selectedTicket ? (
@@ -1133,7 +1269,53 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
     <SplitLayout
       autoSaveId="tickets"
       mainContent={
-        <div className="flex flex-col h-full overflow-hidden">{mainContent}</div>
+        <div className="flex h-full overflow-hidden">
+          {/* ---- LEFT SIDEBAR ---- */}
+          <div className="w-64 border-r flex flex-col shrink-0 bg-background">
+            <div className="p-3 border-b">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                  placeholder="Search tickets..."
+                  className="h-8 pl-8 text-xs"
+                />
+              </div>
+            </div>
+            <ScrollArea className="flex-1">
+              <TicketGroup
+                label="Ongoing"
+                tickets={ongoingTickets}
+                selectedTicketId={selectedTicket?.ticket_id ?? null}
+                onSelect={handleSidebarSelect}
+              />
+              <TicketGroup
+                label="Proposed"
+                tickets={proposedTickets}
+                selectedTicketId={selectedTicket?.ticket_id ?? null}
+                onSelect={handleSidebarSelect}
+              />
+              <TicketGroup
+                label="Past"
+                tickets={pastTickets}
+                selectedTicketId={selectedTicket?.ticket_id ?? null}
+                onSelect={handleSidebarSelect}
+              />
+              <TicketGroup
+                label="Backlog"
+                tickets={backlogTickets}
+                selectedTicketId={selectedTicket?.ticket_id ?? null}
+                onSelect={handleSidebarSelect}
+              />
+            </ScrollArea>
+          </div>
+
+          {/* ---- MAIN CONTENT AREA ---- */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            {contentArea}
+          </div>
+        </div>
       }
       rightPanel={
         <KB2RightPanel

@@ -38,9 +38,10 @@ interface FGLink {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  person: "#3b82f6",
+  team_member: "#3b82f6",
   team: "#8b5cf6",
-  client: "#ec4899",
+  client_company: "#ec4899",
+  client_person: "#10b981",
   repository: "#10b981",
   integration: "#a855f7",
   infrastructure: "#14b8a6",
@@ -97,7 +98,7 @@ export function KB2GraphExplorer({
       type: n.type,
       confidence: n.confidence,
       color: TYPE_COLORS[n.type] || "#888",
-      val: n.type === "person" || n.type === "repository" ? 4 : 2,
+      val: n.type === "team_member" || n.type === "repository" ? 4 : 2,
     })),
     links: filteredEdges.map((e): FGLink => ({
       source: e.source_node_id,

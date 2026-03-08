@@ -1,15 +1,16 @@
 import { embedMany } from "ai";
 import { getEmbeddingModel } from "@/lib/ai-model";
 import { qdrantClient } from "@/lib/qdrant";
-import { kb2ClaimsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import type { StepFunction } from "../pipeline-runner";
 
 const KB2_COLLECTION = "kb2_embeddings";
 
 export const evidenceUpgradeStep: StepFunction = async (ctx) => {
-  ctx.onProgress("Loading low-confidence claims...", 0);
+  const tc = getTenantCollections(ctx.companySlug);
+  await ctx.onProgress("Loading low-confidence claims...", 0);
 
-  const claims = await kb2ClaimsCollection
+  const claims = await tc.claims
     .find({ run_id: ctx.runId, confidence: "low" })
     .toArray();
 
@@ -39,7 +40,7 @@ export const evidenceUpgradeStep: StepFunction = async (ctx) => {
       });
 
       if (results.length >= 2) {
-        await kb2ClaimsCollection.updateOne(
+        await tc.claims.updateOne(
           { claim_id: claim.claim_id, run_id: ctx.runId },
           { $set: { confidence: "medium" } },
         );
@@ -50,7 +51,7 @@ export const evidenceUpgradeStep: StepFunction = async (ctx) => {
     }
 
     if ((i + 1) % 10 === 0) {
-      ctx.onProgress(
+      await ctx.onProgress(
         `Checked ${i + 1}/${claims.length} claims (${upgradedCount} upgraded)`,
         Math.round(((i + 1) / claims.length) * 100),
       );

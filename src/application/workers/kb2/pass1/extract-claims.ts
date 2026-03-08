@@ -1,11 +1,7 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import {
-  kb2EntityPagesCollection,
-  kb2HumanPagesCollection,
-  kb2ClaimsCollection,
-} from "@/lib/mongodb";
-import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type {
   KB2EntityPageType,
@@ -26,18 +22,29 @@ const ExtractedClaimsSchema = z.object({
 });
 
 export const extractClaimsStep: StepFunction = async (ctx) => {
+  const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-extract-claims");
-  const stepId = "pass1-step-13";
+  const stepId = "pass1-step-14";
+  const extractClaimsSystemPrompt = ctx.config?.prompts?.extract_claims?.system ?? `You extract atomic factual claims from knowledge base pages.
+Each claim should be a single, self-contained factual statement that can be independently verified.
 
-  const entityPages = (await kb2EntityPagesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
-  const humanPages = (await kb2HumanPagesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2HumanPageType[];
+Rules:
+- Break compound sentences into separate claims.
+- Preserve entity names exactly as written.
+- Rate confidence based on how definitive the source text is.
+- Mark truth_status as "direct" if stated explicitly, "inferred" if derived from context.
+- List entity names referenced in each claim in entity_refs.`;
+
+  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
+  const humanPages = (await tc.human_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2HumanPageType[];
 
   const claims: KB2ClaimType[] = [];
   let totalLLMCalls = 0;
 
-  ctx.onProgress(`Extracting claims from ${entityPages.length} entity pages...`, 5);
+  await ctx.onProgress(`Extracting claims from ${entityPages.length} entity pages...`, 5);
 
   for (let i = 0; i < entityPages.length; i++) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const page = entityPages[i];
     for (let si = 0; si < page.sections.length; si++) {
       const section = page.sections[si];
@@ -64,7 +71,7 @@ export const extractClaimsStep: StepFunction = async (ctx) => {
           })),
         });
 
-        await kb2EntityPagesCollection.updateOne(
+        await tc.entity_pages.updateOne(
           { page_id: page.page_id, run_id: ctx.runId },
           { $set: { [`sections.${si}.items.${ii}.claim_id`]: claimId } },
         );
@@ -73,15 +80,16 @@ export const extractClaimsStep: StepFunction = async (ctx) => {
 
     if ((i + 1) % 10 === 0) {
       const pct = Math.round(5 + ((i + 1) / entityPages.length) * 40);
-      ctx.onProgress(`Processed ${i + 1}/${entityPages.length} entity pages`, pct);
+      await ctx.onProgress(`Processed ${i + 1}/${entityPages.length} entity pages`, pct);
     }
   }
 
-  ctx.onProgress(`Extracting claims from ${humanPages.length} human pages via LLM...`, 50);
+  await ctx.onProgress(`Extracting claims from ${humanPages.length} human pages via LLM...`, 50);
 
-  const model = getFastModel();
+  const model = getFastModel(ctx.config?.pipeline_settings?.models);
 
   for (let i = 0; i < humanPages.length; i++) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const page = humanPages[i];
     const paragraphTexts = page.paragraphs.map(
       (p) => `### ${p.heading}\n${p.body}`,
@@ -93,25 +101,18 @@ export const extractClaimsStep: StepFunction = async (ctx) => {
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
       model,
-      system: `You extract atomic factual claims from knowledge base pages.
-Each claim should be a single, self-contained factual statement that can be independently verified.
-
-Rules:
-- Break compound sentences into separate claims.
-- Preserve entity names exactly as written.
-- Rate confidence based on how definitive the source text is.
-- Mark truth_status as "direct" if stated explicitly, "inferred" if derived from context.
-- List entity names referenced in each claim in entity_refs.`,
+      system: extractClaimsSystemPrompt,
       prompt: `Extract atomic claims from this "${page.title}" page:\n\n${paragraphTexts}`,
       schema: ExtractedClaimsSchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
     });
     totalLLMCalls++;
     if (usageData) {
       const claimPreview = (result.claims ?? []).slice(0, 5).map((c: any) => c.text).join("\n");
-      const cost = calculateCostUsd("claude-sonnet-4-6", usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, "claude-sonnet-4-6", `Claims from: ${page.title}\n\n${paragraphTexts}`, `Extracted ${(result.claims ?? []).length} claims:\n${claimPreview}...`, usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models), `Claims from: ${page.title}\n\n${paragraphTexts}`, `Extracted ${(result.claims ?? []).length} claims:\n${claimPreview}...`, usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
     for (const claim of result.claims) {
@@ -138,19 +139,19 @@ Rules:
 
     if ((i + 1) % 3 === 0 || i === humanPages.length - 1) {
       const pct = Math.round(50 + ((i + 1) / humanPages.length) * 45);
-      ctx.onProgress(`Extracted claims from ${i + 1}/${humanPages.length} human pages`, pct);
+      await ctx.onProgress(`Extracted claims from ${i + 1}/${humanPages.length} human pages`, pct);
     }
   }
 
   if (claims.length > 0) {
-    await kb2ClaimsCollection.deleteMany({ run_id: ctx.runId });
-    await kb2ClaimsCollection.insertMany(claims);
+    await tc.claims.deleteMany({ run_id: ctx.runId });
+    await tc.claims.insertMany(claims);
   }
 
   const entityClaims = claims.filter((c) => c.source_page_type === "entity");
   const humanClaims = claims.filter((c) => c.source_page_type === "human");
 
-  ctx.onProgress(`Extracted ${claims.length} total claims`, 100);
+  await ctx.onProgress(`Extracted ${claims.length} total claims`, 100);
   return {
     total_claims: claims.length,
     entity_page_claims: entityClaims.length,

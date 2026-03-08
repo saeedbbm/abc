@@ -1,10 +1,7 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import {
-  kb2GraphNodesCollection,
-  kb2InputSnapshotsCollection,
-} from "@/lib/mongodb";
-import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
@@ -47,58 +44,75 @@ RULES:
 export const discoveryStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-discovery");
   const stepId = "pass1-step-8";
+  const tc = getTenantCollections(ctx.companySlug);
 
-  const snapshot = await kb2InputSnapshotsCollection.findOne({ run_id: ctx.runId });
+  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
-  const existingNodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const existingNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
 
   const existingEntityList = existingNodes
     .map((n) => `- ${n.display_name} [${n.type}]`)
     .join("\n");
 
-  const model = getFastModel();
+  const model = getFastModel(ctx.config?.pipeline_settings?.models);
   let totalLLMCalls = 0;
   const allDiscoveries: z.infer<typeof DiscoverySchema>["discoveries"] = [];
+
+  const discoverySettings = ctx.config?.pipeline_settings?.discovery;
+  const BATCH_SIZE = discoverySettings?.batch_size ?? 3;
+  const CONTENT_CAP = discoverySettings?.content_cap_per_doc ?? 3000;
+
+  let discoveryPrompt = DISCOVERY_PROMPT;
+  if (ctx.config?.prompts?.discovery?.system) {
+    discoveryPrompt = ctx.config.prompts.discovery.system;
+    const context = ctx.config?.profile?.company_context ?? "";
+    if (context) {
+      discoveryPrompt = discoveryPrompt.replace(/\$\{company_context\}/g, context);
+    } else {
+      discoveryPrompt = discoveryPrompt.replace(/\$\{company_context\}\n?/g, "");
+    }
+  }
 
   const conversationDocs = docs.filter((d) =>
     d.provider === "slack" || d.provider === "customerFeedback" || d.provider === "github",
   );
 
   if (conversationDocs.length === 0) {
-    ctx.onProgress("No conversation/feedback documents to analyze", 100);
+    await ctx.onProgress("No conversation/feedback documents to analyze", 100);
     return { total_discoveries: 0, by_category: {} };
   }
 
-  const BATCH_SIZE = 3;
   const totalBatches = Math.ceil(conversationDocs.length / BATCH_SIZE);
 
-  ctx.onProgress(`Analyzing ${conversationDocs.length} documents for undocumented work...`, 5);
+  await ctx.onProgress(`Analyzing ${conversationDocs.length} documents for undocumented work...`, 5);
 
   for (let i = 0; i < conversationDocs.length; i += BATCH_SIZE) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const batch = conversationDocs.slice(i, i + BATCH_SIZE);
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
 
     const batchText = batch.map((d, idx) =>
-      `--- Document ${idx + 1}: ${d.title} (${d.provider}) ---\n${d.content.slice(0, 3000)}`,
+      `--- Document ${idx + 1}: ${d.title} (${d.provider}) ---\n${d.content.slice(0, CONTENT_CAP)}`,
     ).join("\n\n");
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
       model,
-      system: DISCOVERY_PROMPT,
+      system: discoveryPrompt,
       prompt: `EXISTING ENTITIES (do not re-discover these):\n${existingEntityList}\n\nDOCUMENTS TO ANALYZE:\n${batchText}`,
       schema: DiscoverySchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
     });
     totalLLMCalls++;
 
     if (usageData) {
-      const cost = calculateCostUsd("claude-sonnet-4-6", usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, "claude-sonnet-4-6",
+      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models),
         `Discovery batch ${batchNum}/${totalBatches}`,
         JSON.stringify(result, null, 2).slice(0, 5000),
         usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
@@ -107,7 +121,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
     const discoveries = Array.isArray(result?.discoveries) ? result.discoveries : [];
     allDiscoveries.push(...discoveries);
 
-    ctx.onProgress(
+    await ctx.onProgress(
       `Batch ${batchNum}/${totalBatches}: found ${discoveries.length} discoveries (${allDiscoveries.length} total)`,
       Math.round(5 + (batchNum / totalBatches) * 80),
     );
@@ -145,7 +159,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
   }
 
   if (newNodes.length > 0) {
-    await kb2GraphNodesCollection.insertMany(newNodes);
+    await tc.graph_nodes.insertMany(newNodes);
   }
 
   const byCategory: Record<string, number> = {};
@@ -153,7 +167,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
     byCategory[d.category] = (byCategory[d.category] || 0) + 1;
   }
 
-  ctx.onProgress(`Discovered ${uniqueDiscoveries.length} new items`, 100);
+  await ctx.onProgress(`Discovered ${uniqueDiscoveries.length} new items`, 100);
   return {
     total_discoveries: uniqueDiscoveries.length,
     llm_calls: totalLLMCalls,

@@ -9,6 +9,8 @@ import {
 import { getFastModel } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { PrefixLogger } from "@/lib/utils";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
+import type { CompanyConfigData } from "@/src/entities/models/kb2-company-config";
 
 export const maxDuration = 60;
 
@@ -32,6 +34,7 @@ const EntityPageUpdateSchema = z.object({
 async function applyEntityPagePropagation(
   targetId: string,
   recommendedAction: string,
+  config: CompanyConfigData | null,
 ): Promise<{ success: boolean; action: string }> {
   const page =
     (await kb2EntityPagesCollection.findOne({ page_id: targetId })) ??
@@ -49,8 +52,8 @@ async function applyEntityPagePropagation(
 
   const logger = new PrefixLogger("kb2-propagate");
   const result = await structuredGenerate({
-    model: getFastModel(),
-    system: `You determine which section item in an entity page needs to be updated based on a recommended action.
+    model: getFastModel(config?.pipeline_settings?.models),
+    system: config?.prompts?.propagation?.system ?? `You determine which section item in an entity page needs to be updated based on a recommended action.
 Given the page content and the recommended action, return the 0-based section_index, item_index, and the exact new_text for that item.
 The new_text should incorporate the recommended action while preserving relevant context from the original.`,
     prompt: `Recommended action: ${recommendedAction}
@@ -95,7 +98,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
-  await params;
+  const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const { accepted_impacts } = (await request.json()) as {
     accepted_impacts: AcceptedImpact[];
   };
@@ -109,6 +113,7 @@ export async function POST(
         const { success, action } = await applyEntityPagePropagation(
           impact.target_id,
           impact.recommended_action,
+          config,
         );
         actions.push(action);
         if (success) propagated++;
@@ -209,6 +214,7 @@ export async function POST(
         const { success, action } = await applyEntityPagePropagation(
           impact.target_id,
           impact.recommended_action,
+          config,
         );
         actions.push(action);
         if (success) propagated++;

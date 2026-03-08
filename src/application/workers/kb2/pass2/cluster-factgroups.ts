@@ -4,11 +4,7 @@ import { getEmbeddingModel, getFastModel } from "@/lib/ai-model";
 import { z } from "zod";
 import { PrefixLogger } from "@/lib/utils";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
-import {
-  kb2ClaimsCollection,
-  kb2FactGroupsCollection,
-  kb2VerificationCardsCollection,
-} from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import type { StepFunction } from "../pipeline-runner";
 
 const logger = new PrefixLogger("kb2-cluster-factgroups");
@@ -34,18 +30,24 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export const clusterFactGroupsStep: StepFunction = async (ctx) => {
-  ctx.onProgress("Loading claims...", 0);
+  const tc = getTenantCollections(ctx.companySlug);
+  const SIM_THRESHOLD = ctx.config?.pipeline_settings?.pass2?.cluster_similarity_threshold ?? 0.85;
+  const CLUSTER_MAX_PAIRS = ctx.config?.pipeline_settings?.pass2?.cluster_max_pairs ?? 50;
+  const clusterFactGroupsSystemPrompt = ctx.config?.prompts?.cluster_factgroups?.system ?? "You validate whether pairs of claims are duplicates, conflicts, or merely related.";
 
-  const claims = await kb2ClaimsCollection.find({ run_id: ctx.runId }).toArray();
+  await ctx.onProgress("Loading claims...", 0);
+
+  const claims = await tc.claims.find({ run_id: ctx.runId }).toArray();
   if (claims.length === 0) return { groups_created: 0, total_claims: 0 };
 
-  await kb2FactGroupsCollection.deleteMany({ run_id: ctx.runId });
+  await tc.fact_groups.deleteMany({ run_id: ctx.runId });
 
-  ctx.onProgress(`Embedding ${claims.length} claim texts...`, 10);
+  await ctx.onProgress(`Embedding ${claims.length} claim texts...`, 10);
 
   const EMBED_BATCH = 96;
   const embeddings: number[][] = [];
   for (let i = 0; i < claims.length; i += EMBED_BATCH) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const batch = claims.slice(i, i + EMBED_BATCH).map((c) => c.text as string);
     const { embeddings: batchEmbeddings } = await embedMany({
       model: getEmbeddingModel(),
@@ -54,12 +56,12 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
     embeddings.push(...batchEmbeddings);
   }
 
-  ctx.onProgress("Finding similar claim pairs...", 40);
+  await ctx.onProgress("Finding similar claim pairs...", 40);
 
-  const SIM_THRESHOLD = 0.85;
   const candidatePairs: [number, number][] = [];
 
   for (let i = 0; i < claims.length; i++) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     for (let j = i + 1; j < claims.length; j++) {
       const entityIdsA = (claims[i].entity_ids ?? []) as string[];
       const entityIdsB = (claims[j].entity_ids ?? []) as string[];
@@ -73,7 +75,7 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
     }
   }
 
-  ctx.onProgress(`Validating ${candidatePairs.length} candidate pairs...`, 60);
+  await ctx.onProgress(`Validating ${candidatePairs.length} candidate pairs...`, 60);
 
   const groups: any[] = [];
   const claimToGroup = new Map<string, string>();
@@ -83,14 +85,14 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
     const start = Date.now();
 
     const pairsText = candidatePairs
-      .slice(0, 50)
+      .slice(0, CLUSTER_MAX_PAIRS)
       .map(([i, j]) => `[${i}] "${claims[i].text}"\n[${j}] "${claims[j].text}"`)
       .join("\n\n");
 
     try {
       const result = await structuredGenerate({
-        model: getFastModel(),
-        system: "You validate whether pairs of claims are duplicates, conflicts, or merely related.",
+        model: getFastModel(ctx.config?.pipeline_settings?.models),
+        system: clusterFactGroupsSystemPrompt,
         prompt: `Review these claim pairs and group them into clusters.\nFor each cluster, pick the best canonical claim.\nMark group_type: "duplicate" if same thing, "conflict" if contradict, "related" if same topic but different facts.\n\nClaim pairs:\n${pairsText}`,
         schema: ClusterValidation,
         logger,
@@ -98,6 +100,7 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
           const cost = (usage.promptTokens * 3 + usage.completionTokens * 15) / 1_000_000;
           await ctx.logLLMCall(stepId, "claude-sonnet-4-6", pairsText.slice(0, 2000), "", usage.promptTokens, usage.completionTokens, cost, Date.now() - start);
         },
+        signal: ctx.signal,
       });
 
       for (const cluster of result.clusters) {
@@ -128,11 +131,11 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
   }
 
   if (groups.length > 0) {
-    await kb2FactGroupsCollection.insertMany(groups);
+    await tc.fact_groups.insertMany(groups);
   }
 
   for (const [claimId, groupId] of claimToGroup) {
-    await kb2ClaimsCollection.updateOne(
+    await tc.claims.updateOne(
       { claim_id: claimId, run_id: ctx.runId },
       { $set: { fact_group_id: groupId } },
     );

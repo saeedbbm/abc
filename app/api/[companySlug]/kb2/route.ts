@@ -15,6 +15,7 @@ import {
   kb2TicketsCollection,
   kb2HowtoCollection,
   kb2PeopleCollection,
+  getTenantCollections,
 } from "@/lib/mongodb";
 
 export async function GET(
@@ -24,13 +25,14 @@ export async function GET(
   const { companySlug } = await params;
   const type = request.nextUrl.searchParams.get("type");
   const runId = request.nextUrl.searchParams.get("run_id");
+  const tc = getTenantCollections(companySlug);
 
   const filter: Record<string, any> = {};
   if (runId) filter.run_id = runId;
 
   switch (type) {
     case "raw_input": {
-      const rawInputs = await kb2RawInputsCollection
+      const rawInputs = await tc.raw_inputs
         .find({ company_slug: companySlug })
         .toArray();
 
@@ -47,7 +49,9 @@ export async function GET(
         sources[source] = {
           doc_count: input.doc_count ?? 0,
           updated_at: input.updated_at,
-          raw_json: JSON.stringify(input.data, null, 2),
+          raw_json: typeof input.data === "string"
+            ? input.data
+            : JSON.stringify(input.data, null, 2),
         };
       }
 
@@ -58,22 +62,20 @@ export async function GET(
       });
     }
     case "inputs": {
-      const doc = await kb2InputSnapshotsCollection.findOne(filter, { sort: { created_at: -1 } });
+      const doc = await tc.input_snapshots.findOne(filter, { sort: { created_at: -1 } });
       return Response.json({ snapshot: doc });
     }
     case "people": {
-      const people = await kb2PeopleCollection.find({ company_slug: companySlug }).toArray();
+      const people = await tc.people.find({ company_slug: companySlug }).toArray();
       if (people.length > 0) {
         return Response.json({ people });
       }
 
-      // Derive from person-type ENTITY PAGES (verified KB team members only)
-      // Use the same run_id resolution as entity_pages query
-      const peopleFilter: Record<string, any> = { node_type: "person" };
+      const peopleFilter: Record<string, any> = { node_type: "team_member" };
       if (!filter.run_id) {
-        const runIdsWithEP = await kb2EntityPagesCollection.distinct("run_id");
+        const runIdsWithEP = await tc.entity_pages.distinct("run_id");
         if (runIdsWithEP.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
+          const latestRun = await tc.runs.findOne(
             { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
             { sort: { completed_at: -1 }, projection: { run_id: 1 } },
           );
@@ -83,7 +85,7 @@ export async function GET(
         peopleFilter.run_id = filter.run_id;
       }
 
-      const personPages = await kb2EntityPagesCollection.find(peopleFilter).toArray();
+      const personPages = await tc.entity_pages.find(peopleFilter).toArray();
 
       const seen = new Set<string>();
       const derived = personPages
@@ -178,19 +180,27 @@ export async function GET(
       return Response.json({ pages });
     }
     case "runs": {
-      const runs = await kb2RunsCollection.find({ company_slug: companySlug }).sort({ started_at: -1 }).toArray();
+      const runs = await tc.runs.find({ company_slug: companySlug }).sort({ started_at: -1 }).toArray();
       return Response.json({ runs });
     }
     case "steps": {
       if (!runId) return Response.json({ error: "run_id required" }, { status: 400 });
-      const steps = await kb2RunStepsCollection.find({ run_id: runId }).sort({ pass: 1, step_number: 1 }).toArray();
+      const steps = await tc.run_steps.find({ run_id: runId }).sort({ pass: 1, step_number: 1, execution_number: 1 }).toArray();
       return Response.json({ steps });
     }
     case "llm_calls": {
       const stepId = request.nextUrl.searchParams.get("step_id");
+      const callId = request.nextUrl.searchParams.get("call_id");
+      const executionId = request.nextUrl.searchParams.get("execution_id");
       const llmFilter: Record<string, any> = { ...filter };
       if (stepId) llmFilter.step_id = stepId;
-      const calls = await kb2LLMCallsCollection.find(llmFilter).sort({ timestamp: 1 }).toArray();
+      if (executionId) llmFilter.execution_id = executionId;
+      if (callId) {
+        llmFilter.call_id = callId;
+        const call = await tc.llm_calls.findOne(llmFilter);
+        return Response.json({ call });
+      }
+      const calls = await tc.llm_calls.find(llmFilter).sort({ timestamp: 1 }).toArray();
       return Response.json({ calls });
     }
     case "tickets": {
@@ -223,36 +233,65 @@ export async function GET(
       const howtos = await kb2HowtoCollection.find(htFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ howtos });
     }
+    case "graph_nodes": {
+      if (!runId) return Response.json({ error: "run_id required" }, { status: 400 });
+      const nodes = await tc.graph_nodes.find({ run_id: runId }).toArray();
+      return Response.json({ nodes });
+    }
     case "parsed_doc": {
       const docId = request.nextUrl.searchParams.get("doc_id");
       if (!docId) return Response.json({ error: "Missing doc_id" }, { status: 400 });
+      const sourceType = request.nextUrl.searchParams.get("source_type");
+      const runId = request.nextUrl.searchParams.get("run_id");
 
-      // Try the latest snapshot first (may be from a specific run)
-      const latestRun = await kb2RunsCollection.findOne(
-        { company_slug: companySlug, status: "completed" },
-        { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-      );
       const snapshotFilter: Record<string, any> = { company_slug: companySlug };
-      if (latestRun) snapshotFilter.run_id = latestRun.run_id;
+      if (runId) {
+        snapshotFilter.run_id = runId;
+      } else {
+        const latestRun = await tc.runs.findOne(
+          { company_slug: companySlug, status: "completed" },
+          { sort: { completed_at: -1 }, projection: { run_id: 1 } },
+        );
+        if (latestRun) snapshotFilter.run_id = latestRun.run_id;
+      }
 
-      let snapshot = await kb2InputSnapshotsCollection.findOne(snapshotFilter, { sort: { created_at: -1 } });
+      let snapshot = await tc.input_snapshots.findOne(snapshotFilter, { sort: { created_at: -1 } });
       if (!snapshot) {
-        snapshot = await kb2InputSnapshotsCollection.findOne(
+        snapshot = await tc.input_snapshots.findOne(
           { company_slug: companySlug },
           { sort: { created_at: -1 } },
         );
       }
 
       if (snapshot?.parsed_documents) {
+        const docs = snapshot.parsed_documents as any[];
         const docIdLower = docId.toLowerCase();
-        const doc = (snapshot.parsed_documents as any[]).find((d: any) => {
+        const sourceTypeLower = sourceType?.toLowerCase();
+
+        const exactMatch = docs.find((d: any) => {
           const sid = (d.sourceId ?? "").toLowerCase();
           const did = (d.doc_id ?? d.id ?? "").toLowerCase();
-          const title = (d.title ?? "").toLowerCase();
-          return sid === docIdLower || did === docIdLower || title === docIdLower
-            || sid.includes(docIdLower) || docIdLower.includes(sid);
+          const idMatch = sid === docIdLower || did === docIdLower;
+          if (!idMatch) return false;
+          if (sourceTypeLower) {
+            const provider = (d.provider ?? "").toLowerCase();
+            return provider === sourceTypeLower;
+          }
+          return true;
         });
-        if (doc) return Response.json({ document: doc });
+        if (exactMatch) return Response.json({ document: exactMatch });
+
+        const titleMatch = docs.find((d: any) => {
+          const title = (d.title ?? "").toLowerCase();
+          const titleMatch = title === docIdLower;
+          if (!titleMatch) return false;
+          if (sourceTypeLower) {
+            const provider = (d.provider ?? "").toLowerCase();
+            return provider === sourceTypeLower;
+          }
+          return true;
+        });
+        if (titleMatch) return Response.json({ document: titleMatch });
       }
 
       return Response.json({ error: "Document not found" }, { status: 404 });

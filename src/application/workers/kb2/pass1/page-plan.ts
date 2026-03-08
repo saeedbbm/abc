@@ -1,9 +1,10 @@
 import { randomUUID } from "crypto";
-import { kb2GraphNodesCollection, kb2TicketsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import {
   ENTITY_PAGE_TEMPLATES,
   STANDARD_HUMAN_PAGES,
 } from "@/src/entities/models/kb2-templates";
+import { getHumanPages } from "@/src/application/lib/kb2/company-config";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
@@ -19,19 +20,24 @@ export function classifyProjectCategory(node: KB2GraphNodeType): string | null {
   if (node.type !== "project") return null;
   const disc = node.attributes?.discovery_category ?? "";
   const status = (node.attributes?.status ?? "").toLowerCase();
+  const docLevel = (node.attributes?.documentation_level ?? "").toLowerCase();
   const isDone = ["done", "completed", "closed", "past"].some((s) => status.includes(s));
+  const isProposed = status === "proposed" || status === "planned";
+  const isUndocumented = docLevel === "undocumented";
 
-  if (disc === "proposed_project") return "proposed_projects";
+  if (disc === "proposed_project" || isProposed) return "proposed_projects";
   if (disc === "past_undocumented") return "past_undocumented";
   if (disc === "ongoing_undocumented") return "ongoing_undocumented";
 
-  if (node.truth_status === "direct") {
-    return isDone ? "past_documented" : "ongoing_documented";
+  if (isDone) {
+    if (isUndocumented || node.truth_status === "inferred") return "past_undocumented";
+    return "past_documented";
   }
-  if (node.truth_status === "inferred") {
-    return isDone ? "past_undocumented" : "ongoing_undocumented";
-  }
-  return "ongoing_documented";
+
+  if (isUndocumented || node.truth_status === "inferred") return "ongoing_undocumented";
+  if (node.truth_status === "direct") return "ongoing_documented";
+
+  return docLevel === "documented" ? "ongoing_documented" : "ongoing_undocumented";
 }
 
 const TICKET_DISCOVERY_CATEGORIES = new Set([
@@ -79,13 +85,14 @@ export interface PagePlanArtifact {
 export async function syncGraphNodesToTickets(
   nodes: KB2GraphNodeType[],
   runId: string,
+  tc: ReturnType<typeof getTenantCollections>,
 ): Promise<{ synced: number; skipped: number }> {
   const ticketNodes = nodes.filter(
     (n) => n.type === "ticket" || isProposedTicketNode(n),
   );
   if (ticketNodes.length === 0) return { synced: 0, skipped: 0 };
 
-  const existing = await kb2TicketsCollection
+  const existing = await tc.tickets
     .find({ linked_entity_ids: { $in: ticketNodes.map((n) => n.node_id) } })
     .toArray();
   const existingNodeIds = new Set(
@@ -128,7 +135,7 @@ export async function syncGraphNodesToTickets(
   }
 
   if (toInsert.length > 0) {
-    await kb2TicketsCollection.insertMany(toInsert);
+    await tc.tickets.insertMany(toInsert);
   }
 
   return { synced: toInsert.length, skipped };
@@ -137,11 +144,9 @@ export async function syncGraphNodesToTickets(
 async function linkTicketsProjectsHowtos(
   nodes: KB2GraphNodeType[],
   runId: string,
+  tc: ReturnType<typeof getTenantCollections>,
 ): Promise<{ linked: number }> {
-  const { kb2TicketsCollection, kb2HowtoCollection } = await import("@/lib/mongodb");
-  const { randomUUID } = await import("crypto");
-  
-  const tickets = await kb2TicketsCollection.find({ run_id: runId }).toArray();
+  const tickets = await tc.tickets.find({ run_id: runId }).toArray();
   const projectNodes = nodes.filter((n) => n.type === "project");
   let linked = 0;
 
@@ -176,23 +181,23 @@ async function linkTicketsProjectsHowtos(
         truth_status: "inferred" as any,
         confidence: "low" as any,
       };
-      await kb2GraphNodesCollection.insertOne(newProjectNode);
+      await tc.graph_nodes.insertOne(newProjectNode);
       linkedProject = newProjectNode;
     }
 
     if (linkedProject) {
-      await kb2TicketsCollection.updateOne(
+      await tc.tickets.updateOne(
         { ticket_id: (ticket as any).ticket_id },
         { $addToSet: { linked_entity_ids: linkedProject.node_id } },
       );
 
       if (isProposed) {
-        const existingHowto = await kb2HowtoCollection.findOne({
+        const existingHowto = await tc.howto.findOne({
           ticket_id: (ticket as any).ticket_id,
           run_id: runId,
         });
         if (!existingHowto) {
-          await kb2HowtoCollection.insertOne({
+          await tc.howto.insertOne({
             howto_id: randomUUID(),
             run_id: runId,
             ticket_id: (ticket as any).ticket_id,
@@ -220,10 +225,11 @@ async function linkTicketsProjectsHowtos(
 }
 
 export const pagePlanStep: StepFunction = async (ctx) => {
-  const nodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const tc = getTenantCollections(ctx.companySlug);
+  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
   if (nodes.length === 0) throw new Error("No graph nodes found — run step 3 first");
 
-  ctx.onProgress(`Planning pages for ${nodes.length} entities...`, 10);
+  await ctx.onProgress(`Planning pages for ${nodes.length} entities...`, 10);
 
   const entityPlans: EntityPagePlan[] = nodes
     .filter((node) => !isProposedTicketNode(node))
@@ -235,22 +241,13 @@ export const pagePlanStep: StepFunction = async (ctx) => {
       has_template: node.type in ENTITY_PAGE_TEMPLATES,
     }));
 
-  ctx.onProgress("Planning human concept pages...", 50);
+  await ctx.onProgress("Planning human concept pages...", 50);
 
-  const projectNodes = nodes.filter((n) => n.type === "project");
-  const populatedProjectCategories = new Set<string>();
-  for (const pn of projectNodes) {
-    const cat = classifyProjectCategory(pn);
-    if (cat) populatedProjectCategories.add(cat);
-  }
+  const humanPageDefs = ctx.config
+    ? await getHumanPages(ctx.companySlug)
+    : STANDARD_HUMAN_PAGES;
 
-  const humanPlans: HumanPagePlan[] = STANDARD_HUMAN_PAGES
-    .filter((hp) => {
-      if (PROJECT_CATEGORIES.has(hp.category)) {
-        return populatedProjectCategories.has(hp.category);
-      }
-      return true;
-    })
+  const humanPlans: HumanPagePlan[] = humanPageDefs
     .map((hp) => ({
       page_id: randomUUID(),
       category: hp.category,
@@ -260,11 +257,11 @@ export const pagePlanStep: StepFunction = async (ctx) => {
       related_entity_types: hp.relatedEntityTypes,
     }));
 
-  ctx.onProgress("Syncing ticket nodes to kb2_tickets...", 70);
-  const ticketSync = await syncGraphNodesToTickets(nodes, ctx.runId);
+  await ctx.onProgress("Syncing ticket nodes to kb2_tickets...", 70);
+  const ticketSync = await syncGraphNodesToTickets(nodes, ctx.runId, tc);
 
-  ctx.onProgress("Linking tickets, projects, and howto docs...", 85);
-  const linkResult = await linkTicketsProjectsHowtos(nodes, ctx.runId);
+  await ctx.onProgress("Linking tickets, projects, and howto docs...", 85);
+  const linkResult = await linkTicketsProjectsHowtos(nodes, ctx.runId, tc);
 
   const artifact: PagePlanArtifact = {
     entity_pages: entityPlans,
@@ -273,7 +270,7 @@ export const pagePlanStep: StepFunction = async (ctx) => {
     ticket_sync: ticketSync,
   };
 
-  ctx.onProgress(
+  await ctx.onProgress(
     `Planned ${artifact.total_pages} pages (${entityPlans.length} entity + ${humanPlans.length} human), synced ${ticketSync.synced} tickets, linked ${linkResult.linked} howtos`,
     100,
   );

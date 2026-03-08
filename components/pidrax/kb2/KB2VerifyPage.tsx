@@ -63,6 +63,12 @@ interface VerifyCard {
   title: string;
   explanation: string;
   description?: string;
+  problem_explanation?: string;
+  supporting_evidence?: { text: string; source_title?: string; confidence?: string }[];
+  missing_evidence?: string[];
+  affected_entities?: { entity_name: string; entity_type?: string; relationship?: string }[];
+  required_data?: string[];
+  verification_question?: string;
   canonical_text: string;
   proposed_text?: string;
   recommended_action?: string;
@@ -151,7 +157,7 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
     const allNodes: GraphNode[] = nData.nodes ?? [];
     const seen = new Set<string>();
     setNodes(allNodes.filter((n) => {
-      if (n.type !== "person" || seen.has(n.node_id)) return false;
+      if (n.type !== "team_member" || seen.has(n.node_id)) return false;
       seen.add(n.node_id);
       return true;
     }));
@@ -536,8 +542,85 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
                     )}
                   </div>
 
-                  {/* Description */}
-                  <p className="text-sm mb-4">{selectedCard.description || selectedCard.explanation}</p>
+                  {/* Problem Explanation */}
+                  <div className="mb-4 p-4 rounded-lg bg-muted/40 border">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Problem</p>
+                    <p className="text-sm leading-relaxed">{selectedCard.problem_explanation || selectedCard.description || selectedCard.explanation}</p>
+                  </div>
+
+                  {/* Verification Question */}
+                  {selectedCard.verification_question && (
+                    <div className="mb-4 p-4 rounded-lg border-2 border-primary/20 bg-primary/5">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">Question for Reviewer</p>
+                      <p className="text-sm font-medium">{selectedCard.verification_question}</p>
+                    </div>
+                  )}
+
+                  {/* Supporting Evidence */}
+                  {(selectedCard.supporting_evidence ?? []).length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Supporting Evidence</p>
+                      <div className="space-y-2">
+                        {selectedCard.supporting_evidence!.map((ev, i) => (
+                          <div key={i} className="flex gap-2 items-start p-2.5 rounded-md bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs">{ev.text}</p>
+                              {ev.source_title && <p className="text-[10px] text-muted-foreground mt-1">Source: {ev.source_title}</p>}
+                            </div>
+                            {ev.confidence && (
+                              <Badge variant="outline" className="text-[9px] shrink-0">{ev.confidence}</Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Missing Evidence */}
+                  {(selectedCard.missing_evidence ?? []).length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Missing Evidence</p>
+                      <div className="space-y-1.5">
+                        {selectedCard.missing_evidence!.map((item, i) => (
+                          <div key={i} className="flex gap-2 items-start p-2.5 rounded-md bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                            <p className="text-xs flex-1">{item}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Affected Entities */}
+                  {(selectedCard.affected_entities ?? []).length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Affected Entities</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedCard.affected_entities!.map((ent, i) => (
+                          <Badge key={i} variant="secondary" className="text-[11px] gap-1">
+                            {ent.entity_name}
+                            {ent.entity_type && <span className="text-muted-foreground">({ent.entity_type})</span>}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Required Data */}
+                  {(selectedCard.required_data ?? []).length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Data Needed from You</p>
+                      <ul className="space-y-1">
+                        {selectedCard.required_data!.map((item, i) => (
+                          <li key={i} className="text-xs flex gap-2 items-start">
+                            <span className="text-primary font-bold mt-0.5">•</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {/* Recommended action */}
                   {selectedCard.recommended_action && (

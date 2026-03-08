@@ -1,13 +1,7 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import {
-  kb2ClaimsCollection,
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-  kb2EntityPagesCollection,
-  kb2VerificationCardsCollection,
-} from "@/lib/mongodb";
-import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type {
   KB2ClaimType,
@@ -39,20 +33,47 @@ const LLMVerifyCardSchema = z.object({
     index: z.number(),
     keep: z.boolean(),
     title: z.string(),
-    description: z.string(),
+    problem_explanation: z.string().describe("Clear explanation of the problem: what is wrong/uncertain and what's at stake if it's incorrect"),
+    supporting_evidence: z.array(z.object({
+      text: z.string().describe("Factual statement from the source that supports the claim"),
+      source_title: z.string().optional().describe("Document title where this evidence was found"),
+      confidence: z.enum(["high", "medium", "low"]).optional(),
+    })).describe("Evidence found in source documents that relates to this issue"),
+    missing_evidence: z.array(z.string()).describe("Specific information that is missing and would be needed to resolve this"),
+    affected_entity_names: z.array(z.string()).describe("Display names of other entities that would be impacted if this issue is confirmed"),
+    required_data: z.array(z.string()).describe("Specific data points the reviewer needs to provide (e.g., 'correct database URL', 'actual owner name')"),
+    verification_question: z.string().describe("A single clear yes/no or specific-answer question the reviewer should answer"),
     severity: z.enum(["S1", "S2", "S3", "S4"]),
     recommended_action: z.string(),
   })),
 });
 
 export const createVerifyCardsStep: StepFunction = async (ctx) => {
+  const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-verify-cards");
-  const stepId = "pass1-step-14";
+  const stepId = "pass1-step-15";
+  const BATCH_SIZE = ctx.config?.pipeline_settings?.verification?.batch_size ?? 25;
+  const createVerifyCardsSystemPrompt = ctx.config?.prompts?.create_verify_cards?.system ?? `You review verification card candidates for a company knowledge base.
+For each candidate, decide whether to keep it and rewrite it for a human reviewer.
 
-  const claims = (await kb2ClaimsCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2ClaimType[];
-  const nodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await kb2GraphEdgesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
-  const entityPages = (await kb2EntityPagesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
+SEVERITY RUBRIC:
+- S1 (Critical): Affects production systems, could cause wrong AI chat answers, factual contradiction about infrastructure/payments/auth
+- S2 (High): Important factual claim about system behavior needing verification, integration details, data flow
+- S3 (Medium): Organizational/process claims, team membership, project status
+- S4 (Low): Nice-to-know, cosmetic, low-impact gaps like missing optional info
+
+RULES:
+- Filter out noise: if a candidate is trivially true, obvious, or would waste a reviewer's time, set keep: false
+- Write a specific, human-friendly title (not generic like "Inferred claim needs verification")
+- Write a description that explains what's at stake if this is wrong
+- Missing section cards for sections unlikely to have data should be S4 or filtered
+- Unknown owner cards for minor libraries or tools should be S4 or filtered
+- Inferred claims about critical systems (payments, auth, databases) should be S1 or S2`;
+
+  const claims = (await tc.claims.find({ run_id: ctx.runId }).toArray()) as unknown as KB2ClaimType[];
+  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
+  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
 
   const nodeById = new Map<string, KB2GraphNodeType>();
   for (const n of nodes) nodeById.set(n.node_id, n);
@@ -60,7 +81,7 @@ export const createVerifyCardsStep: StepFunction = async (ctx) => {
   for (const ep of entityPages) pageById.set(ep.page_id, ep);
 
   // ------ Phase 1: Gather all candidates ------
-  ctx.onProgress("Phase 1: Gathering verification candidates...", 5);
+  await ctx.onProgress("Phase 1: Gathering verification candidates...", 5);
 
   const candidates: RawCandidate[] = [];
 
@@ -144,58 +165,72 @@ export const createVerifyCardsStep: StepFunction = async (ctx) => {
     });
   }
 
-  ctx.onProgress(`Phase 1 complete: ${candidates.length} raw candidates`, 20);
+  await ctx.onProgress(`Phase 1 complete: ${candidates.length} raw candidates`, 20);
 
   if (candidates.length === 0) {
-    ctx.onProgress("No verification candidates found", 100);
+    await ctx.onProgress("No verification candidates found", 100);
     return { total_cards: 0, by_type: {}, by_severity: {}, llm_calls: 0 };
   }
 
   // ------ Phase 2: LLM pass for filtering and rewriting ------
-  ctx.onProgress("Phase 2: LLM filtering and rewriting...", 25);
+  await ctx.onProgress("Phase 2: LLM filtering and rewriting...", 25);
 
-  const model = getFastModel();
+  const model = getFastModel(ctx.config?.pipeline_settings?.models);
   let totalLLMCalls = 0;
-  const BATCH_SIZE = 25;
   const survivingCards: z.infer<typeof LLMVerifyCardSchema>["cards"][number][] = [];
   const survivingCandidates: RawCandidate[] = [];
 
+  const edgesByNode = new Map<string, { edge: KB2GraphEdgeType; other: KB2GraphNodeType | undefined }[]>();
+  for (const edge of edges) {
+    const srcEntry = edgesByNode.get(edge.source_node_id) ?? [];
+    srcEntry.push({ edge, other: nodeById.get(edge.target_node_id) });
+    edgesByNode.set(edge.source_node_id, srcEntry);
+    const tgtEntry = edgesByNode.get(edge.target_node_id) ?? [];
+    tgtEntry.push({ edge, other: nodeById.get(edge.source_node_id) });
+    edgesByNode.set(edge.target_node_id, tgtEntry);
+  }
+
   for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const batch = candidates.slice(i, i + BATCH_SIZE);
-    const batchText = batch.map((c, idx) =>
-      `${i + idx}. [${c.type}] Entity: ${c.entity_name ?? "unknown"}\n   "${c.raw_text}"`,
-    ).join("\n\n");
+    const batchText = batch.map((c, idx) => {
+      const parts = [`${i + idx}. [${c.type}] Entity: ${c.entity_name ?? "unknown"}\n   Claim: "${c.raw_text}"`];
+      if (c.source_refs.length > 0) {
+        parts.push(`   Sources: ${c.source_refs.map((r) => `${r.title} (${r.source_type})${r.excerpt ? ` — "${r.excerpt.slice(0, 150)}"` : ""}`).join("; ")}`);
+      }
+      if (c.page_id) {
+        const page = pageById.get(c.page_id);
+        if (page) {
+          const relSection = page.sections.find((s) => s.items.some((it) => it.text.toLowerCase().includes(c.raw_text.toLowerCase().slice(0, 40))));
+          if (relSection) parts.push(`   Page section [${relSection.section_name}]: ${relSection.items.map((it) => it.text).join(" | ").slice(0, 300)}`);
+        }
+      }
+      const node = nodes.find((n) => n.display_name.toLowerCase() === (c.entity_name ?? "").toLowerCase());
+      if (node) {
+        const nodeEdges = edgesByNode.get(node.node_id) ?? [];
+        if (nodeEdges.length > 0) {
+          parts.push(`   Graph connections: ${nodeEdges.slice(0, 8).map((e) => `${e.edge.type} → ${e.other?.display_name ?? "?"}`).join(", ")}`);
+        }
+      }
+      return parts.join("\n");
+    }).join("\n\n");
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
       model,
-      system: `You review verification card candidates for a company knowledge base.
-For each candidate, decide whether to keep it and rewrite it for a human reviewer.
-
-SEVERITY RUBRIC:
-- S1 (Critical): Affects production systems, could cause wrong AI chat answers, factual contradiction about infrastructure/payments/auth
-- S2 (High): Important factual claim about system behavior needing verification, integration details, data flow
-- S3 (Medium): Organizational/process claims, team membership, project status
-- S4 (Low): Nice-to-know, cosmetic, low-impact gaps like missing optional info
-
-RULES:
-- Filter out noise: if a candidate is trivially true, obvious, or would waste a reviewer's time, set keep: false
-- Write a specific, human-friendly title (not generic like "Inferred claim needs verification")
-- Write a description that explains what's at stake if this is wrong
-- Missing section cards for sections unlikely to have data should be S4 or filtered
-- Unknown owner cards for minor libraries or tools should be S4 or filtered
-- Inferred claims about critical systems (payments, auth, databases) should be S1 or S2`,
-      prompt: `Review these ${batch.length} verification candidates:\n\n${batchText}`,
+      system: createVerifyCardsSystemPrompt,
+      prompt: `Review these ${batch.length} verification candidates. For each one, provide a structured analysis with problem explanation, evidence, affected entities, and a clear verification question.\n\n${batchText}`,
       schema: LLMVerifyCardSchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
     });
     totalLLMCalls++;
 
     if (usageData) {
-      const cost = calculateCostUsd("claude-sonnet-4-6", usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, "claude-sonnet-4-6", batchText.slice(0, 3000), JSON.stringify(result, null, 2).slice(0, 3000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models), batchText.slice(0, 3000), JSON.stringify(result, null, 2).slice(0, 3000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
     for (const card of result.cards ?? []) {
@@ -207,22 +242,22 @@ RULES:
     }
 
     const pct = Math.round(25 + ((i + batch.length) / candidates.length) * 40);
-    ctx.onProgress(`Phase 2: processed ${Math.min(i + BATCH_SIZE, candidates.length)}/${candidates.length} candidates`, pct);
+    await ctx.onProgress(`Phase 2: processed ${Math.min(i + BATCH_SIZE, candidates.length)}/${candidates.length} candidates`, pct);
   }
 
-  ctx.onProgress(`Phase 2 complete: ${survivingCards.length}/${candidates.length} cards kept`, 65);
+  await ctx.onProgress(`Phase 2 complete: ${survivingCards.length}/${candidates.length} cards kept`, 65);
 
   // ------ Phase 3: Attach source refs mechanically ------
-  ctx.onProgress("Phase 3: Attaching source references...", 70);
+  await ctx.onProgress("Phase 3: Attaching source references...", 70);
 
   // ------ Phase 4: Auto-assign from graph ownership ------
-  ctx.onProgress("Phase 4: Auto-assigning...", 80);
+  await ctx.onProgress("Phase 4: Auto-assigning...", 80);
 
   const ownershipMap = new Map<string, string[]>();
   for (const edge of edges) {
     if (edge.type === "OWNED_BY" || edge.type === "LEADS") {
       const target = nodeById.get(edge.target_node_id);
-      if (target && target.type === "person") {
+      if (target && target.type === "team_member") {
         const existing = ownershipMap.get(edge.source_node_id) ?? [];
         existing.push(target.display_name);
         ownershipMap.set(edge.source_node_id, existing);
@@ -244,13 +279,25 @@ RULES:
       }
     }
 
+    const affectedEntities: { entity_name: string; entity_type?: string; relationship?: string }[] = [];
+    for (const name of llmCard.affected_entity_names ?? []) {
+      const found = nodes.find((n) => n.display_name.toLowerCase() === name.toLowerCase());
+      affectedEntities.push({ entity_name: name, entity_type: found?.type, relationship: "potentially affected" });
+    }
+
     finalCards.push({
       card_id: randomUUID(),
       run_id: ctx.runId,
       card_type: candidate.type,
       severity: llmCard.severity as KB2Severity,
       title: llmCard.title,
-      explanation: llmCard.description,
+      explanation: llmCard.problem_explanation ?? llmCard.title,
+      problem_explanation: llmCard.problem_explanation,
+      supporting_evidence: llmCard.supporting_evidence ?? [],
+      missing_evidence: llmCard.missing_evidence ?? [],
+      affected_entities: affectedEntities,
+      required_data: llmCard.required_data ?? [],
+      verification_question: llmCard.verification_question,
       recommended_action: llmCard.recommended_action,
       page_occurrences: candidate.page_id
         ? [{ page_id: candidate.page_id, page_type: candidate.page_type ?? "entity", page_title: candidate.page_title }]
@@ -263,13 +310,13 @@ RULES:
     });
   }
 
-  const existingDupCards = await kb2VerificationCardsCollection
+  const existingDupCards = await tc.verification_cards
     .find({ run_id: ctx.runId, card_type: "duplicate_cluster" })
     .toArray();
 
-  await kb2VerificationCardsCollection.deleteMany({ run_id: ctx.runId, card_type: { $ne: "duplicate_cluster" } });
+  await tc.verification_cards.deleteMany({ run_id: ctx.runId, card_type: { $ne: "duplicate_cluster" } });
   if (finalCards.length > 0) {
-    await kb2VerificationCardsCollection.insertMany(finalCards);
+    await tc.verification_cards.insertMany(finalCards);
   }
 
   const totalCards = finalCards.length + existingDupCards.length;
@@ -281,7 +328,7 @@ RULES:
     byType["duplicate_cluster"] = existingDupCards.length;
   }
 
-  ctx.onProgress(`Created ${totalCards} verification cards (${candidates.length - survivingCards.length} filtered as noise)`, 100);
+  await ctx.onProgress(`Created ${totalCards} verification cards (${candidates.length - survivingCards.length} filtered as noise)`, 100);
   return {
     total_cards: totalCards,
     candidates_gathered: candidates.length,

@@ -1,12 +1,9 @@
 import { z } from "zod";
-import {
-  kb2EntityPagesCollection,
-  kb2HumanPagesCollection,
-  kb2GraphNodesCollection,
-} from "@/lib/mongodb";
-import { getFastModel, getReasoningModel, calculateCostUsd } from "@/lib/ai-model";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, getReasoningModel, getReasoningModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { STANDARD_HUMAN_PAGES } from "@/src/entities/models/kb2-templates";
+import { getHumanPages } from "@/src/application/lib/kb2/company-config";
 import { PROJECT_CATEGORIES, classifyProjectCategory } from "./page-plan";
 import type { KB2EntityPageType, KB2GraphNodeType, KB2HumanPageType, KB2HumanPageLayer } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
@@ -38,11 +35,12 @@ const GeneratedHumanPageSchema = z.object({
 export const generateHumanPagesStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-gen-human-pages");
   const stepId = "pass1-step-12";
+  const tc = getTenantCollections(ctx.companySlug);
 
-  const entityPages = (await kb2EntityPagesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
+  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
   if (entityPages.length === 0) throw new Error("No entity pages found — run step 11 first");
 
-  const graphNodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const graphNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
   const nodeById = new Map<string, KB2GraphNodeType>();
   for (const n of graphNodes) nodeById.set(n.node_id, n);
 
@@ -73,16 +71,22 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
   const pages: KB2HumanPageType[] = [];
   let totalLLMCalls = 0;
 
-  ctx.onProgress(`Generating ${humanPlans.length} human pages from AI pages...`, 5);
+  await ctx.onProgress(`Generating ${humanPlans.length} human pages from AI pages...`, 5);
 
   for (let i = 0; i < humanPlans.length; i++) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const plan = humanPlans[i];
-    const hpDef = STANDARD_HUMAN_PAGES.find((hp) => hp.category === plan.category);
+    const humanPageDefs = ctx.config ? await getHumanPages(ctx.companySlug) : STANDARD_HUMAN_PAGES;
+    const hpDef = humanPageDefs.find((hp) => hp.category === plan.category)
+      ?? STANDARD_HUMAN_PAGES.find((hp) => hp.category === plan.category);
     if (!hpDef) continue;
 
     const useReasoning = CATEGORIES_NEEDING_REASONING.has(plan.category);
-    const model = useReasoning ? getReasoningModel() : getFastModel();
-    const modelName = useReasoning ? "claude-opus-4-6" : "claude-sonnet-4-6";
+    const model = useReasoning ? getReasoningModel(ctx.config?.pipeline_settings?.models) : getFastModel(ctx.config?.pipeline_settings?.models);
+    const modelName = useReasoning ? getReasoningModelName(ctx.config?.pipeline_settings?.models) : getFastModelName(ctx.config?.pipeline_settings?.models);
+
+    const pgSettings = ctx.config?.pipeline_settings?.page_generation;
+    const MAX_ENTITY_PAGES = pgSettings?.max_entity_pages_per_human_page ?? 25;
 
     const relatedPages: KB2EntityPageType[] = [];
     const isProjectCategory = PROJECT_CATEGORIES.has(plan.category);
@@ -98,7 +102,30 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
         relatedPages.push(...pagesOfType);
       }
     }
-    const cappedPages = relatedPages.slice(0, 25);
+    const cappedPages = relatedPages.slice(0, MAX_ENTITY_PAGES);
+
+    if (cappedPages.length === 0) {
+      const page: KB2HumanPageType = {
+        page_id: plan.page_id,
+        run_id: ctx.runId,
+        title: hpDef.title,
+        layer: hpDef.layer as KB2HumanPageLayer,
+        category: hpDef.category,
+        paragraphs: [{
+          heading: hpDef.title,
+          body: `No ${hpDef.title.toLowerCase()} data has been discovered yet. This page will be populated when relevant information is ingested.`,
+          entity_refs: [],
+          source_items: [],
+        }],
+        linked_entity_page_ids: [],
+      };
+      pages.push(page);
+      if ((i + 1) % 3 === 0 || i === humanPlans.length - 1) {
+        const pct = Math.round(5 + ((i + 1) / humanPlans.length) * 90);
+        await ctx.onProgress(`Generated ${i + 1}/${humanPlans.length} human pages`, pct);
+      }
+      continue;
+    }
 
     const entityPagesContext = cappedPages.map((ep) => {
       const sections = ep.sections.map((s) => {
@@ -112,9 +139,7 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
-    const result = await structuredGenerate({
-      model,
-      system: `You generate human-readable concept hub pages for a company knowledge base.
+    let humanPageSystemPrompt = `You generate human-readable concept hub pages for a company knowledge base.
 These pages synthesize information from AI entity pages into coherent, well-structured prose.
 
 Page: "${hpDef.title}"
@@ -129,13 +154,24 @@ Rules:
 - Write 3-8 paragraphs depending on available information.
 - For used_items: list which entity page items you used to write each paragraph.
   Use the entity display name (from the "##" header), section name, and item index from the AI pages.
-  This creates traceability from human content back to structured AI data.`,
+  This creates traceability from human content back to structured AI data.`;
+    if (ctx.config?.prompts?.generate_human_pages?.system) {
+      humanPageSystemPrompt = ctx.config.prompts.generate_human_pages.system
+        .replace(/\$\{page_title\}/g, hpDef.title)
+        .replace(/\$\{page_layer\}/g, hpDef.layer)
+        .replace(/\$\{page_description\}/g, hpDef.description);
+    }
+
+    const result = await structuredGenerate({
+      model,
+      system: humanPageSystemPrompt,
       prompt: `Generate the "${hpDef.title}" page from these AI entity pages:
 
 ${entityPagesContext}`,
       schema: GeneratedHumanPageSchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
     });
     totalLLMCalls++;
     if (usageData) {
@@ -178,16 +214,16 @@ ${entityPagesContext}`,
 
     if ((i + 1) % 3 === 0 || i === humanPlans.length - 1) {
       const pct = Math.round(5 + ((i + 1) / humanPlans.length) * 90);
-      ctx.onProgress(`Generated ${i + 1}/${humanPlans.length} human pages`, pct);
+      await ctx.onProgress(`Generated ${i + 1}/${humanPlans.length} human pages`, pct);
     }
   }
 
   if (pages.length > 0) {
-    await kb2HumanPagesCollection.deleteMany({ run_id: ctx.runId });
-    await kb2HumanPagesCollection.insertMany(pages);
+    await tc.human_pages.deleteMany({ run_id: ctx.runId });
+    await tc.human_pages.insertMany(pages);
   }
 
-  ctx.onProgress(`Generated ${pages.length} human pages`, 100);
+  await ctx.onProgress(`Generated ${pages.length} human pages`, 100);
   return {
     total_pages: pages.length,
     llm_calls: totalLLMCalls,

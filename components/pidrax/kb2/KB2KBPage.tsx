@@ -83,7 +83,7 @@ interface EntityPage {
 // Constants
 // ---------------------------------------------------------------------------
 
-const LAYER_ORDER = ["company", "engineering", "marketing", "legal"];
+const DEFAULT_LAYER_ORDER = ["company", "engineering", "marketing", "legal"];
 const LAYER_LABELS: Record<string, string> = {
   company: "Company",
   engineering: "Engineering",
@@ -92,7 +92,7 @@ const LAYER_LABELS: Record<string, string> = {
 };
 
 const ENTITY_TYPE_ORDER = [
-  "person", "team", "client", "repository", "integration", "infrastructure",
+  "team_member", "team", "client_company", "client_person", "repository", "integration", "infrastructure",
   "cloud_resource", "library", "database", "environment", "project",
   "ticket", "pull_request", "pipeline", "customer_feedback",
 ];
@@ -124,28 +124,47 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
   const [selectedPage, setSelectedPage] = useState<HumanPage | null>(null);
   const [selectedEntityPage, setSelectedEntityPage] =
     useState<EntityPage | null>(null);
+  const [layerOrder, setLayerOrder] = useState<string[]>(DEFAULT_LAYER_ORDER);
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(
-    new Set(LAYER_ORDER)
+    new Set(DEFAULT_LAYER_ORDER)
   );
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
   const [viewTab, setViewTab] = useState("human");
   const [sidebarMode, setSidebarMode] = useState<"human" | "ai">("human");
 
-  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; truth_status?: string; attributes?: Record<string, any>; source_refs: { source_type: string; doc_id: string; title: string; excerpt: string }[] }>>({});
+  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; truth_status?: string; attributes?: Record<string, any>; source_refs: { source_type: string; doc_id: string; title: string; section_heading?: string; excerpt: string }[] }>>({});
 
   const [rightPanelContext, setRightPanelContext] = useState<AutoContext | null>(null);
   const [rightPanelSources, setRightPanelSources] = useState<SourceRef[]>([]);
   const [rightPanelRelated, setRightPanelRelated] = useState<RelatedEntityPage[]>([]);
 
   const fetchPages = useCallback(async () => {
-    const [hRes, eRes, nRes] = await Promise.all([
+    const [hRes, eRes, nRes, cfgRes] = await Promise.all([
       fetch(`/api/${companySlug}/kb2?type=human_pages`),
       fetch(`/api/${companySlug}/kb2?type=entity_pages`),
       fetch(`/api/${companySlug}/kb2?type=graph_nodes`),
+      fetch(`/api/${companySlug}/kb2/config`).catch(() => null),
     ]);
     const hData = await hRes.json();
     const eData = await eRes.json();
     const nData = await nRes.json();
+
+    if (cfgRes?.ok) {
+      try {
+        const cfgData = await cfgRes.json();
+        const kbStructure = cfgData.config?.kb_structure;
+        if (kbStructure?.layers) {
+          const enabledLayers = Object.entries(kbStructure.layers)
+            .filter(([_, v]: [string, any]) => v.enabled)
+            .map(([k]) => k);
+          if (enabledLayers.length > 0) {
+            setLayerOrder(enabledLayers);
+            setExpandedLayers(new Set(enabledLayers));
+          }
+        }
+      } catch { /* ignore config errors */ }
+    }
+
     setHumanPages(hData.pages ?? []);
     setEntityPages(eData.pages ?? []);
     const nodeMap: typeof graphNodes = {};
@@ -191,7 +210,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
     return acc;
   }, {} as Record<string, EntityPage[]>);
 
-  const pagesByLayer = LAYER_ORDER.reduce(
+  const pagesByLayer = layerOrder.reduce(
     (acc, layer) => {
       acc[layer] = humanPages.filter((p) => p.layer === layer);
       return acc;
@@ -212,6 +231,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       doc_id: ref.doc_id,
       title: ref.title,
       excerpt: ref.excerpt,
+      section_heading: ref.section_heading,
     }));
 
   const relatedPagesForHuman = (page: HumanPage): RelatedEntityPage[] => {
@@ -356,7 +376,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
         <ScrollArea className="flex-1 p-2">
           {sidebarMode === "human" ? (
             <>
-              {LAYER_ORDER.map((layer) => {
+              {layerOrder.map((layer) => {
                 const pages = pagesByLayer[layer] ?? [];
                 const isExpanded = expandedLayers.has(layer);
                 return (
@@ -460,20 +480,26 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                         <div className="ml-4 space-y-1">
                           {PROJECT_SUB_GROUPS.map((sg) => {
                             const sgPages = subGroups[sg];
-                            if (sgPages.length === 0) return null;
                             const sgKey = `project_${sg}`;
                             const sgExpanded = expandedTypes.has(sgKey);
+                            const isEmpty = sgPages.length === 0;
                             return (
                               <div key={sg}>
                                 <button
-                                  onClick={() => toggleType(sgKey)}
-                                  className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded hover:bg-accent/50 text-muted-foreground"
+                                  onClick={() => { if (!isEmpty) toggleType(sgKey); }}
+                                  className={`flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground ${isEmpty ? "opacity-50 cursor-default" : "hover:bg-accent/50"}`}
                                 >
-                                  {sgExpanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                  {isEmpty ? (
+                                    <span className="h-2.5 w-2.5 inline-block" />
+                                  ) : sgExpanded ? (
+                                    <ChevronDown className="h-2.5 w-2.5" />
+                                  ) : (
+                                    <ChevronRight className="h-2.5 w-2.5" />
+                                  )}
                                   {sg}
                                   <Badge variant="outline" className="ml-auto text-[9px]">{sgPages.length}</Badge>
                                 </button>
-                                {sgExpanded && (
+                                {sgExpanded && !isEmpty && (
                                   <div className="ml-4 space-y-0.5">
                                     {sgPages.map((ep) => (
                                       <button
@@ -785,7 +811,7 @@ function EntityPageView({
 }: {
   companySlug: string;
   page: EntityPage;
-  sourceRefs: { source_type: string; doc_id: string; title: string; excerpt: string }[];
+  sourceRefs: { source_type: string; doc_id: string; title: string; section_heading?: string; excerpt: string }[];
   onBack?: () => void;
   onItemClick?: (refs: SourceRef[]) => void;
 }) {

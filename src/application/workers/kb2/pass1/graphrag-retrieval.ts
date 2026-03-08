@@ -1,9 +1,5 @@
 import { embedMany } from "ai";
-import {
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-  kb2InputSnapshotsCollection,
-} from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { getEmbeddingModel } from "@/lib/ai-model";
 import { qdrantClient } from "@/lib/qdrant";
 import type { KB2GraphNodeType, KB2GraphEdgeType } from "@/src/entities/models/kb2-types";
@@ -12,7 +8,6 @@ import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner
 import type { PagePlanArtifact, EntityPagePlan, HumanPagePlan } from "./page-plan";
 
 const KB2_COLLECTION = "kb2_embeddings";
-const TOP_K = 10;
 
 export interface RetrievalPack {
   page_id: string;
@@ -24,12 +19,15 @@ export interface RetrievalPack {
 }
 
 export const graphragRetrievalStep: StepFunction = async (ctx) => {
+  const tc = getTenantCollections(ctx.companySlug);
+  const TOP_K = ctx.config?.pipeline_settings?.graphrag?.vector_top_k ?? 10;
+
   const planArtifact = (await ctx.getStepArtifact("pass1", 9)) as PagePlanArtifact | undefined;
   if (!planArtifact) throw new Error("No page plan found — run step 9 first");
 
-  const nodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await kb2GraphEdgesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
-  const snapshot = await kb2InputSnapshotsCollection.findOne({ run_id: ctx.runId });
+  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
+  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
   const docs = (snapshot?.parsed_documents ?? []) as KB2ParsedDocument[];
 
   const nodeById = new Map<string, KB2GraphNodeType>();
@@ -42,7 +40,7 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
     ...planArtifact.human_pages.map((p) => ({ ...p, page_type: "human" as const })),
   ];
 
-  ctx.onProgress(`Retrieving context for ${allPlans.length} pages...`, 5);
+  await ctx.onProgress(`Retrieving context for ${allPlans.length} pages...`, 5);
 
   for (let idx = 0; idx < allPlans.length; idx++) {
     const plan = allPlans[idx];
@@ -60,7 +58,7 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
         const neighborEdges = edges.filter(
           (e) => e.source_node_id === node.node_id || e.target_node_id === node.node_id,
         );
-        for (const edge of neighborEdges.slice(0, 20)) {
+        for (const edge of neighborEdges.slice(0, ctx.config?.pipeline_settings?.graphrag?.neighbor_edges_limit ?? 20)) {
           const otherId = edge.source_node_id === node.node_id ? edge.target_node_id : edge.source_node_id;
           const other = nodeById.get(otherId);
           if (other) {
@@ -72,7 +70,7 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
         for (const doc of docs) {
           const contentLower = doc.content.toLowerCase();
           if (searchNames.some((n) => contentLower.includes(n.toLowerCase()))) {
-            docSnippets.push(`[${doc.provider}] ${doc.title}: ${doc.content.slice(0, 500)}`);
+            docSnippets.push(`[${doc.provider}] ${doc.title}: ${doc.content.slice(0, ctx.config?.pipeline_settings?.graphrag?.doc_snippet_length ?? 500)}`);
           }
         }
       }
@@ -84,7 +82,7 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
       const relatedNodes = nodes.filter((n) =>
         hp.related_entity_types.includes(n.type),
       );
-      for (const rn of relatedNodes.slice(0, 15)) {
+      for (const rn of relatedNodes.slice(0, ctx.config?.pipeline_settings?.graphrag?.related_nodes_limit ?? 15)) {
         graphContext.push(`  Related: ${rn.display_name} [${rn.type}]`);
       }
     }
@@ -120,17 +118,17 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
         ? (plan as EntityPagePlan).display_name
         : (plan as HumanPagePlan).title,
       graph_context: graphContext,
-      doc_snippets: docSnippets.slice(0, 10),
+      doc_snippets: docSnippets.slice(0, ctx.config?.pipeline_settings?.graphrag?.doc_snippets_limit ?? 10),
       vector_snippets: vectorSnippets,
     });
 
     if ((idx + 1) % 5 === 0 || idx === allPlans.length - 1) {
       const pct = Math.round(5 + ((idx + 1) / allPlans.length) * 90);
-      ctx.onProgress(`Retrieved context for ${idx + 1}/${allPlans.length} pages`, pct);
+      await ctx.onProgress(`Retrieved context for ${idx + 1}/${allPlans.length} pages`, pct);
     }
   }
 
-  ctx.onProgress(`Retrieval complete for ${packs.length} pages`, 100);
+  await ctx.onProgress(`Retrieval complete for ${packs.length} pages`, 100);
   return {
     total_packs: packs.length,
     entity_packs: packs.filter((p) => p.page_type === "entity").length,

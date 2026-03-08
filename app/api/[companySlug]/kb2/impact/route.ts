@@ -9,6 +9,7 @@ import {
   kb2GraphEdgesCollection,
   kb2EntityPagesCollection,
 } from "@/lib/mongodb";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 export const maxDuration = 60;
 
@@ -35,7 +36,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
-  await params;
+  const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const logger = new PrefixLogger("kb2-impact");
 
   const { change_type, entity_id, old_value, new_value, context } =
@@ -44,7 +46,7 @@ export async function POST(
   if (
     change_type === "comment" &&
     typeof new_value === "string" &&
-    new_value.length < 50
+    new_value.length < (config?.pipeline_settings?.impact?.min_value_length ?? 50)
   ) {
     return Response.json({ impacts: [] });
   }
@@ -62,7 +64,7 @@ export async function POST(
         { target_node_id: entity_id },
       ],
     })
-    .limit(50)
+    .limit(config?.pipeline_settings?.impact?.edges_limit ?? 50)
     .toArray();
 
   const neighborIds = new Set<string>();
@@ -80,7 +82,7 @@ export async function POST(
 
   const relatedPages = await kb2EntityPagesCollection
     .find({ node_id: { $in: [entity_id, ...neighborIds] } })
-    .limit(20)
+    .limit(config?.pipeline_settings?.impact?.related_pages_limit ?? 20)
     .toArray();
 
   const graphContext = [
@@ -104,8 +106,8 @@ export async function POST(
   ].join("\n");
 
   const result = await structuredGenerate({
-    model: getFastModel(),
-    system: `You are a knowledge-base impact analyzer. Given a change to an entity, identify all downstream impacts on related entities, pages, tickets, and claims. Be precise about severity:
+    model: getFastModel(config?.pipeline_settings?.models),
+    system: config?.prompts?.impact_analysis?.system ?? `You are a knowledge-base impact analyzer. Given a change to an entity, identify all downstream impacts on related entities, pages, tickets, and claims. Be precise about severity:
 - S1: Critical — breaks correctness of a core entity or claim
 - S2: High — significant factual change that should be propagated
 - S3: Medium — minor update that may need propagation

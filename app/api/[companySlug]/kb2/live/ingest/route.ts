@@ -10,7 +10,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
-  await params;
+  const { companySlug } = await params;
 
   let body: any;
   try {
@@ -32,6 +32,6 @@ export async function POST(
     return Response.json({ error: "document is required" }, { status: 400 });
   }
 
-  const result = await processIncrementalDocument({ source_type, document });
+  const result = await processIncrementalDocument({ source_type, document, companySlug });
   return Response.json(result);
 }

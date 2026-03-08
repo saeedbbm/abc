@@ -138,7 +138,7 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
     setEntityPages(epData.pages ?? []);
     const nodes = nData.nodes ?? [];
     setProjects(nodes.filter((n: any) => n.type === "project"));
-    setPersons(nodes.filter((n: any) => n.type === "person"));
+    setPersons(nodes.filter((n: any) => n.type === "team_member"));
   }, [companySlug]);
 
   useEffect(() => {

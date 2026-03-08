@@ -12,6 +12,7 @@ import { getFastModel } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { generateText } from "ai";
 import { PrefixLogger } from "@/lib/utils";
+import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
 
 export const maxDuration = 120;
 
@@ -37,6 +38,7 @@ export async function POST(
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const config = await getCompanyConfig(companySlug);
   const { cardId, modificationText, answers } = await request.json();
   const logger = new PrefixLogger("verify-check");
 
@@ -60,17 +62,28 @@ export async function POST(
 
   logger.log(`Loaded ${allNodes.length} nodes, ${allEdges.length} edges, ${allPages.length} pages`);
 
-  // ── Step 2: LLM identifies which nodes are affected ──
-  const identifyResult = await structuredGenerate({
-    model: getFastModel(),
-    system: `You are a knowledge graph analyst. Given a user's modification request and a list of all entity nodes in the knowledge base, identify EVERY node whose entity page would need to be updated.
+  // ── Step 2: Identify which nodes are affected ──
+  const preComputedEntities = (card as any).affected_entities ?? [];
+  let affectedNames: Set<string>;
+  let identifyReasoning = "";
+
+  if (preComputedEntities.length > 0) {
+    affectedNames = new Set(
+      preComputedEntities.map((e: any) => (e.entity_name as string).toLowerCase().trim()),
+    );
+    identifyReasoning = `Skipped LLM — used ${preComputedEntities.length} pre-computed affected entities from verify card`;
+    logger.log(`Using ${affectedNames.size} pre-computed affected entities: ${[...affectedNames].join(", ")}`);
+  } else {
+    const identifyResult = await structuredGenerate({
+      model: getFastModel(config?.pipeline_settings?.models),
+      system: config?.prompts?.verify_analyst?.system ?? `You are a knowledge graph analyst. Given a user's modification request and a list of all entity nodes in the knowledge base, identify EVERY node whose entity page would need to be updated.
 
 Think through the graph relationships:
 - If the user says "use X instead of Y", find the node for Y AND every node that mentions or depends on Y (people who work with Y, repos that use Y, projects involving Y, etc.)
 - Include both directly and indirectly affected nodes
 - Be thorough — missing an affected node means the knowledge base becomes inconsistent`,
-    prompt: `Verification Card: ${card.title}
-Description: ${card.description || card.explanation}
+      prompt: `Verification Card: ${card.title}
+Description: ${(card as any).description || (card as any).explanation}
 
 User's Change Request: "${modificationText}"
 
@@ -78,15 +91,16 @@ All nodes in the knowledge base:
 ${nodeList}
 
 Which nodes have entity pages that would need to change? List ALL of them by display_name.`,
-    schema: AffectedNodesSchema,
-    logger,
-  });
+      schema: AffectedNodesSchema,
+      logger,
+    });
 
-  const affectedNames = new Set(
-    identifyResult.affected_node_names.map((n: string) => n.toLowerCase().trim()),
-  );
-
-  logger.log(`LLM identified ${affectedNames.size} affected nodes: ${[...affectedNames].join(", ")}`);
+    affectedNames = new Set(
+      identifyResult.affected_node_names.map((n: string) => n.toLowerCase().trim()),
+    );
+    identifyReasoning = identifyResult.reasoning;
+    logger.log(`LLM identified ${affectedNames.size} affected nodes: ${[...affectedNames].join(", ")}`);
+  }
 
   // ── Step 3: Match to actual pages and also walk graph edges ──
   const matchedNodeIds = new Set<string>();
@@ -161,12 +175,12 @@ Which nodes have entity pages that would need to change? List ALL of them by dis
 
   // ── Step 5: For each affected page, apply changes individually ──
   // Process pages one-by-one to avoid massive single LLM call that times out
-  const model = getFastModel();
+  const model = getFastModel(config?.pipeline_settings?.models);
   const allDrafts: any[] = [];
   const allQuestions: string[] = [];
 
   // Process in parallel batches of 5
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = config?.pipeline_settings?.verify_check?.batch_size ?? 5;
   const items: { type: "entity_page" | "ticket"; id: string; title: string; content: string }[] = [];
 
   for (const page of affectedPages) {
@@ -204,7 +218,7 @@ Which nodes have entity pages that would need to change? List ALL of them by dis
     try {
       const result = await generateText({
         model,
-        system: `You are a precise knowledge base editor. Apply the user's change to the given pages/tickets.
+        system: config?.prompts?.verify_editor?.system ?? `You are a precise knowledge base editor. Apply the user's change to the given pages/tickets.
 
 RULES:
 1. ONLY change what the user explicitly asked to change.
@@ -235,7 +249,7 @@ Pages to process:
 ${batchContext}
 
 Apply the change. Skip pages that don't need changes.`,
-        maxTokens: 16384,
+        maxTokens: config?.pipeline_settings?.verify_check?.max_tokens ?? 16384,
       });
 
       let parsed: { drafts: any[]; questions: string[] };
@@ -270,7 +284,7 @@ Apply the change. Skip pages that don't need changes.`,
     drafts: allDrafts,
     questions: allQuestions,
     debug: {
-      reasoning: identifyResult.reasoning,
+      reasoning: identifyReasoning,
       affectedNames: [...affectedNames],
       nodesTotal: allNodes.length,
       pagesScanned: allPages.length,

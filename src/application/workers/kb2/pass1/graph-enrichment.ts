@@ -1,17 +1,12 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import {
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-} from "@/lib/mongodb";
-import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { KB2EdgeTypeEnum } from "@/src/entities/models/kb2-types";
 import type { KB2GraphNodeType, KB2GraphEdgeType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
-
-const BATCH_SIZE = 15;
 
 const EnrichmentResultSchema = z.object({
   new_relationships: z.array(z.object({
@@ -23,13 +18,15 @@ const EnrichmentResultSchema = z.object({
 });
 
 export const graphEnrichmentStep: StepFunction = async (ctx) => {
+  const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-graph-enrichment");
-  const nodes = (await kb2GraphNodesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await kb2GraphEdgesCollection.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
+  const BATCH_SIZE = ctx.config?.pipeline_settings?.graph_enrichment?.batch_size ?? 15;
+  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
 
   if (nodes.length === 0) throw new Error("No graph nodes found — run step 3 first");
 
-  const model = getFastModel();
+  const model = getFastModel(ctx.config?.pipeline_settings?.models);
   const stepId = "pass1-step-7";
 
   const nodeIdSet = new Set(nodes.map((n) => n.node_id));
@@ -47,6 +44,7 @@ export const graphEnrichmentStep: StepFunction = async (ctx) => {
   const addedEdges: { source: string; target: string; type: string; evidence: string }[] = [];
 
   for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const batch = nodes.slice(i, i + BATCH_SIZE);
     const batchNodeIds = new Set(batch.map((n) => n.node_id));
 
@@ -76,11 +74,7 @@ export const graphEnrichmentStep: StepFunction = async (ctx) => {
 
     const promptText = `Entities:\n${graphSummary}\n\nExisting Relationships:\n${edgeSummary}`;
 
-    const startMs = Date.now();
-    let usageData: { promptTokens: number; completionTokens: number } | null = null;
-    const result = await structuredGenerate({
-      model,
-      system: `You are a knowledge graph relationship discoverer. Given a batch of entities from a software company's knowledge base, identify missing relationships between them.
+    let enrichmentPrompt = `You are a knowledge graph relationship discoverer. Given a batch of entities from a software company's knowledge base, identify missing relationships between them.
 
 Your ONLY job is to find relationships between the entities listed below. Do NOT suggest new entities or reclassify existing ones — those steps are already handled by earlier pipeline stages.
 
@@ -106,16 +100,26 @@ Rules:
 - Both source and target MUST be entities from the list above — use their exact display_name
 - Only suggest relationships you are confident about based on the entity names, types, and attributes
 - Return an empty array if no clear relationships can be inferred
-- Do NOT invent relationships based on guessing — only suggest when the connection is obvious from naming, type, or attributes`,
+- Do NOT invent relationships based on guessing — only suggest when the connection is obvious from naming, type, or attributes`;
+    if (ctx.config?.prompts?.graph_enrichment?.system) {
+      enrichmentPrompt = ctx.config.prompts.graph_enrichment.system;
+    }
+
+    const startMs = Date.now();
+    let usageData: { promptTokens: number; completionTokens: number } | null = null;
+    const result = await structuredGenerate({
+      model,
+      system: enrichmentPrompt,
       prompt: promptText,
       schema: EnrichmentResultSchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
     });
     totalLLMCalls++;
     if (usageData) {
-      const cost = calculateCostUsd("claude-sonnet-4-6", usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, "claude-sonnet-4-6", promptText, JSON.stringify(result, null, 2), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models), promptText, JSON.stringify(result, null, 2), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
     for (const rel of result.new_relationships) {
@@ -135,20 +139,20 @@ Rules:
         source_node_id: srcNode.node_id,
         target_node_id: tgtNode.node_id,
         type: rel.type,
-        weight: 0.8,
+        weight: ctx.config?.pipeline_settings?.graph_enrichment?.edge_weight ?? 0.8,
         evidence: `[enrichment] ${rel.evidence}`,
       };
-      await kb2GraphEdgesCollection.insertOne(newEdge);
+      await tc.graph_edges.insertOne(newEdge);
       edges.push(newEdge);
       newEdges++;
       addedEdges.push({ source: srcNode.display_name, target: tgtNode.display_name, type: rel.type, evidence: rel.evidence });
     }
 
     const pct = Math.round(((i + batch.length) / nodes.length) * 95);
-    ctx.onProgress(`Enriched batch ${Math.ceil((i + 1) / BATCH_SIZE)} — ${newEdges} new relationships so far`, pct);
+    await ctx.onProgress(`Enriched batch ${Math.ceil((i + 1) / BATCH_SIZE)} — ${newEdges} new relationships so far`, pct);
   }
 
-  ctx.onProgress(`Graph enrichment complete: +${newEdges} relationships`, 100);
+  await ctx.onProgress(`Graph enrichment complete: +${newEdges} relationships`, 100);
   return {
     new_edges: newEdges,
     total_nodes: nodes.length,
