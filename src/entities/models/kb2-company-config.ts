@@ -103,7 +103,7 @@ export interface PromptsConfig {
   // Pass 1
   entity_extraction: { system: string };
   entity_resolution: { system: string };
-  extraction_validation: { system_gap: string; system_judge: string };
+  extraction_validation: { system_gap: string; system_judge: string; system_attr_inference: string };
   discovery: { system: string };
   graph_enrichment: { system: string };
   generate_entity_pages: { system: string };
@@ -213,6 +213,7 @@ export interface GraphRAGSettings {
 export interface GraphEnrichmentSettings {
   batch_size: number;
   edge_weight: number;
+  similarity_threshold?: number;
 }
 
 export interface ChatSettings {

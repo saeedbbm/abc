@@ -1,0 +1,97 @@
+## What the KB2 Pipeline Should Achieve
+
+### The Core Goal
+
+The pipeline ingests raw company data — Slack conversations, Jira tickets, GitHub PRs, Confluence docs, and customer feedback — and produces a structured knowledge base that a new team member (or an AI chatbot) could use to understand *how this company actually works*, not just what the documentation says.
+
+The most valuable output is not the documented stuff (anyone can read a Confluence page). It's **the things nobody wrote down** — the conventions, the tribal knowledge, the patterns that only exist in people's heads or scattered across hundreds of messages.
+
+---
+
+### The Three Layers of Value
+
+**Layer 1: Documented knowledge, organized**
+- Take the 6 Confluence docs, 34 Jira tickets, 16 PRs, and turn them into clean entity pages (one page per project, decision, person, process, etc.)
+- This is table stakes. It's useful but not remarkable.
+
+**Layer 2: Undocumented knowledge, discovered**
+- Find the 4 past projects that were completed but never had a Confluence doc (Pet Categories Page, Pet Adoption Chooser, Contact Form Page, Shelter Events Browser)
+- Find the 5 ongoing projects that have no formal documentation (Site Navigation Improvements, Supply Tracking, Supply Orders, Event Calendar, Volunteer Hours Tracking)
+- Find proposed features from customer feedback (Toy Donation Feature from 3 separate customer requests)
+- Each of these should become an entity with sources traced back to the exact Slack messages, PR descriptions, or feedback submissions that prove it exists
+
+**Layer 3: Hidden patterns, synthesized — this is the demo money shot**
+- **Kim's Color Convention**: Across 10 sources over 2+ years, Kim consistently uses pink/blue for gender and green for money CTAs. No document ever says "our rule is pink for girls, blue for boys, green for money." The pipeline should discover this by cross-referencing her Slack messages from 2023-03-14, 2023-10-02, 2024-02-19, 2024-06-10, 2025-03-10, plus Confluence redesign doc phases 1-3, plus Tim's PRs that implement her designs.
+- **Tim's Layout Convention**: Vertical sidebar for selection/navigation, horizontal columns for comparison. Never written as a rule — only visible across his Slack messages and PR review comments spanning 3 years and 4+ features.
+- **Matt's Client-Side Browse Pattern**: For lists under ~20 items, load everything in one API call, navigate client-side. Never stated as a principle — only visible in his own PR #23, his review comments on PRs #47, #49, #52, #55, and his approval of pagination for the one case (PR #58) where the list was 30-40 items.
+
+---
+
+### What "Success" Looks Like
+
+**For entity completeness:**
+- Every entity has `status`, `documentation_level`, and `description` as public attributes — not hidden behind `_description`
+- Every process uses `status` (not a separate `process_status` field)
+- Every decision has `decided_by`, `rationale`, and `scope` filled (or explicitly marked as unknown with reasoning)
+- Step 8 discovery nodes are not bare — they have the same attribute coverage as Step 5 entities
+
+**For conventions:**
+- 3 convention entities exist, each with `is_convention: true`, `pattern_rule`, `constituent_decisions`, `established_by`, and combined `source_refs` from all underlying evidence
+- Each convention is connected to its constituent individual decisions via `CONTAINS` edges
+- Each convention is connected to the team member who established it via `PROPOSED_BY` edges
+- Each convention is connected to proposed features it applies to via `APPLIES_TO` edges
+- Kim's Color Convention has source refs spanning 5 Slack conversations, 3 Confluence doc sections, and 2 PRs
+
+**For graph connectivity:**
+- Discovery nodes (Step 8) have edges connecting them to related existing entities — not floating as isolated islands with zero edges
+- The graph can be traversed from "Toy Donation Feature" → `APPLIES_TO` → "Kim's Color Convention" → `PROPOSED_BY` → "Kim"
+- No dangling edges pointing to nonexistent nodes (the 490 broken MENTIONED_IN edges from Step 6 should be addressed)
+
+**For pages:**
+- Convention entities get their own entity pages using the `decision` template
+- A "Hidden Conventions & Patterns" human page exists that narratively describes these patterns with evidence
+- Kim's team_member entity page has an "Established Conventions" section
+- The "Other Decisions & Tradeoffs" page includes conventions alongside regular decisions
+
+**For How-To guides:**
+- The Toy Donation Feature how-to guide should reference all 3 conventions in its implementation guidance
+- It should say things like: "Use green for the donate CTA (per the team's established color convention for financial actions)" and "Use a vertical sidebar for toy category selection (per the team's layout convention for selection interfaces)" and "Load the toy list in a single API call on mount since shelters typically have under 20 toys available (per the team's client-side browse pattern for small datasets)"
+- This is only possible if the `APPLIES_TO` edges exist and the How-To step can follow them to find convention entity pages
+
+**For verify cards:**
+- A manageable number (under 30), not 200+
+- No cards that question the existence of conventions (they're synthesized by design)
+- Focused on genuinely questionable claims: wrong attributions, contradictory facts, missing critical info
+
+**For traceability:**
+- From any human page paragraph → click entity reference → entity page → click source ref → original document with highlighted excerpt
+- The chain is: human page `entity_refs` / `entity_node_ids` → node → entity page `source_refs` → original parsed document
+- If someone decides to change the color convention from green to blue for money, you can trace every entity, page, and source that mentions it
+
+---
+
+### What "Failure" Looks Like
+
+- **Fragmented conventions**: Instead of one "Kim's Color Convention" entity, there are 6 separate decisions ("Use pink/blue on pet cards", "Use green for donate button", "Use green for sponsor button", etc.) with no connection between them. A new team member reading the KB would see individual page-level choices, not the pattern.
+
+- **No edges on discovery nodes**: Step 8 finds the Toy Donation Feature but it floats in the graph with zero connections. The How-To step can't find any conventions to reference because there are no edges to follow. The generated guide is generic: "Build a donation page" with no mention of team conventions.
+
+- **Bare entities**: Half the entities have `_description` but no `description`, or processes have `process_status` while projects have `status`, or discovery nodes have no `documentation_level`. Page generation LLMs get inconsistent data and produce uneven pages.
+
+- **Wrong attributions**: Kim's color decisions are attributed to Tim (because Tim's PRs implement Kim's designs and his name appears in the source text). Matt's browse pattern is attributed to Jack (because Jack's PRs are the ones being reviewed). The `decided_by` field tells the wrong story.
+
+- **Overwhelming verify cards**: 150+ cards, most of them S4 noise like "Missing optional section 'Known Issues' on date-fns library page". The real issues (wrong attributions, contradictory statuses) are buried.
+
+- **Conventions invisible on team member pages**: Kim's entity page talks about her design work but never mentions her color convention because the template has no section for it and the graph context doesn't surface it. A user asking "what would Kim do for this new page's colors?" gets no answer.
+
+- **How-To guides ignore conventions**: The Toy Donation Feature guide is written without referencing any team patterns. It says "design a UI for toy selection" instead of "use a vertical sidebar for toy category selection (Tim's convention) with pink/blue pet card accents (Kim's convention) and load all available toys in one API call (Matt's pattern)."
+
+---
+
+### The Demo Pitch
+
+The single most powerful thing this pipeline should enable:
+
+> "We found that across 10 different sources over 2 years, your UX designer consistently uses pink for female animals, blue for male animals, and green for money-related CTAs. This was never documented as a convention, but it is one. Here are all 10 sources. And when we wrote the implementation guide for the Toy Donation Feature your customers keep requesting, we automatically applied this convention along with 2 others we discovered."
+
+That's Layer 3. If the pipeline achieves that, with full traceability back to original sources, it's a success. Everything else — clean entities, complete attributes, manageable verify cards — is infrastructure to make that possible.

@@ -23,8 +23,12 @@ export const propagationStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress("Loading fact groups and claims...", 0);
 
-  const groups = await tc.fact_groups.find({ run_id: ctx.runId }).toArray();
-  const claims = await tc.claims.find({ run_id: ctx.runId }).toArray();
+  const fgExecId = await ctx.getStepExecutionId("pass2", 1);
+  const fgFilter = fgExecId ? { execution_id: fgExecId } : { run_id: ctx.runId };
+  const groups = await tc.fact_groups.find(fgFilter).toArray();
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const claimsFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
+  const claims = await tc.claims.find(claimsFilter).toArray();
   const claimById = new Map(claims.map((c) => [c.claim_id, c]));
 
   let claimsUpdated = 0;
@@ -45,8 +49,11 @@ export const propagationStep: StepFunction = async (ctx) => {
       if (!member || member.text === canonical.text) continue;
 
       try {
+        const claimUpdFilter = claimsExecId
+          ? { claim_id: memberId, execution_id: claimsExecId }
+          : { claim_id: memberId, run_id: ctx.runId };
         await tc.claims.updateOne(
-          { claim_id: memberId, run_id: ctx.runId },
+          claimUpdFilter,
           { $set: { text: canonical.text } },
         );
         claimsUpdated++;
@@ -58,8 +65,12 @@ export const propagationStep: StepFunction = async (ctx) => {
       if (member.source_page_id && member.source_page_type === "entity" &&
           member.source_section_index !== undefined && member.source_item_index !== undefined) {
         try {
+          const epExecId = await ctx.getStepExecutionId("pass1", 11);
+          const epUpdFilter = epExecId
+            ? { page_id: member.source_page_id, execution_id: epExecId }
+            : { page_id: member.source_page_id, run_id: ctx.runId };
           await tc.entity_pages.updateOne(
-            { page_id: member.source_page_id, run_id: ctx.runId },
+            epUpdFilter,
             { $set: { [`sections.${member.source_section_index}.items.${member.source_item_index}.text`]: canonical.text } },
           );
           entityPagesUpdated++;
@@ -84,19 +95,28 @@ export const propagationStep: StepFunction = async (ctx) => {
   const updatedHumanPageIds = new Set<string>();
 
   if (updatedEntityPageIds.size > 0) {
+    const epExecId2 = await ctx.getStepExecutionId("pass1", 11);
+    const epReadFilter = epExecId2
+      ? { page_id: { $in: Array.from(updatedEntityPageIds) }, execution_id: epExecId2 }
+      : { page_id: { $in: Array.from(updatedEntityPageIds) }, run_id: ctx.runId };
     const modifiedEntityPages = await tc.entity_pages
-      .find({ page_id: { $in: Array.from(updatedEntityPageIds) }, run_id: ctx.runId })
+      .find(epReadFilter)
       .toArray();
     const modifiedNodeIds = new Set(modifiedEntityPages.map((p: any) => p.node_id).filter(Boolean));
 
-    const humanPages = await tc.human_pages.find({ run_id: ctx.runId }).toArray();
+    const hpExecId = await ctx.getStepExecutionId("pass1", 12);
+    const hpReadFilter = hpExecId ? { execution_id: hpExecId } : { run_id: ctx.runId };
+    const humanPages = await tc.human_pages.find(hpReadFilter).toArray();
     for (const hp of humanPages) {
       const linkedIds = (hp as any).linked_entity_page_ids ?? [];
       const referencesModified = linkedIds.some((id: string) => modifiedNodeIds.has(id));
       if (referencesModified) {
         try {
+          const hpUpdFilter = hpExecId
+            ? { page_id: (hp as any).page_id, execution_id: hpExecId }
+            : { page_id: (hp as any).page_id, run_id: ctx.runId };
           await tc.human_pages.updateOne(
-            { page_id: (hp as any).page_id, run_id: ctx.runId },
+            hpUpdFilter,
             { $set: { needs_regeneration: true } },
           );
           humanPagesAffected++;
@@ -119,7 +139,10 @@ export const propagationStep: StepFunction = async (ctx) => {
 
     for (const pageId of updatedEntityPageIds) {
       try {
-        const page = await tc.entity_pages.findOne({ page_id: pageId, run_id: ctx.runId }) as any;
+        const epFindFilter = epExecId2
+          ? { page_id: pageId, execution_id: epExecId2 }
+          : { page_id: pageId, run_id: ctx.runId };
+        const page = await tc.entity_pages.findOne(epFindFilter) as any;
         if (!page) continue;
 
         const pageText = (page.sections ?? [])
@@ -143,7 +166,10 @@ export const propagationStep: StepFunction = async (ctx) => {
 
     for (const pageId of updatedHumanPageIds) {
       try {
-        const hp = await tc.human_pages.findOne({ page_id: pageId, run_id: ctx.runId }) as any;
+        const hpFindFilter = hpExecId
+          ? { page_id: pageId, execution_id: hpExecId }
+          : { page_id: pageId, run_id: ctx.runId };
+        const hp = await tc.human_pages.findOne(hpFindFilter) as any;
         if (!hp) continue;
 
         const pageText = (hp.paragraphs ?? [])

@@ -65,6 +65,38 @@ async function ensureConfigExists(companySlug: string): Promise<CompanyConfig> {
 }
 
 // ---------------------------------------------------------------------------
+// Backfill missing prompt keys from defaults so the UI always shows every
+// configurable prompt, even for configs created before a key was added.
+// ---------------------------------------------------------------------------
+function backfillPrompts(data: CompanyConfigData): CompanyConfigData {
+  const defaults = buildDefaultConfigData();
+  if (!defaults.prompts || !data.prompts) return data;
+
+  let patched = false;
+  const merged = { ...data.prompts } as Record<string, any>;
+
+  for (const [stepKey, defaultEntry] of Object.entries(defaults.prompts)) {
+    const existing = (merged as any)[stepKey];
+    if (!existing) {
+      (merged as any)[stepKey] = defaultEntry;
+      patched = true;
+      continue;
+    }
+    if (typeof defaultEntry === "object" && defaultEntry !== null) {
+      for (const [subKey, subVal] of Object.entries(defaultEntry)) {
+        if (!(subKey in existing)) {
+          existing[subKey] = subVal;
+          patched = true;
+        }
+      }
+    }
+  }
+
+  if (!patched) return data;
+  return { ...data, prompts: merged as PromptsConfig };
+}
+
+// ---------------------------------------------------------------------------
 // Core reader
 // ---------------------------------------------------------------------------
 export async function getCompanyConfig(companySlug: string): Promise<CompanyConfigData | null> {
@@ -82,8 +114,9 @@ export async function getCompanyConfig(companySlug: string): Promise<CompanyConf
   const activeVersion = doc.versions.find((v) => v.version === doc!.active_version);
   if (!activeVersion) return null;
 
-  configCache.set(companySlug, { data: activeVersion.data, version: activeVersion.version, ts: Date.now() });
-  return activeVersion.data;
+  const data = backfillPrompts(activeVersion.data);
+  configCache.set(companySlug, { data, version: activeVersion.version, ts: Date.now() });
+  return data;
 }
 
 export async function getActiveConfigVersion(companySlug: string): Promise<number | null> {

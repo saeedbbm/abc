@@ -141,92 +141,19 @@ export async function syncGraphNodesToTickets(
   return { synced: toInsert.length, skipped };
 }
 
-async function linkTicketsProjectsHowtos(
-  nodes: KB2GraphNodeType[],
-  runId: string,
-  tc: ReturnType<typeof getTenantCollections>,
-): Promise<{ linked: number }> {
-  const tickets = await tc.tickets.find({ run_id: runId }).toArray();
-  const projectNodes = nodes.filter((n) => n.type === "project");
-  let linked = 0;
-
-  for (const ticket of tickets) {
-    const ticketNode = nodes.find((n) => (ticket as any).linked_entity_ids?.includes(n.node_id));
-    if (!ticketNode) continue;
-    
-    const relatedEntities: string[] = ticketNode.attributes?.related_entities ?? [];
-    let linkedProject = projectNodes.find((p) => 
-      relatedEntities.some((re) => 
-        p.display_name.toLowerCase().includes(re.toLowerCase()) || 
-        re.toLowerCase().includes(p.display_name.toLowerCase())
-      )
-    );
-
-    const cat = ticketNode.attributes?.discovery_category ?? "";
-    const isProposed = ["proposed_ticket", "proposed_from_feedback"].includes(cat);
-    
-    if (!linkedProject && isProposed) {
-      const newProjectNode: KB2GraphNodeType = {
-        node_id: randomUUID(),
-        run_id: runId,
-        type: "project" as any,
-        display_name: `Project: ${ticketNode.display_name}`,
-        aliases: [],
-        attributes: {
-          discovery_category: "proposed_project",
-          description: `Auto-linked project for ticket: ${ticketNode.display_name}`,
-          related_entities: [ticketNode.display_name],
-        },
-        source_refs: ticketNode.source_refs ?? [],
-        truth_status: "inferred" as any,
-        confidence: "low" as any,
-      };
-      await tc.graph_nodes.insertOne(newProjectNode);
-      linkedProject = newProjectNode;
-    }
-
-    if (linkedProject) {
-      await tc.tickets.updateOne(
-        { ticket_id: (ticket as any).ticket_id },
-        { $addToSet: { linked_entity_ids: linkedProject.node_id } },
-      );
-
-      if (isProposed) {
-        const existingHowto = await tc.howto.findOne({
-          ticket_id: (ticket as any).ticket_id,
-          run_id: runId,
-        });
-        if (!existingHowto) {
-          await tc.howto.insertOne({
-            howto_id: randomUUID(),
-            run_id: runId,
-            ticket_id: (ticket as any).ticket_id,
-            project_node_id: linkedProject.node_id,
-            title: `How to: ${(ticket as any).title}`,
-            sections: [
-              { section_name: "Overview", content: "" },
-              { section_name: "Context", content: "" },
-              { section_name: "Requirements", content: "" },
-              { section_name: "Implementation Steps", content: "" },
-              { section_name: "Testing Plan", content: "" },
-              { section_name: "Risks and Considerations", content: "" },
-              { section_name: "Prompt Section", content: "" },
-            ],
-            linked_entity_ids: [linkedProject.node_id],
-            created_at: new Date().toISOString(),
-          });
-          linked++;
-        }
-      }
-    }
-  }
-
-  return { linked };
-}
-
 export const pagePlanStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const nodesFilter = step9ExecId ? { execution_id: step9ExecId } : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+
+  const existingIds = new Set(nodes.map((n) => n.node_id));
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  if (step10ExecId) {
+    const step10Nodes = (await tc.graph_nodes.find({ execution_id: step10ExecId }).toArray()) as unknown as KB2GraphNodeType[];
+    for (const n of step10Nodes) { if (!existingIds.has(n.node_id)) { nodes.push(n); existingIds.add(n.node_id); } }
+  }
+
   if (nodes.length === 0) throw new Error("No graph nodes found — run step 3 first");
 
   await ctx.onProgress(`Planning pages for ${nodes.length} entities...`, 10);
@@ -257,11 +184,8 @@ export const pagePlanStep: StepFunction = async (ctx) => {
       related_entity_types: hp.relatedEntityTypes,
     }));
 
-  await ctx.onProgress("Syncing ticket nodes to kb2_tickets...", 70);
+  await ctx.onProgress("Syncing ticket nodes to kb2_tickets...", 80);
   const ticketSync = await syncGraphNodesToTickets(nodes, ctx.runId, tc);
-
-  await ctx.onProgress("Linking tickets, projects, and howto docs...", 85);
-  const linkResult = await linkTicketsProjectsHowtos(nodes, ctx.runId, tc);
 
   const artifact: PagePlanArtifact = {
     entity_pages: entityPlans,
@@ -271,7 +195,7 @@ export const pagePlanStep: StepFunction = async (ctx) => {
   };
 
   await ctx.onProgress(
-    `Planned ${artifact.total_pages} pages (${entityPlans.length} entity + ${humanPlans.length} human), synced ${ticketSync.synced} tickets, linked ${linkResult.linked} howtos`,
+    `Planned ${artifact.total_pages} pages (${entityPlans.length} entity + ${humanPlans.length} human), synced ${ticketSync.synced} tickets`,
     100,
   );
   return artifact;

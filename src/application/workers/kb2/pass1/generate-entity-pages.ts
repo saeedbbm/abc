@@ -33,20 +33,26 @@ const GeneratedSectionSchema = z.object({
 export const generateEntityPagesStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-gen-entity-pages");
-  const stepId = "pass1-step-11";
+  const stepId = "pass1-step-14";
 
-  const retrievalArtifact = await ctx.getStepArtifact("pass1", 10);
-  if (!retrievalArtifact?.retrieval_packs) throw new Error("No retrieval packs found — run step 10 first");
+  const retrievalArtifact = await ctx.getStepArtifact("pass1", 13);
+  if (!retrievalArtifact?.retrieval_packs) throw new Error("No retrieval packs found — run step 13 first");
 
   const entityPacks = (retrievalArtifact.retrieval_packs as RetrievalPack[]).filter(
     (p) => p.page_type === "entity",
   );
 
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  const nodeExecIds = [step9ExecId, step10ExecId].filter(Boolean);
+  const nodesFilter = nodeExecIds.length > 0
+    ? { execution_id: { $in: nodeExecIds } }
+    : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
   const nodeById = new Map<string, KB2GraphNodeType>();
   for (const node of nodes) nodeById.set(node.node_id, node);
 
-  const planArtifact = await ctx.getStepArtifact("pass1", 9);
+  const planArtifact = await ctx.getStepArtifact("pass1", 12);
   const entityPlans = planArtifact?.entity_pages ?? [];
 
   const model = getFastModel(ctx.config?.pipeline_settings?.models);
@@ -133,6 +139,7 @@ ${context}`,
     const page: KB2EntityPageType = {
       page_id: pack.page_id,
       run_id: ctx.runId,
+      execution_id: ctx.executionId,
       node_id: node.node_id,
       node_type: node.type,
       title: node.display_name,
@@ -208,7 +215,6 @@ ${context}`,
   }
 
   if (pages.length > 0) {
-    await tc.entity_pages.deleteMany({ run_id: ctx.runId });
     await tc.entity_pages.insertMany(pages);
   }
 

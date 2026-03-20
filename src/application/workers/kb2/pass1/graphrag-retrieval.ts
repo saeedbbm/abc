@@ -22,12 +22,33 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const TOP_K = ctx.config?.pipeline_settings?.graphrag?.vector_top_k ?? 10;
 
-  const planArtifact = (await ctx.getStepArtifact("pass1", 9)) as PagePlanArtifact | undefined;
-  if (!planArtifact) throw new Error("No page plan found — run step 9 first");
+  const planArtifact = (await ctx.getStepArtifact("pass1", 13)) as PagePlanArtifact | undefined;
+  if (!planArtifact) throw new Error("No page plan found — run step 12 first");
 
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
-  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const nodesFilter = step9ExecId ? { execution_id: step9ExecId } : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+  const existingNodeIds = new Set(nodes.map((n) => n.node_id));
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  if (step10ExecId) {
+    const extra = (await tc.graph_nodes.find({ execution_id: step10ExecId }).toArray()) as unknown as KB2GraphNodeType[];
+    for (const n of extra) { if (!existingNodeIds.has(n.node_id)) { nodes.push(n); existingNodeIds.add(n.node_id); } }
+  }
+  const edgesExecId = await ctx.getStepExecutionId("pass1", 6);
+  const edgesFilter = edgesExecId ? { execution_id: edgesExecId } : { run_id: ctx.runId };
+  const edges = (await tc.graph_edges.find(edgesFilter).toArray()) as unknown as KB2GraphEdgeType[];
+  for (const stepNum of [7, 11]) {
+    const execId = await ctx.getStepExecutionId("pass1", stepNum);
+    if (execId) {
+      const extra = (await tc.graph_edges.find({ execution_id: execId }).toArray()) as unknown as KB2GraphEdgeType[];
+      const edgeSet = new Set(edges.map((e) => e.edge_id));
+      for (const e of extra) { if (!edgeSet.has(e.edge_id)) edges.push(e); }
+    }
+  }
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
   const docs = (snapshot?.parsed_documents ?? []) as KB2ParsedDocument[];
 
   const nodeById = new Map<string, KB2GraphNodeType>();

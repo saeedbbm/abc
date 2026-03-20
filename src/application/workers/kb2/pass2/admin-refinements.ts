@@ -31,8 +31,16 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress("Loading graph data...", 0);
 
+  const nodesExecId = await ctx.getStepExecutionId("pass1", 5);
+  const edgesExecId = await ctx.getStepExecutionId("pass1", 6);
+  const epExecId = await ctx.getStepExecutionId("pass1", 11);
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const nf = nodesExecId ? { execution_id: nodesExecId } : { run_id: ctx.runId };
+  const ef = edgesExecId ? { execution_id: edgesExecId } : { run_id: ctx.runId };
+  const epf = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const cf = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
   let nodes = (await tc.graph_nodes
-    .find({ run_id: ctx.runId })
+    .find(nf)
     .toArray()) as unknown as KB2GraphNodeType[];
 
   // ---------------------------------------------------------------------------
@@ -69,7 +77,7 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
       ];
 
       await tc.graph_nodes.updateOne(
-        { node_id: keepNode.node_id, run_id: ctx.runId },
+        { node_id: keepNode.node_id, ...nf },
         {
           $set: {
             aliases: mergedAliases,
@@ -80,7 +88,7 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
 
       const affectedEdges = await tc.graph_edges
         .find({
-          run_id: ctx.runId,
+          ...ef,
           $or: [
             { source_node_id: mergedNode.node_id },
             { target_node_id: mergedNode.node_id },
@@ -101,30 +109,30 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
         if (newSource === newTarget) {
           await tc.graph_edges.deleteOne({
             edge_id: edge.edge_id,
-            run_id: ctx.runId,
+            ...ef,
           });
         } else {
           await tc.graph_edges.updateOne(
-            { edge_id: edge.edge_id, run_id: ctx.runId },
+            { edge_id: edge.edge_id, ...ef },
             { $set: { source_node_id: newSource, target_node_id: newTarget } },
           );
         }
       }
 
       await tc.claims.updateMany(
-        { run_id: ctx.runId, entity_ids: mergedNode.node_id },
+        { ...cf, entity_ids: mergedNode.node_id },
         { $set: { "entity_ids.$[elem]": keepNode.node_id } },
         { arrayFilters: [{ elem: mergedNode.node_id }] },
       );
 
       await tc.entity_pages.deleteMany({
-        run_id: ctx.runId,
+        ...epf,
         node_id: mergedNode.node_id,
       });
 
       await tc.graph_nodes.deleteOne({
         node_id: mergedNode.node_id,
-        run_id: ctx.runId,
+        ...nf,
       });
 
       nodes = nodes.filter((n) => n.node_id !== mergedNode.node_id);
@@ -142,19 +150,19 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
     if (!node) continue;
 
     await tc.graph_edges.deleteMany({
-      run_id: ctx.runId,
+      ...ef,
       $or: [
         { source_node_id: node.node_id },
         { target_node_id: node.node_id },
       ],
     });
     await tc.entity_pages.deleteMany({
-      run_id: ctx.runId,
+      ...epf,
       node_id: node.node_id,
     });
     await tc.graph_nodes.deleteOne({
       node_id: node.node_id,
-      run_id: ctx.runId,
+      ...nf,
     });
 
     nodes = nodes.filter((n) => n.node_id !== node.node_id);
@@ -172,26 +180,26 @@ export const adminRefinementsStep: StepFunction = async (ctx) => {
 
     if (!accepted) {
       await tc.graph_edges.deleteMany({
-        run_id: ctx.runId,
+        ...ef,
         $or: [
           { source_node_id: node.node_id },
           { target_node_id: node.node_id },
         ],
       });
       await tc.entity_pages.deleteMany({
-        run_id: ctx.runId,
+        ...epf,
         node_id: node.node_id,
       });
       await tc.graph_nodes.deleteOne({
         node_id: node.node_id,
-        run_id: ctx.runId,
+        ...nf,
       });
 
       nodes = nodes.filter((n) => n.node_id !== node.node_id);
       result.discoveries_rejected++;
     } else {
       await tc.graph_nodes.updateOne(
-        { node_id: node.node_id, run_id: ctx.runId },
+        { node_id: node.node_id, ...nf },
         {
           $set: {
             truth_status: "human_asserted" as const,

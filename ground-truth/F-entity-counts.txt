@@ -1,0 +1,279 @@
+================================================================================
+GROUND TRUTH — SECTION F: ENTITY COUNTS
+================================================================================
+
+Exact counts of every entity type present in the input data, with full
+lists where practical.
+
+
+================================================================================
+1. PROJECTS
+================================================================================
+
+Total: 21
+
+See A-projects.txt for full list with details.
+
+By category:
+  past_documented:        8
+  past_undocumented:      4
+  ongoing_documented:     2
+  ongoing_undocumented:   5
+  proposed:               2
+
+By status:
+  completed:    11
+  active:        8
+  proposed:      2
+
+
+================================================================================
+2. DECISIONS / CONVENTIONS
+================================================================================
+
+Total: 16
+
+See B-decisions.txt for full list with details.
+
+By documentation status:
+  Explicitly documented:           9  (#4-10, #14, #15)
+  Partially documented:            1  (#1 — Kim's colors)
+  Not documented (implicit only):  6  (#2, #3, #11, #12, #13, #16)
+
+Hidden patterns:                   3  (#1, #2, #3)
+
+
+================================================================================
+3. PROCESSES
+================================================================================
+
+Total: 9
+
+See C-processes.txt for full list with details.
+
+
+================================================================================
+4. TEAM MEMBERS
+================================================================================
+
+Total: 6
+
+  1. Matt      — Architect / Tech Lead
+  2. Sarah     — PM / CTO
+  3. Tim       — Senior Frontend Developer
+  4. Kim       — UX Designer
+  5. Jack      — Junior Backend Developer (joined Jan 2024)
+  6. Jill      — Junior Frontend Developer (joined Jun 2024)
+
+
+================================================================================
+5. SLACK CONVERSATIONS
+================================================================================
+
+Total conversations: 39
+
+By channel:
+  #general:       16
+  #engineering:   18
+  #design:         5
+
+Total channels: 3
+
+Conversation list (channel | date):
+
+  #general     | 2023-01-09   (Q1 kickoff)
+  #general     | 2023-01-17   (Q1 priorities locked)
+  #engineering | 2023-02-06   (PR review discussion)
+  #design      | 2023-03-14   (Kim: pet card design)
+  #engineering | 2023-03-21   (Tim: categories page layout)
+  #general     | 2023-04-03   (Team standup — beta ship)
+  #general     | 2023-04-18   (Beta is live)
+  #engineering | 2023-05-10   (Matt: API response standardization)
+  #general     | 2023-06-05   (Mid-year check-in)
+  #engineering | 2023-07-19   (Matt: building adoption chooser)
+  #general     | 2023-08-14   (Summer updates)
+  #engineering | 2023-09-11   (Tim: flaky CI tests)
+  #design      | 2023-10-02   (Kim: shelter locations design)
+  #general     | 2023-11-20   (EOY planning)
+  #engineering | 2023-12-12   (Year-end code freeze)
+  #general     | 2024-01-08   (Sarah announces Jack joining)
+  #engineering | 2024-01-22   (Jack's first week questions)
+  #design      | 2024-02-19   (Kim: donation page design)
+  #engineering | 2024-06-03   (Jill's first week — Tim helps)
+  #engineering | 2024-03-18   (Jack: shelter hours parsing)
+  #general     | 2024-04-15   (Q2 check-in)
+  #engineering | 2024-05-13   (Tim: comparison layout discussion)
+  #design      | 2024-06-10   (Kim: comparison mockups)
+  #general     | 2024-07-22   (Comparison feature shipped)
+  #engineering | 2024-08-19   (Jack: date format question)
+  #general     | 2024-09-16   (Q4 planning — volunteer portal)
+  #engineering | 2024-10-07   (Tim: volunteer form layout)
+  #engineering | 2024-11-04   (Jack: shift signup race conditions)
+  #general     | 2024-12-02   (Year-end review)
+  #general     | 2025-01-06   (Q1 priorities — mobile)
+  #engineering | 2025-02-17   (Tim: resource library layout)
+  #design      | 2025-03-10   (Kim: volunteer portal design)
+  #engineering | 2025-04-14   (Matt: Tim covering reviews)
+  #engineering | 2025-06-09   (Jack: supply tracking discussion)
+  #general     | 2025-07-14   (Volunteer portal launched)
+  #engineering | 2025-08-18   (Jill: mobile issues)
+  #general     | 2025-10-06   (Sarah: customer feedback review)
+  #engineering | 2025-11-10   (Jack: API versioning question)
+  #general     | 2025-12-01   (Year-end updates — 2026 planning)
+
+
+================================================================================
+6. JIRA TICKETS
+================================================================================
+
+Total tickets: 34
+
+By status:
+  Done:          27
+  In Progress:    5
+  Backlog:        2
+
+Ticket list:
+
+  PAW-1   Set up CI/CD pipeline                          Done
+  PAW-2   Pet profile card components                    Done
+  PAW-3   Pet search and filter backend                  Done
+  PAW-4   Pet browse page layout                         Done
+  PAW-5   Fix auth token refresh bug                     Done
+  PAW-6   Pet categories page — frontend layout          Done
+  PAW-7   Standardize shelter API response format        Done
+  PAW-8   Build adoption chooser page                    Done
+  PAW-9   Build shelter locations page                   Done
+  PAW-10  Fix flaky CI tests                             Done
+  PAW-11  Shelter locations page — design                Done
+  PAW-12  Update about page copy                         Done
+  PAW-13  Shelter info API endpoint                      Done
+  PAW-14  Build contact form page                        Done
+  PAW-15  Build donation page — frontend                 Done
+  PAW-16  PawFinder website redesign — phase 2 (Epic)    In Progress
+  PAW-17  Build shelter comparison page                  Done
+  PAW-18  Site navigation improvements                   In Progress
+  PAW-19  Mobile responsiveness — phase 1                Done
+  PAW-20  Volunteer portal — backend API                 Done
+  PAW-21  Volunteer portal — frontend                    Done
+  PAW-22  Fix broken shelter links on partner page       Done
+  PAW-23  Supply tracking — backend                      Done
+  PAW-24  Supply tracking — frontend                     In Progress
+  PAW-25  Quarterly dependency updates — Q3 2025         Done
+  PAW-26  Fix pet card image fallback                    Done
+  PAW-27  Investigate slow shelter locations page        Backlog
+  PAW-28  Update onboarding docs for new developers      Done
+  PAW-29  Database migration postmortem                  Done
+  PAW-30  Mobile nav refactor                            Done
+  PAW-31  Add event calendar to shelter pages             In Progress
+  PAW-32  Supply orders feature — backend                In Progress
+  PAW-33  2026 roadmap planning                          Backlog
+  PAW-34  Build shelter events browser page              Done
+
+
+================================================================================
+7. GITHUB PULL REQUESTS
+================================================================================
+
+Total PRs: 16
+
+By repository:
+  pawfinder/pawfinder-web:   12
+  pawfinder/pawfinder-api:    4
+
+Repositories: 2
+  1. pawfinder/pawfinder-web
+  2. pawfinder/pawfinder-api
+
+PR list:
+
+  PR #12  Fix auth token refresh timing              pawfinder-web   Matt     2023-02-06
+  PR #18  Build pet profile cards for browse page     pawfinder-web   Tim      2023-03-28
+  PR #23  Pet adoption chooser page                   pawfinder-web   Matt     2023-07-24
+  PR #27  Standardize shelter API response format     pawfinder-api   Matt     2023-05-15
+  PR #31  Shelter locations page                      pawfinder-web   Tim      2023-09-18
+  PR #35  Add shelter info API endpoint               pawfinder-api   Jack     2024-03-12
+  PR #39  Contact form page                           pawfinder-web   Jill     2024-06-10
+  PR #43  Shelter comparison feature                  pawfinder-web   Jill     2024-07-08
+  PR #47  Donation page frontend                      pawfinder-web   Tim      2024-03-25
+  PR #49  Shelter events browser                      pawfinder-web   Jack     2024-08-05
+  PR #52  Volunteer portal backend API                pawfinder-api   Jack     2024-09-23
+  PR #55  Volunteer portal frontend                   pawfinder-web   Jill     2024-10-14
+  PR #58  Supply tracking backend                     pawfinder-api   Jack     2025-06-16
+  PR #61  Mobile navigation refactor                  pawfinder-web   Jill     2025-08-11
+  PR #63  Dependency updates Q3 2025                  pawfinder-web   Tim      2025-09-08
+  PR #65  Fix broken image fallback on pet cards      pawfinder-web   Jill     2025-10-20
+
+PRs by author:
+  Matt:   3  (#12, #23, #27)
+  Tim:    4  (#18, #31, #47, #63)
+  Jack:   4  (#35, #49, #52, #58)
+  Jill:   5  (#39, #43, #55, #61, #65)
+  Kim:    0
+  Sarah:  0
+
+
+================================================================================
+8. CONFLUENCE DOCUMENTS
+================================================================================
+
+Total documents: 6
+
+  1. PawFinder Website Redesign
+     Space: Product  |  Author: Sarah  |  Created: 2023-01-20
+
+  2. PawFinder Engineering Onboarding Guide
+     Space: Engineering  |  Author: Sarah  |  Created: 2024-01-10
+
+  3. Volunteer Portal Product Spec
+     Space: Product  |  Author: Sarah  |  Created: 2024-07-29
+
+  4. Q3 2024 Product Roadmap
+     Space: Product  |  Author: Sarah  |  Created: 2024-06-24
+
+  5. Incident Postmortem — Database Migration Failure (May 28, 2024)
+     Space: Engineering  |  Author: Sarah  |  Created: 2024-06-05
+     (Note: page body credits Matt as content author, but the Confluence
+     page metadata lists Sarah as the page author/creator)
+
+  6. Shelter Partner Integration Spec
+     Space: Engineering  |  Author: Sarah  |  Created: 2023-06-12
+
+By author (Confluence page metadata):
+  Sarah:  6  (all pages — Sarah is the Confluence page author for all docs)
+
+By space:
+  Product:      3
+  Engineering:  3
+
+
+================================================================================
+9. CUSTOMER FEEDBACK SUBMISSIONS
+================================================================================
+
+Total submissions: 6
+
+See E-customer-feedback.txt for full analysis.
+
+  Submission #1  Lisa M.          2024-06-03  Toy donation request
+  Submission #2  David Chen       2024-11-19  Toy donation request
+  Submission #3  Rachel Torres    2025-03-22  Toy donation request
+  Submission #4  Tom Bradley      2024-03-10  Positive feedback
+  Submission #5  Amanda K.        2025-01-08  Bug report (broken link)
+  Submission #6  Mike Nguyen      2025-08-14  Feature request (volunteer hours)
+
+
+================================================================================
+10. INPUT FILE SUMMARY
+================================================================================
+
+File              Lines    Entities
+--------------    -----    ---------------------------
+slack.txt           627    39 conversations, 3 channels
+github.txt          791    16 PRs, 2 repos
+jira.txt            727    34 tickets
+confluence.txt      541    6 documents
+webform.txt         102    6 submissions
+
+Total input lines:  2788
+================================================================================

@@ -21,6 +21,7 @@ interface RecoveryCandidate {
   evidence_excerpt: string;
   recovery_source: "programmatic" | "cross_llm" | "opus_confirmed";
   source_doc_title: string;
+  source_doc_id?: string;
   source_provider: string;
 }
 
@@ -66,6 +67,7 @@ function runProgrammaticScan(
             evidence_excerpt: doc.title,
             recovery_source: "programmatic",
             source_doc_title: doc.title,
+            source_doc_id: doc.sourceId,
             source_provider: doc.provider,
           });
         }
@@ -89,6 +91,7 @@ function runProgrammaticScan(
             evidence_excerpt: `Ticket ${ticketKey} found in Jira document: ${doc.title}`,
             recovery_source: "programmatic",
             source_doc_title: doc.title,
+            source_doc_id: doc.sourceId,
             source_provider: doc.provider,
           });
         }
@@ -111,6 +114,7 @@ function runProgrammaticScan(
           evidence_excerpt: `Ticket ${ticketKey} referenced in ${doc.provider} document: ${doc.title}`,
           recovery_source: "programmatic",
           source_doc_title: doc.title,
+          source_doc_id: doc.sourceId,
           source_provider: doc.provider,
         });
       }
@@ -135,6 +139,7 @@ function runProgrammaticScan(
           evidence_excerpt: `Email ${email} found in ${doc.provider} document: ${doc.title}`,
           recovery_source: "programmatic",
           source_doc_title: doc.title,
+          source_doc_id: doc.sourceId,
           source_provider: doc.provider,
         });
       }
@@ -155,6 +160,7 @@ const GapCheckSchema = z.object({
     display_name: z.string(),
     suggested_type: z.string(),
     reason: z.string(),
+    evidence_excerpt: z.string().describe("Exact verbatim quote from the source document that mentions or evidences this entity"),
     source_document: z.string(),
   })),
   miscategorized: z.array(z.object({
@@ -192,10 +198,132 @@ interface AttributeIssue {
   reason: string;
 }
 
-const VALID_PROJECT_STATUS = new Set(["active", "completed", "proposed", "planned"]);
+const VALID_PROJECT_STATUS = new Set(["active", "completed", "proposed"]);
 const VALID_DOC_LEVEL = new Set(["documented", "undocumented"]);
 const VALID_DECISION_STATUS = new Set(["decided", "pending", "superseded", "reversed"]);
 const VALID_PROCESS_STATUS = new Set(["active", "deprecated", "proposed", "informal"]);
+
+function computeSourceCoverage(sourceTypes: Set<string>) {
+  const cov = {
+    has_confluence: sourceTypes.has("confluence"),
+    has_jira: sourceTypes.has("jira"),
+    has_github: sourceTypes.has("github"),
+    has_slack: sourceTypes.has("slack"),
+    has_feedback: sourceTypes.has("customer_feedback") || sourceTypes.has("webform"),
+  };
+  let level: "documented" | "undocumented";
+  if (cov.has_confluence) level = "documented";
+  else level = "undocumented";
+  const parts: string[] = [];
+  if (cov.has_confluence) parts.push("confluence");
+  if (cov.has_jira) parts.push("jira");
+  if (cov.has_github) parts.push("github");
+  if (cov.has_slack) parts.push("slack");
+  if (cov.has_feedback) parts.push("feedback");
+  return { cov, level, reason: `Sources: ${parts.join(", ") || "none"}` };
+}
+
+// ---------------------------------------------------------------------------
+// Layer 0a-LLM: Batched attribute inference via LLM
+// ---------------------------------------------------------------------------
+
+const ATTR_INFERENCE_BATCH_SIZE = 15;
+
+const AttributeInferenceSchema = z.object({
+  entities: z.array(z.object({
+    display_name: z.string(),
+    status: z.string().optional(),
+    rationale: z.string().optional(),
+    scope: z.string().optional(),
+    decided_by: z.string().optional(),
+    confidence: z.enum(["high", "medium", "low"]),
+    reasoning: z.string(),
+  })),
+});
+
+const ATTRIBUTE_INFERENCE_PROMPT = `You are an attribute inference engine for a knowledge base system. You receive entities with their source excerpts and must infer missing attributes.
+
+## PROJECT STATUS
+
+Allowed values: active, completed, proposed.
+
+CRITICAL: A project's status describes the OVERALL initiative, not any single ticket or PR.
+- The excerpts may mention Jira ticket statuses (Done, In Progress, Backlog) and PR states (merged, open). These describe individual work items, NOT the project as a whole.
+- A project is "completed" ONLY when ALL evidence points to it being finished — every ticket Done, every PR merged, no further references to outstanding work, and no ongoing discussion.
+- A project is "active" if there are ANY In Progress tickets, open PRs, or recent Slack/comment mentions of ongoing work — even if most tickets are Done and some PRs are merged.
+- A project is "proposed" if it is only discussed as a future idea with no work started, or if tickets/epics exist but no development work has begun.
+- When in doubt between "active" and "completed", prefer "active".
+
+## DECISION ATTRIBUTES
+
+- "rationale": why the decision was made. Only fill if the excerpts state or strongly imply the reason.
+- "scope": which project, feature, or area it affects.
+- "decided_by": the person or group who made it. Only fill if explicitly named.
+- Omit any field where the excerpts lack clear evidence.
+
+## PROCESS STATUS
+
+For process entities, return the "status" field (not "process_status").
+Allowed values: active, deprecated, proposed, informal.
+- "active": the process has formal documentation (e.g., a Confluence page with defined steps) and is currently followed.
+- "informal": the process is practiced but NOT formally documented — only visible in Slack conversations, PR review patterns, or casual mentions.
+- "deprecated": evidence indicates the process is no longer followed or has been replaced.
+- "proposed": the process is discussed as something the team should adopt but hasn't yet.
+
+## GENERAL RULES
+
+- DO NOT hallucinate. If the excerpts do not contain enough information, omit the field (return undefined). An empty field is always better than a guess.
+- "reasoning": REQUIRED. You must quote the specific evidence from the excerpts that led to your conclusion. For example: "PAW-34 Done + PR #49 merged + no further references → completed" or "PAW-32 In Progress → project still active despite other tickets being Done".
+- "confidence": "high" = clear, unambiguous evidence; "medium" = reasonable inference from partial evidence; "low" = weak signal, limited data.`;
+
+interface LLMInferenceTarget {
+  node_id: string;
+  display_name: string;
+  type: string;
+  excerpts: string;
+  existing_attrs: Record<string, any>;
+}
+
+function collectLLMInferenceTargets(
+  nodes: KB2GraphNodeType[],
+  heuristicIssues: AttributeIssue[],
+): LLMInferenceTarget[] {
+  const flaggedNodeIds = new Set<string>();
+  const defaultedNodeIds = new Set<string>();
+
+  for (const issue of heuristicIssues) {
+    if (issue.action === "flagged") flaggedNodeIds.add(issue.node_id);
+    if (issue.action === "backfilled" && (issue.field === "status" || issue.field === "decision_status")) {
+      defaultedNodeIds.add(issue.node_id);
+    }
+  }
+
+  const targets: LLMInferenceTarget[] = [];
+  for (const node of nodes) {
+    if (node.type !== "project" && node.type !== "decision" && node.type !== "process") continue;
+
+    const needsLLM =
+      flaggedNodeIds.has(node.node_id) ||
+      defaultedNodeIds.has(node.node_id) ||
+      (node.type === "project" && !VALID_PROJECT_STATUS.has((node.attributes as any)?.status)) ||
+      (node.type === "process" && !(node.attributes as any)?._status_reasoning);
+
+    if (!needsLLM) continue;
+
+    const excerpts = node.source_refs
+      .map((r) => `[${r.source_type}] ${r.title}${r.section_heading ? ` > ${r.section_heading}` : ""}: ${r.excerpt}`)
+      .join("\n");
+
+    targets.push({
+      node_id: node.node_id,
+      display_name: node.display_name,
+      type: node.type,
+      excerpts: excerpts.slice(0, 3000),
+      existing_attrs: node.attributes as Record<string, any> ?? {},
+    });
+  }
+  return targets;
+}
 
 function validateAndBackfillAttributes(
   nodes: KB2GraphNodeType[],
@@ -206,31 +334,24 @@ function validateAndBackfillAttributes(
   for (const node of nodes) {
     const attrs = (node.attributes ?? {}) as Record<string, any>;
     const sourceTypes = new Set(node.source_refs.map((r) => r.source_type));
-    const excerpts = node.source_refs.map((r) => r.excerpt.toLowerCase()).join(" ");
     const patch: Record<string, any> = {};
 
-    if (node.type === "project") {
-      if (!attrs.status || !VALID_PROJECT_STATUS.has(attrs.status)) {
-        let inferred: string | undefined;
-        if (excerpts.includes("done") || excerpts.includes("resolved") || excerpts.includes("completed")) {
-          inferred = "completed";
-        } else if (excerpts.includes("in progress") || excerpts.includes("active")) {
-          inferred = "active";
-        } else if (sourceTypes.has("customer_feedback") && !sourceTypes.has("jira") && !sourceTypes.has("confluence")) {
-          inferred = "proposed";
-        }
-        if (inferred) {
-          patch.status = inferred;
-          issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "backfilled", value: inferred, reason: `Inferred from source excerpts/types` });
-        } else {
-          issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "flagged", reason: "Missing status — could not infer from sources" });
-        }
-      }
-
+    const needsDocLevel = node.type === "project" || node.type === "process" || node.type === "decision";
+    if (needsDocLevel) {
+      const { cov, level, reason } = computeSourceCoverage(sourceTypes);
+      patch._source_coverage = cov;
       if (!attrs.documentation_level || !VALID_DOC_LEVEL.has(attrs.documentation_level)) {
-        const level = sourceTypes.has("confluence") ? "documented" : "undocumented";
         patch.documentation_level = level;
-        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "documentation_level", action: "backfilled", value: level, reason: sourceTypes.has("confluence") ? "Has confluence source" : "No confluence source found" });
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "documentation_level", action: "backfilled", value: level, reason });
+      }
+    }
+
+    if (node.type === "project") {
+      if (attrs.status === "planned") {
+        patch.status = "proposed";
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "backfilled", value: "proposed", reason: "Normalized planned → proposed" });
+      } else if (!attrs.status || !VALID_PROJECT_STATUS.has(attrs.status)) {
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "flagged", reason: "Missing status — will be inferred by LLM" });
       }
     }
 
@@ -241,7 +362,7 @@ function validateAndBackfillAttributes(
       }
 
       if (!attrs.rationale) {
-        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "rationale", action: "flagged", reason: "Missing rationale — requires human or LLM review" });
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "rationale", action: "flagged", reason: "Missing rationale — will be inferred by LLM" });
       }
 
       if (!attrs.scope) {
@@ -251,22 +372,18 @@ function validateAndBackfillAttributes(
           const inferred = relTargets[0];
           patch.scope = inferred;
           issues.push({ node_id: node.node_id, display_name: node.display_name, field: "scope", action: "backfilled", value: inferred, reason: `Inferred from relationship target: ${inferred}` });
-        } else {
-          issues.push({ node_id: node.node_id, display_name: node.display_name, field: "scope", action: "flagged", reason: "Missing scope — no relationships to infer from" });
         }
       }
     }
 
     if (node.type === "process") {
-      if (!attrs.process_status || !VALID_PROCESS_STATUS.has(attrs.process_status)) {
-        patch.process_status = "active";
-        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "process_status", action: "backfilled", value: "active", reason: "Default — most extracted processes are currently active" });
-      }
-
-      if (!attrs.documentation_level || !VALID_DOC_LEVEL.has(attrs.documentation_level)) {
-        const level = sourceTypes.has("confluence") ? "documented" : "undocumented";
-        patch.documentation_level = level;
-        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "documentation_level", action: "backfilled", value: level, reason: sourceTypes.has("confluence") ? "Has confluence source" : "No confluence source found" });
+      const processStatus = attrs.status ?? attrs.process_status;
+      if (!processStatus || !VALID_PROCESS_STATUS.has(processStatus)) {
+        patch.status = "active";
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "backfilled", value: "active", reason: "Default — will be refined by LLM pass" });
+      } else if (attrs.process_status && !attrs.status) {
+        patch.status = attrs.process_status;
+        issues.push({ node_id: node.node_id, display_name: node.display_name, field: "status", action: "backfilled", value: attrs.process_status, reason: "Migrated process_status → status" });
       }
     }
 
@@ -279,6 +396,191 @@ function validateAndBackfillAttributes(
 }
 
 // ---------------------------------------------------------------------------
+// Duplicate cluster detection
+// ---------------------------------------------------------------------------
+
+function tokenize(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase()
+      .replace(/[._@]/g, " ")
+      .replace(/[^a-z0-9\s\-]/g, "")
+      .split(/[\s\-]+/)
+      .filter((t) => t.length > 1),
+  );
+}
+
+function tokenSimilarity(a: string, b: string): number {
+  const tokA = tokenize(a);
+  const tokB = tokenize(b);
+  if (tokA.size === 0 || tokB.size === 0) return 0;
+  let overlap = 0;
+  for (const t of tokA) {
+    if (tokB.has(t)) overlap++;
+  }
+  return overlap / Math.max(tokA.size, tokB.size);
+}
+
+const SKIP_SHARED_REF_DUPE_TYPES = new Set([
+  "team_member", "library", "infrastructure", "integration",
+  "database", "environment", "cloud_resource",
+]);
+
+function tagDuplicateClusters(
+  nodes: KB2GraphNodeType[],
+): { pairs: [string, string][]; updates: Map<string, string[]> } {
+  const pairs: [string, string][] = [];
+  const dupeMap = new Map<string, Set<string>>();
+
+  const addPair = (a: KB2GraphNodeType, b: KB2GraphNodeType) => {
+    const key = [a.display_name, b.display_name].sort().join("|||");
+    if (pairs.some(([x, y]) => [x, y].sort().join("|||") === key)) return;
+    pairs.push([a.display_name, b.display_name]);
+    if (!dupeMap.has(a.node_id)) dupeMap.set(a.node_id, new Set());
+    if (!dupeMap.has(b.node_id)) dupeMap.set(b.node_id, new Set());
+    dupeMap.get(a.node_id)!.add(b.display_name);
+    dupeMap.get(b.node_id)!.add(a.display_name);
+  };
+
+  const ticketRefs = new Map<string, KB2GraphNodeType[]>();
+  const prRefs = new Map<string, KB2GraphNodeType[]>();
+
+  for (const node of nodes) {
+    const allText = [node.display_name, ...node.source_refs.map((r) => r.title)].join(" ");
+    for (const m of allText.matchAll(TICKET_PATTERN)) {
+      const ticket = m[1].toUpperCase();
+      if (!ticketRefs.has(ticket)) ticketRefs.set(ticket, []);
+      ticketRefs.get(ticket)!.push(node);
+    }
+    for (const m of allText.matchAll(PR_PATTERN)) {
+      const prNum = m[1] ?? m[2] ?? m[3];
+      if (prNum) {
+        const prKey = `PR#${prNum}`;
+        if (!prRefs.has(prKey)) prRefs.set(prKey, []);
+        prRefs.get(prKey)!.push(node);
+      }
+    }
+  }
+
+  for (const [, group] of ticketRefs) {
+    const unique = [...new Map(group.map((n) => [n.node_id, n])).values()];
+    for (let i = 0; i < unique.length; i++) {
+      for (let j = i + 1; j < unique.length; j++) {
+        if (unique[i].type !== unique[j].type) continue;
+        if (SKIP_SHARED_REF_DUPE_TYPES.has(unique[i].type)) continue;
+        const la = unique[i].display_name.toLowerCase().trim();
+        const lb = unique[j].display_name.toLowerCase().trim();
+        if (la.includes(lb) || lb.includes(la) || tokenSimilarity(la, lb) >= 0.3) {
+          addPair(unique[i], unique[j]);
+        }
+      }
+    }
+  }
+
+  for (const [, group] of prRefs) {
+    const unique = [...new Map(group.map((n) => [n.node_id, n])).values()];
+    for (let i = 0; i < unique.length; i++) {
+      for (let j = i + 1; j < unique.length; j++) {
+        if (unique[i].type !== unique[j].type) continue;
+        if (SKIP_SHARED_REF_DUPE_TYPES.has(unique[i].type)) continue;
+        const la = unique[i].display_name.toLowerCase().trim();
+        const lb = unique[j].display_name.toLowerCase().trim();
+        if (la.includes(lb) || lb.includes(la) || tokenSimilarity(la, lb) >= 0.3) {
+          addPair(unique[i], unique[j]);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (nodes[i].type !== nodes[j].type) continue;
+      const a = nodes[i].display_name.toLowerCase().trim();
+      const b = nodes[j].display_name.toLowerCase().trim();
+      if (a === b) continue;
+      if (a.length > 5 && b.length > 5 && (a.includes(b) || b.includes(a))) {
+        addPair(nodes[i], nodes[j]);
+      }
+    }
+  }
+
+  const updates = new Map<string, string[]>();
+  for (const [nodeId, dupes] of dupeMap) {
+    updates.set(nodeId, [...dupes]);
+  }
+  return { pairs, updates };
+}
+
+// ---------------------------------------------------------------------------
+// Decision enrichment: link decisions to parent entities
+// ---------------------------------------------------------------------------
+
+function enrichDecisionLinks(
+  nodes: KB2GraphNodeType[],
+): { issues: AttributeIssue[]; updates: Map<string, Record<string, any>>; stats: { decisions_enriched: number; scope_filled: number; decided_by_filled: number } } {
+  const issues: AttributeIssue[] = [];
+  const updates = new Map<string, Record<string, any>>();
+  let scopeFilled = 0;
+  let decidedByFilled = 0;
+  let enriched = 0;
+
+  const entityNames = new Map<string, { name: string; type: string }>();
+  for (const n of nodes) {
+    if (n.type !== "decision") {
+      entityNames.set(n.display_name.toLowerCase().trim(), { name: n.display_name, type: n.type });
+    }
+  }
+
+  const decisions = nodes.filter((n) => n.type === "decision");
+  for (const dec of decisions) {
+    const attrs = (dec.attributes ?? {}) as Record<string, any>;
+    const allText = [
+      dec.display_name,
+      ...dec.source_refs.map((r) => r.excerpt),
+      ...dec.source_refs.map((r) => r.title),
+    ].join(" ").toLowerCase();
+
+    const related: Array<{ name: string; type: string }> = [];
+    const patch: Record<string, any> = {};
+
+    for (const [key, ent] of entityNames) {
+      if (key.length < 3) continue;
+      if (allText.includes(key)) {
+        related.push(ent);
+      }
+    }
+
+    if (related.length > 0) {
+      patch._related_entities = related.map((r) => ({ name: r.name, type: r.type }));
+      enriched++;
+
+      if (!attrs.scope) {
+        const scopeEntity = related.find((r) => r.type === "project" || r.type === "repository");
+        if (scopeEntity) {
+          patch.scope = scopeEntity.name;
+          scopeFilled++;
+          issues.push({ node_id: dec.node_id, display_name: dec.display_name, field: "scope", action: "backfilled", value: scopeEntity.name, reason: `Matched entity "${scopeEntity.name}" (${scopeEntity.type}) in excerpts` });
+        }
+      }
+
+      if (!attrs.decided_by) {
+        const person = related.find((r) => r.type === "team_member");
+        if (person) {
+          patch.decided_by = person.name;
+          decidedByFilled++;
+          issues.push({ node_id: dec.node_id, display_name: dec.display_name, field: "decided_by", action: "backfilled", value: person.name, reason: `Team member "${person.name}" mentioned in excerpts` });
+        }
+      }
+    }
+
+    if (Object.keys(patch).length > 0) {
+      updates.set(dec.node_id, patch);
+    }
+  }
+
+  return { issues, updates, stats: { decisions_enriched: enriched, scope_filled: scopeFilled, decided_by_filled: decidedByFilled } };
+}
+
+// ---------------------------------------------------------------------------
 // Main step
 // ---------------------------------------------------------------------------
 
@@ -287,11 +589,29 @@ export const extractionValidationStep: StepFunction = async (ctx) => {
   const stepId = "pass1-step-4";
   const tc = getTenantCollections(ctx.companySlug);
 
-  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
   if (!snapshot) throw new Error("No input snapshot found");
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
 
-  const existingNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  // Read step 3's nodes (latest execution) and clone them into this execution
+  const step3ExecId = await ctx.getStepExecutionId("pass1", 3);
+  const step3Filter = step3ExecId ? { execution_id: step3ExecId } : { run_id: ctx.runId };
+  const sourceNodes = (await tc.graph_nodes.find(step3Filter).toArray()) as unknown as (KB2GraphNodeType & { _id?: any })[];
+
+  const clonedNodes = sourceNodes.map(({ _id, ...rest }) => ({
+    ...rest,
+    execution_id: ctx.executionId,
+    attributes: { ...rest.attributes },
+  }));
+  if (clonedNodes.length > 0) {
+    await tc.graph_nodes.insertMany(clonedNodes as any[]);
+  }
+
+  const myFilter = { execution_id: ctx.executionId };
+  const existingNodes = (await tc.graph_nodes.find(myFilter).toArray()) as unknown as KB2GraphNodeType[];
   const existingNames = new Set<string>();
   for (const node of existingNodes) {
     existingNames.add(node.display_name.toLowerCase().trim());
@@ -300,23 +620,162 @@ export const extractionValidationStep: StepFunction = async (ctx) => {
     }
   }
 
-  // ---- Layer 0: Attribute validation & backfill ----
-  await ctx.onProgress("Layer 0: Validating and backfilling entity attributes...", 2);
+  // ---- Layer 0a: Attribute validation & backfill ----
+  await ctx.onProgress("Layer 0a: Validating and backfilling entity attributes...", 1);
   const { issues: attrIssues, updates: attrUpdates } = validateAndBackfillAttributes(existingNodes);
 
   if (attrUpdates.size > 0) {
     const bulkOps = Array.from(attrUpdates.entries()).map(([nodeId, patch]) => ({
       updateOne: {
-        filter: { node_id: nodeId, run_id: ctx.runId },
+        filter: { node_id: nodeId, execution_id: ctx.executionId },
         update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) },
       },
     }));
     await tc.graph_nodes.bulkWrite(bulkOps);
   }
 
-  const attrBackfilled = attrIssues.filter((i) => i.action === "backfilled").length;
+  let attrBackfilled = attrIssues.filter((i) => i.action === "backfilled").length;
   const attrFlagged = attrIssues.filter((i) => i.action === "flagged").length;
-  await ctx.onProgress(`Layer 0 done: ${attrBackfilled} backfilled, ${attrFlagged} flagged`, 4);
+  await ctx.onProgress(`Layer 0a heuristics done: ${attrBackfilled} backfilled, ${attrFlagged} flagged`, 2);
+
+  // ---- Layer 0a-LLM: Batched attribute inference ----
+  let llmCalls = 0;
+  const llmTargets = collectLLMInferenceTargets(existingNodes, attrIssues);
+  if (llmTargets.length > 0) {
+    await ctx.onProgress(`Layer 0a-LLM: Inferring attributes for ${llmTargets.length} entities...`, 2);
+    const crossCheckModel = getCrossCheckModel(ctx.config?.pipeline_settings?.models);
+    const systemPrompt = ctx.config?.prompts?.extraction_validation?.system_attr_inference ?? ATTRIBUTE_INFERENCE_PROMPT;
+    let llmInferred = 0;
+
+    for (let batchStart = 0; batchStart < llmTargets.length; batchStart += ATTR_INFERENCE_BATCH_SIZE) {
+      const batch = llmTargets.slice(batchStart, batchStart + ATTR_INFERENCE_BATCH_SIZE);
+      const entitiesText = batch.map((t, i) => {
+        const missingFields: string[] = [];
+        if (t.type === "project" && !VALID_PROJECT_STATUS.has(t.existing_attrs?.status)) missingFields.push("status");
+        if (t.type === "decision") {
+          if (!t.existing_attrs?.rationale) missingFields.push("rationale");
+          if (!t.existing_attrs?.scope) missingFields.push("scope");
+          if (!t.existing_attrs?.decided_by) missingFields.push("decided_by");
+        }
+        if (t.type === "process") missingFields.push("status");
+        return `${i + 1}. "${t.display_name}" [type: ${t.type}] — missing: ${missingFields.join(", ")}\nExcerpts:\n${t.excerpts}`;
+      }).join("\n\n---\n\n");
+
+      const prompt = `Infer the missing attributes for these entities based on their source excerpts.\n\n${entitiesText}`;
+
+      try {
+        const startMs = Date.now();
+        let usageData: { promptTokens: number; completionTokens: number } | null = null;
+
+        const result = await structuredGenerate({
+          model: crossCheckModel,
+          system: systemPrompt,
+          prompt,
+          schema: AttributeInferenceSchema,
+          logger,
+          onUsage: (usage) => { usageData = usage; },
+          signal: ctx.signal,
+        });
+        llmCalls++;
+
+        if (usageData) {
+          const durationMs = Date.now() - startMs;
+          const cost = calculateCostUsd(getCrossCheckModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+          ctx.logLLMCall(stepId, getCrossCheckModelName(ctx.config?.pipeline_settings?.models), prompt, JSON.stringify(result, null, 2), usageData.promptTokens, usageData.completionTokens, cost, durationMs);
+        }
+
+        const resultMap = new Map<string, (typeof result.entities)[number]>();
+        for (const e of result.entities ?? []) {
+          resultMap.set(e.display_name.toLowerCase().trim(), e);
+        }
+
+        const llmBulkOps: any[] = [];
+        for (const target of batch) {
+          const inferred = resultMap.get(target.display_name.toLowerCase().trim());
+          if (!inferred) continue;
+
+          const patch: Record<string, any> = {};
+          patch._status_reasoning = inferred.reasoning;
+
+          if (target.type === "project" && inferred.status) {
+            const normalizedStatus = inferred.status === "planned" ? "proposed" : inferred.status;
+            if (VALID_PROJECT_STATUS.has(normalizedStatus)) {
+              patch.status = normalizedStatus;
+              attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "status", action: "backfilled", value: normalizedStatus, reason: `LLM-inferred: ${inferred.reasoning}` });
+            }
+          }
+          if (target.type === "decision") {
+            if (inferred.rationale) {
+              patch.rationale = inferred.rationale;
+              attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "rationale", action: "backfilled", value: inferred.rationale, reason: `LLM-inferred: ${inferred.reasoning}` });
+            }
+            if (inferred.scope) {
+              patch.scope = inferred.scope;
+              attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "scope", action: "backfilled", value: inferred.scope, reason: `LLM-inferred: ${inferred.reasoning}` });
+            }
+            if (inferred.decided_by) {
+              patch.decided_by = inferred.decided_by;
+              attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "decided_by", action: "backfilled", value: inferred.decided_by, reason: `LLM-inferred: ${inferred.reasoning}` });
+            }
+          }
+          if (target.type === "process" && inferred.status && VALID_PROCESS_STATUS.has(inferred.status)) {
+            patch.status = inferred.status;
+            attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "status", action: "backfilled", value: inferred.status, reason: `LLM-inferred: ${inferred.reasoning}` });
+          }
+
+          if (Object.keys(patch).length > 0) {
+            llmInferred++;
+            llmBulkOps.push({
+              updateOne: {
+                filter: { node_id: target.node_id, execution_id: ctx.executionId },
+                update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) },
+              },
+            });
+          }
+        }
+
+        if (llmBulkOps.length > 0) {
+          await tc.graph_nodes.bulkWrite(llmBulkOps);
+        }
+      } catch (err) {
+        logger.log(`Attribute inference batch failed (non-fatal): ${err}`);
+      }
+    }
+
+    attrBackfilled = attrIssues.filter((i) => i.action === "backfilled").length;
+    await ctx.onProgress(`Layer 0a-LLM done: ${llmInferred} entities refined by LLM`, 3);
+  }
+
+  // ---- Layer 0b: Duplicate cluster tagging ----
+  await ctx.onProgress("Layer 0b: Detecting duplicate clusters...", 2);
+  const { pairs: dupePairs, updates: dupeUpdates } = tagDuplicateClusters(existingNodes);
+
+  if (dupeUpdates.size > 0) {
+    const dupeBulkOps = Array.from(dupeUpdates.entries()).map(([nodeId, dupes]) => ({
+      updateOne: {
+        filter: { node_id: nodeId, execution_id: ctx.executionId },
+        update: { $set: { "attributes._likely_duplicates": dupes } },
+      },
+    }));
+    await tc.graph_nodes.bulkWrite(dupeBulkOps);
+  }
+  await ctx.onProgress(`Layer 0b done: ${dupePairs.length} duplicate pairs found`, 3);
+
+  // ---- Layer 0c: Decision enrichment ----
+  await ctx.onProgress("Layer 0c: Enriching decision links...", 3);
+  const { issues: decIssues, updates: decUpdates, stats: decStats } = enrichDecisionLinks(existingNodes);
+  attrIssues.push(...decIssues);
+
+  if (decUpdates.size > 0) {
+    const decBulkOps = Array.from(decUpdates.entries()).map(([nodeId, patch]) => ({
+      updateOne: {
+        filter: { node_id: nodeId, execution_id: ctx.executionId },
+        update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) },
+      },
+    }));
+    await tc.graph_nodes.bulkWrite(decBulkOps);
+  }
+  await ctx.onProgress(`Layer 0c done: ${decStats.decisions_enriched} decisions enriched, ${decStats.scope_filled} scopes filled, ${decStats.decided_by_filled} decided_by filled`, 4);
 
   // ---- Layer 1: Programmatic scan ----
   await ctx.onProgress("Layer 1: Programmatic pattern scan...", 5);
@@ -363,14 +822,13 @@ export const extractionValidationStep: StepFunction = async (ctx) => {
   ).join("\n\n");
 
   let crossLLMCandidates: RecoveryCandidate[] = [];
-  let llmCalls = 0;
 
   try {
     const crossCheckModel = getCrossCheckModel(ctx.config?.pipeline_settings?.models);
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
 
-    const gapCheckPrompt = ctx.config?.prompts?.extraction_validation?.system_gap ?? "You are a quality assurance reviewer for a knowledge base entity extraction system. Your job is to find entities that the primary extraction missed. Be thorough but precise — only flag real entities, not attributes or components.";
+    const gapCheckPrompt = ctx.config?.prompts?.extraction_validation?.system_gap ?? "You are a quality assurance reviewer for a knowledge base entity extraction system. Your job is to find entities that the primary extraction missed. Be thorough but precise — only flag real entities, not attributes or components.\n\nFor each missed entity, you MUST provide an evidence_excerpt: an exact verbatim quote from the source document that mentions or evidences the entity. Copy the text word-for-word — do NOT paraphrase or summarize. The excerpt must clearly reference the entity and include enough surrounding context to be meaningful on its own (at minimum the full sentence).";
     const gapPrompt = `Here are all entities extracted so far:\n${entitySummary}\n\nReview these source documents and identify any entities that were MISSED or MISCATEGORIZED.\nFocus on: PRs, tickets, people, repositories, databases, infrastructure, decisions (architecture choices, technology tradeoffs), and processes (team workflows, procedures) that should be entities but aren't in the list above.`;
 
     const result = await structuredGenerate({
@@ -400,7 +858,7 @@ export const extractionValidationStep: StepFunction = async (ctx) => {
         aliases: [],
         attributes: {},
         confidence: "medium",
-        evidence_excerpt: missed.reason,
+        evidence_excerpt: missed.evidence_excerpt || missed.reason,
         recovery_source: "cross_llm",
         source_doc_title: missed.source_document,
         source_provider: "unknown",
@@ -432,10 +890,12 @@ export const extractionValidationStep: StepFunction = async (ctx) => {
       recovery_details: [],
       attribute_validation: {
         total_checked: existingNodes.filter((n) => n.type === "project" || n.type === "decision" || n.type === "process").length,
-        backfilled: attrBackfilled,
+        backfilled: attrBackfilled + decIssues.filter((i) => i.action === "backfilled").length,
         flagged: attrFlagged,
         issues: attrIssues,
       },
+      duplicate_clusters: { count: dupePairs.length, pairs: dupePairs },
+      decision_enrichment: decStats,
     };
   }
 
@@ -509,14 +969,28 @@ Be precise. Only ADD genuinely missing entities.`;
 
   // ---- Insert confirmed entities into graph ----
   if (confirmed.length > 0) {
-    const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+    const snapshot = await tc.input_snapshots.findOne(
+      snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+    );
     const allDocs = (snapshot?.parsed_documents ?? []) as KB2ParsedDocument[];
     const docByTitle = new Map<string, KB2ParsedDocument>();
-    for (const d of allDocs) docByTitle.set(d.title.toLowerCase(), d);
+    const docById = new Map<string, KB2ParsedDocument>();
+    for (const d of allDocs) {
+      docByTitle.set(d.title.toLowerCase(), d);
+      if (d.sourceId) docById.set(d.sourceId.toLowerCase(), d);
+    }
 
     const newNodes: KB2GraphNodeType[] = confirmed.map((c) => {
-      const matchedDoc = docByTitle.get(c.source_doc_title.toLowerCase());
-      const docId = matchedDoc?.sourceId ?? c.source_doc_title;
+      let matchedDoc = docById.get(c.source_doc_id?.toLowerCase() ?? "")
+        ?? docByTitle.get(c.source_doc_title.toLowerCase());
+      if (!matchedDoc) {
+        const needle = normalizeForMatch(c.source_doc_title);
+        for (const d of allDocs) {
+          const normTitle = normalizeForMatch(d.title);
+          if (normTitle.includes(needle) || needle.includes(normTitle)) { matchedDoc = d; break; }
+        }
+      }
+      const docId = matchedDoc?.sourceId ?? c.source_doc_id ?? c.source_doc_title;
       const sourceType = matchedDoc?.provider ?? c.source_provider;
       let section_heading: string | undefined;
       if (c.evidence_excerpt && matchedDoc?.sections?.length) {
@@ -528,6 +1002,7 @@ Be precise. Only ADD genuinely missing entities.`;
       return {
         node_id: randomUUID(),
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         type: c.type as any,
         display_name: c.display_name,
         aliases: c.aliases,
@@ -545,6 +1020,131 @@ Be precise. Only ADD genuinely missing entities.`;
     });
 
     await tc.graph_nodes.insertMany(newNodes);
+
+    // ---- Mini pass: run attribute layers on recovered entities ----
+    await ctx.onProgress(`Processing attributes for ${newNodes.length} recovered entities...`, 90);
+
+    const newNodeIds = new Set(newNodes.map((n) => n.node_id));
+    const freshNewNodes = (await tc.graph_nodes.find({ execution_id: ctx.executionId, node_id: { $in: [...newNodeIds] } }).toArray()) as unknown as KB2GraphNodeType[];
+
+    // Layer 0a heuristics
+    const { issues: newAttrIssues, updates: newAttrUpdates } = validateAndBackfillAttributes(freshNewNodes);
+    if (newAttrUpdates.size > 0) {
+      const ops = Array.from(newAttrUpdates.entries()).map(([nodeId, patch]) => ({
+        updateOne: {
+          filter: { node_id: nodeId, execution_id: ctx.executionId },
+          update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) },
+        },
+      }));
+      await tc.graph_nodes.bulkWrite(ops);
+    }
+    attrIssues.push(...newAttrIssues);
+
+    // Layer 0a-LLM inference
+    const newLLMTargets = collectLLMInferenceTargets(freshNewNodes, newAttrIssues);
+    if (newLLMTargets.length > 0) {
+      const crossCheckModel = getCrossCheckModel(ctx.config?.pipeline_settings?.models);
+      const systemPrompt = ctx.config?.prompts?.extraction_validation?.system_attr_inference ?? ATTRIBUTE_INFERENCE_PROMPT;
+
+      for (let batchStart = 0; batchStart < newLLMTargets.length; batchStart += ATTR_INFERENCE_BATCH_SIZE) {
+        const batch = newLLMTargets.slice(batchStart, batchStart + ATTR_INFERENCE_BATCH_SIZE);
+        const entitiesText = batch.map((t, i) => {
+          const missingFields: string[] = [];
+          if (t.type === "project" && !VALID_PROJECT_STATUS.has(t.existing_attrs?.status)) missingFields.push("status");
+          if (t.type === "decision") {
+            if (!t.existing_attrs?.rationale) missingFields.push("rationale");
+            if (!t.existing_attrs?.scope) missingFields.push("scope");
+            if (!t.existing_attrs?.decided_by) missingFields.push("decided_by");
+          }
+          if (t.type === "process") missingFields.push("status");
+          return `${i + 1}. "${t.display_name}" [type: ${t.type}] — missing: ${missingFields.join(", ")}\nExcerpts:\n${t.excerpts}`;
+        }).join("\n\n---\n\n");
+
+        const prompt = `Infer the missing attributes for these entities based on their source excerpts.\n\n${entitiesText}`;
+        try {
+          const startMs = Date.now();
+          let usageData: { promptTokens: number; completionTokens: number } | null = null;
+          const result = await structuredGenerate({
+            model: crossCheckModel, system: systemPrompt, prompt,
+            schema: AttributeInferenceSchema, logger,
+            onUsage: (usage) => { usageData = usage; },
+            signal: ctx.signal,
+          });
+          llmCalls++;
+
+          if (usageData) {
+            const durationMs = Date.now() - startMs;
+            const cost = calculateCostUsd(getCrossCheckModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+            ctx.logLLMCall(stepId, getCrossCheckModelName(ctx.config?.pipeline_settings?.models), prompt, JSON.stringify(result, null, 2), usageData.promptTokens, usageData.completionTokens, cost, durationMs);
+          }
+
+          const resultMap = new Map<string, (typeof result.entities)[number]>();
+          for (const e of result.entities ?? []) resultMap.set(e.display_name.toLowerCase().trim(), e);
+
+          const llmBulkOps: any[] = [];
+          for (const target of batch) {
+            const inferred = resultMap.get(target.display_name.toLowerCase().trim());
+            if (!inferred) continue;
+            const patch: Record<string, any> = { _status_reasoning: inferred.reasoning };
+            if (target.type === "project" && inferred.status) {
+              const normalizedStatus = inferred.status === "planned" ? "proposed" : inferred.status;
+              if (VALID_PROJECT_STATUS.has(normalizedStatus)) {
+                patch.status = normalizedStatus;
+                attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "status", action: "backfilled", value: normalizedStatus, reason: `LLM-inferred (recovered): ${inferred.reasoning}` });
+              }
+            }
+            if (target.type === "decision") {
+              if (inferred.rationale) { patch.rationale = inferred.rationale; attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "rationale", action: "backfilled", value: inferred.rationale, reason: `LLM-inferred (recovered): ${inferred.reasoning}` }); }
+              if (inferred.scope) { patch.scope = inferred.scope; attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "scope", action: "backfilled", value: inferred.scope, reason: `LLM-inferred (recovered): ${inferred.reasoning}` }); }
+              if (inferred.decided_by) { patch.decided_by = inferred.decided_by; attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "decided_by", action: "backfilled", value: inferred.decided_by, reason: `LLM-inferred (recovered): ${inferred.reasoning}` }); }
+            }
+            if (target.type === "process" && inferred.status && VALID_PROCESS_STATUS.has(inferred.status)) {
+              patch.status = inferred.status;
+              attrIssues.push({ node_id: target.node_id, display_name: target.display_name, field: "status", action: "backfilled", value: inferred.status, reason: `LLM-inferred (recovered): ${inferred.reasoning}` });
+            }
+            if (Object.keys(patch).length > 0) {
+              llmBulkOps.push({ updateOne: { filter: { node_id: target.node_id, execution_id: ctx.executionId }, update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) } } });
+            }
+          }
+          if (llmBulkOps.length > 0) await tc.graph_nodes.bulkWrite(llmBulkOps);
+        } catch (err) {
+          logger.log(`Attribute inference for recovered entities batch failed (non-fatal): ${err}`);
+        }
+      }
+    }
+
+    // Layer 0b duplicates (recovered vs all)
+    const allNodesForDupes = [...existingNodes, ...freshNewNodes];
+    const { pairs: newDupePairs, updates: newDupeUpdates } = tagDuplicateClusters(allNodesForDupes);
+    if (newDupeUpdates.size > 0) {
+      const dupeOps = Array.from(newDupeUpdates.entries())
+        .filter(([nodeId]) => newNodeIds.has(nodeId))
+        .map(([nodeId, dupes]) => ({
+          updateOne: { filter: { node_id: nodeId, execution_id: ctx.executionId }, update: { $set: { "attributes._likely_duplicates": dupes } } },
+        }));
+      if (dupeOps.length > 0) await tc.graph_nodes.bulkWrite(dupeOps);
+    }
+    dupePairs.push(...newDupePairs.filter(([a, b]) => {
+      const aIsNew = freshNewNodes.some((n) => n.display_name === a);
+      const bIsNew = freshNewNodes.some((n) => n.display_name === b);
+      return aIsNew || bIsNew;
+    }));
+
+    // Layer 0c decision enrichment (recovered decisions only)
+    const newDecisions = freshNewNodes.filter((n) => n.type === "decision");
+    if (newDecisions.length > 0) {
+      const allForDecEnrich = [...existingNodes, ...freshNewNodes];
+      const { issues: newDecIssues, updates: newDecUpdates } = enrichDecisionLinks(allForDecEnrich);
+      const relevantDecOps = Array.from(newDecUpdates.entries())
+        .filter(([nodeId]) => newNodeIds.has(nodeId))
+        .map(([nodeId, patch]) => ({
+          updateOne: { filter: { node_id: nodeId, execution_id: ctx.executionId }, update: { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`attributes.${k}`, v])) } },
+        }));
+      if (relevantDecOps.length > 0) await tc.graph_nodes.bulkWrite(relevantDecOps);
+      attrIssues.push(...newDecIssues.filter((i) => newNodeIds.has(i.node_id)));
+    }
+
+    await ctx.onProgress(`Recovered entity attributes processed`, 95);
   }
 
   const finalCount = existingNodes.length + confirmed.length;
@@ -571,9 +1171,11 @@ Be precise. Only ADD genuinely missing entities.`;
     })),
     attribute_validation: {
       total_checked: existingNodes.filter((n) => n.type === "project" || n.type === "decision" || n.type === "process").length,
-      backfilled: attrBackfilled,
+      backfilled: attrBackfilled + decIssues.filter((i) => i.action === "backfilled").length,
       flagged: attrFlagged,
       issues: attrIssues,
     },
+    duplicate_clusters: { count: dupePairs.length, pairs: dupePairs },
+    decision_enrichment: decStats,
   };
 };

@@ -90,11 +90,11 @@ Jira prefix: \${project_prefix}
 - library: A dependency/package/framework with version info (React 18, Django 4.2)
 - database: A data store with schema (PostgreSQL database, MongoDB, Redis-as-datastore)
 - environment: A deployment environment (dev, staging, production)
-- project: A feature initiative or body of work with timeline. MUST include attributes.status (one of: "active", "completed", "proposed", "planned") and attributes.documentation_level (one of: "documented" if it has Confluence/wiki docs, "undocumented" if only mentioned in Slack/PRs/code). When a larger project has named sub-features or phases, extract BOTH the parent project AND each sub-feature as separate project entities.
+- project: A feature initiative or body of work with timeline. MUST include attributes.status (one of: "active", "completed", "proposed") and attributes.documentation_level (one of: "documented" if it has Confluence/wiki docs, "undocumented" if only mentioned in Slack/PRs/code). When a larger project has named sub-features or phases, extract BOTH the parent project AND each sub-feature as separate project entities.
 - ticket: A Jira/issue tracker item — bug, story, task
 - pull_request: A GitHub/GitLab pull request or merge request
 - decision: An architecture decision, technology choice, or design tradeoff — explicit or implicit. Look for: "we decided to...", "we chose X over Y", "the tradeoff was...", "we went with...", alternatives discussed in PR reviews, Slack debates that concluded with a choice. MUST include attributes: attributes.decision_status (one of: "decided", "pending", "superseded", "reversed"), attributes.rationale (why this choice was made, 1-2 sentences), attributes.alternatives_considered (what was rejected, array of strings, can be empty), attributes.scope (what this decision affects, e.g. "authentication", "database", "deployment"). SHOULD include if present: attributes.decided_by (person or team who made the call), attributes.consequences (known tradeoffs or accepted downsides), attributes.superseded_by (name of the decision that replaced this one, if reversed/superseded).
-- process: A repeatable workflow, procedure, or practice the team follows — formal or informal. Look for: "our process for...", "how we do...", runbooks, on-call procedures, release checklists, code review norms, incident response steps, onboarding steps. MUST include attributes: attributes.process_status (one of: "active", "deprecated", "proposed", "informal"), attributes.documentation_level (one of: "documented", "undocumented" — same logic as project). SHOULD include if present: attributes.owner (person or team responsible), attributes.trigger (what initiates this process, e.g. "new PR", "incident alert", "new hire"), attributes.steps_summary (brief ordered list of key steps).
+- process: A repeatable workflow, procedure, or practice the team follows — formal or informal. Look for: "our process for...", "how we do...", runbooks, on-call procedures, release checklists, code review norms, incident response steps, onboarding steps. MUST include attributes: attributes.status (one of: "active", "deprecated", "proposed", "informal"), attributes.documentation_level (one of: "documented", "undocumented" — same logic as project). SHOULD include if present: attributes.owner (person or team responsible), attributes.trigger (what initiates this process, e.g. "new PR", "incident alert", "new hire"), attributes.steps_summary (brief ordered list of key steps).
 - pipeline: A CI/CD pipeline or automation workflow (GitHub Actions ci.yml, deploy.yml). This is an AUTOMATED workflow, not a human process.
 - customer_feedback: A customer service ticket or feedback item from Zendesk/support systems (CFB-xxxx). NOT a Jira ticket.
 
@@ -178,7 +178,10 @@ Extract every distinct named feature, initiative, phase, or body of work as its 
 export const entityExtractionStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-entity-extraction");
   const tc = getTenantCollections(ctx.companySlug);
-  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
@@ -357,6 +360,7 @@ export const entityExtractionStep: StepFunction = async (ctx) => {
       nodeMap.set(key, {
         node_id: randomUUID(),
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         type: normalizedType,
         display_name: entity.display_name,
         aliases,
@@ -370,7 +374,6 @@ export const entityExtractionStep: StepFunction = async (ctx) => {
 
   const nodes = Array.from(nodeMap.values());
   if (nodes.length > 0) {
-    await tc.graph_nodes.deleteMany({ run_id: ctx.runId });
     await tc.graph_nodes.insertMany(nodes);
   }
 

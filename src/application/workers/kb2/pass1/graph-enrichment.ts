@@ -21,8 +21,12 @@ export const graphEnrichmentStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-graph-enrichment");
   const BATCH_SIZE = ctx.config?.pipeline_settings?.graph_enrichment?.batch_size ?? 15;
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
+  const nodesExecId = await ctx.getStepExecutionId("pass1", 5);
+  const nodesFilter = nodesExecId ? { execution_id: nodesExecId } : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+  const edgesExecId = await ctx.getStepExecutionId("pass1", 6);
+  const edgesFilter = edgesExecId ? { execution_id: edgesExecId } : { run_id: ctx.runId };
+  const edges = (await tc.graph_edges.find(edgesFilter).toArray()) as unknown as KB2GraphEdgeType[];
 
   if (nodes.length === 0) throw new Error("No graph nodes found — run step 3 first");
 
@@ -136,6 +140,7 @@ Rules:
       const newEdge: KB2GraphEdgeType = {
         edge_id: randomUUID(),
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         source_node_id: srcNode.node_id,
         target_node_id: tgtNode.node_id,
         type: rel.type,

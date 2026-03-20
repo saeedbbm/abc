@@ -10,6 +10,22 @@ export const finalizeStep: StepFunction = async (ctx) => {
     throw new Error(`Run document not found for run_id=${ctx.runId}. Cannot finalize.`);
   }
 
+  const nodesExecId = await ctx.getStepExecutionId("pass1", 5);
+  const edgesExecId = await ctx.getStepExecutionId("pass1", 6);
+  const epExecId = await ctx.getStepExecutionId("pass1", 11);
+  const hpExecId = await ctx.getStepExecutionId("pass1", 12);
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const cardsExecId = await ctx.getStepExecutionId("pass1", 15);
+  const fgExecId = await ctx.getStepExecutionId("pass2", 1);
+
+  const nf = nodesExecId ? { execution_id: nodesExecId } : { run_id: ctx.runId };
+  const edf = edgesExecId ? { execution_id: edgesExecId } : { run_id: ctx.runId };
+  const epf = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const hpf = hpExecId ? { execution_id: hpExecId } : { run_id: ctx.runId };
+  const clf = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
+  const vcf = cardsExecId ? { execution_id: cardsExecId } : { run_id: ctx.runId };
+  const fgf = fgExecId ? { execution_id: fgExecId } : { run_id: ctx.runId };
+
   const [
     nodeCount,
     edgeCount,
@@ -21,15 +37,15 @@ export const finalizeStep: StepFunction = async (ctx) => {
     claims,
     verifyCards,
   ] = await Promise.all([
-    tc.graph_nodes.countDocuments({ run_id: ctx.runId }),
-    tc.graph_edges.countDocuments({ run_id: ctx.runId }),
-    tc.entity_pages.countDocuments({ run_id: ctx.runId }),
-    tc.human_pages.countDocuments({ run_id: ctx.runId }),
-    tc.claims.countDocuments({ run_id: ctx.runId }),
-    tc.verification_cards.countDocuments({ run_id: ctx.runId }),
-    tc.fact_groups.find({ run_id: ctx.runId }).toArray(),
-    tc.claims.find({ run_id: ctx.runId }).toArray(),
-    tc.verification_cards.find({ run_id: ctx.runId }).toArray(),
+    tc.graph_nodes.countDocuments(nf),
+    tc.graph_edges.countDocuments(edf),
+    tc.entity_pages.countDocuments(epf),
+    tc.human_pages.countDocuments(hpf),
+    tc.claims.countDocuments(clf),
+    tc.verification_cards.countDocuments(vcf),
+    tc.fact_groups.find(fgf).toArray(),
+    tc.claims.find(clf).toArray(),
+    tc.verification_cards.find(vcf).toArray(),
   ]);
 
   const factGroupCounts = {

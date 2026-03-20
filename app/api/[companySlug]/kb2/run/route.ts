@@ -50,8 +50,11 @@ export async function POST(
         step: step ? Number(step) : undefined,
         fromStep: fromStep ? Number(fromStep) : undefined,
         reuseRunId,
-        onProgress: async (detail, percent) => {
-          await send({ type: "progress", detail, percent });
+        onProgress: async (detail, percent, stepPercent?, stepId?) => {
+          await send({ type: "progress", detail, percent, step_percent: stepPercent, step_id: stepId });
+        },
+        onStepLifecycle: async (type, data) => {
+          await send({ type, ...data });
         },
       });
 

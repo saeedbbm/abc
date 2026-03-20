@@ -1,0 +1,636 @@
+================================================================================
+GROUND TRUTH — SECTION A: PROJECTS
+================================================================================
+
+Every distinct project, initiative, or body of work that was planned, built,
+or proposed — whether formally tracked or not. Derived exclusively from the
+synthetic input data in input-human-format/.
+
+Total project count: 21
+
+
+================================================================================
+PROJECT 1: PawFinder Website Redesign
+================================================================================
+
+Canonical name:   PawFinder Website Redesign
+Alternate names:  "website redesign" (Slack), "PawFinder website redesign —
+                  phase 2" (PAW-16), "site refresh" (Kim in Slack #general
+                  2023-01-09), "redesign" (various)
+Status:           active
+  Proof:          Confluence doc "PawFinder Website Redesign" shows Phase 4
+                  as "IN PROGRESS". PAW-16 (Epic) is "In Progress". PAW-19
+                  (mobile responsiveness) resolved 2025-08-20, but Phase 4
+                  still listed as in progress in Confluence.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign"
+  Jira:           YES — PAW-16 (Epic, sub-tickets: PAW-15, PAW-17, PAW-18,
+                  PAW-19). Additionally related tickets not formally linked
+                  as sub-tickets: PAW-2, PAW-3, PAW-4, PAW-6, PAW-9, PAW-11,
+                  PAW-30
+  GitHub:         YES — PRs #18, #31, #43, #47, #61 (all part of redesign phases)
+  Slack:          YES — #general 2023-01-09 (Kim mentions site refresh),
+                  #general 2023-01-17 (Q1 priorities), #design 2024-06-10
+                  (Kim on redesign progress), many others
+  Webform:        NO
+
+Category:         ongoing_documented
+
+Notes:            This is the umbrella project. Phases 1-3 are completed,
+                  Phase 4 (Mobile and Polish) is active. Contains multiple
+                  sub-projects listed separately below.
+
+
+================================================================================
+PROJECT 2: Pet Profiles and Browse Page
+================================================================================
+
+Canonical name:   Pet Profiles and Browse Page
+Alternate names:  "Pet profile pages" (Sarah in Slack), "pet profile cards"
+                  (PAW-2, PR #18), "pet browse page" (PAW-4), "browse page"
+                  (various Slack), "Phase 1" of Website Redesign
+Status:           completed
+  Proof:          PAW-2 Done (2023-03-20), PAW-3 Done (2023-03-15),
+                  PAW-4 Done (2023-04-02). PR #18 merged 2023-04-02.
+                  Confluence redesign doc Phase 1 marked COMPLETE.
+                  Slack #general 2023-04-18 "Beta is LIVE!"
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Phase 1 section
+  Jira:           YES — PAW-2, PAW-3, PAW-4
+  GitHub:         YES — PR #18 (pet profile cards)
+  Slack:          YES — #general 2023-01-17 (priorities), #design 2023-03-14
+                  (Kim designing cards), #general 2023-04-03 (standup),
+                  #general 2023-04-18 (beta launch)
+  Webform:        NO
+
+Category:         past_documented
+
+
+================================================================================
+PROJECT 3: Pet Categories Page
+================================================================================
+
+Canonical name:   Pet Categories Page
+Alternate names:  "Pet categories page — frontend layout" (PAW-6),
+                  "pet categories page" (Tim in Slack)
+Status:           completed
+  Proof:          PAW-6 Done (2023-04-14).
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-6
+  GitHub:         NO (no PR in the data explicitly for this page)
+  Slack:          YES — #engineering 2023-03-21 (Tim discusses layout with Matt)
+  Webform:        NO
+
+Category:         past_undocumented
+
+Notes:            Tim built this. His Slack discussion about vertical left menu
+                  for category selection is key evidence for his layout pattern.
+                  No Confluence doc covers this page specifically (the redesign
+                  doc does not mention it).
+
+
+================================================================================
+PROJECT 4: Pet Adoption Chooser
+================================================================================
+
+Canonical name:   Pet Adoption Chooser
+Alternate names:  "adoption chooser page" (Slack, PR #23), "Choose a Pet to
+                  Adopt" (PR #23 description), "Build adoption chooser page"
+                  (PAW-8)
+Status:           completed
+  Proof:          PAW-8 Done (2023-07-28). PR #23 merged 2023-07-28.
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-8
+  GitHub:         YES — PR #23 (Matt, merged 2023-07-28)
+  Slack:          YES — #engineering 2023-07-19 (Matt says he's building it)
+  Webform:        NO
+
+Category:         past_undocumented
+
+Notes:            This is the key undocumented past project. Matt built it
+                  end-to-end. No Confluence doc exists. PR #23 contains the
+                  primary evidence of Matt's client-side browse pattern (loads
+                  all pets on mount, client-side next/prev navigation).
+
+
+================================================================================
+PROJECT 5: Shelter Locations Page
+================================================================================
+
+Canonical name:   Shelter Locations Page
+Alternate names:  "shelter locations" (various), "Build shelter locations page"
+                  (PAW-9), "Shelter locations page — design" (PAW-11),
+                  "Phase 2" of Website Redesign (shelter pages)
+Status:           completed
+  Proof:          PAW-9 Done (2023-09-25), PAW-11 Done (2023-10-05).
+                  PR #31 merged 2023-09-25. Confluence redesign doc Phase 2
+                  marked COMPLETE.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Phase 2 section
+  Jira:           YES — PAW-9, PAW-11
+  GitHub:         YES — PR #31 (Tim, merged 2023-09-25)
+  Slack:          YES — #design 2023-10-02 (Kim on location card design)
+  Webform:        NO
+
+Category:         past_documented
+
+
+================================================================================
+PROJECT 6: Shelter Comparison Feature
+================================================================================
+
+Canonical name:   Shelter Comparison Feature
+Alternate names:  "shelter comparison" (various), "Build shelter comparison
+                  page" (PAW-17), "Shelter comparison feature" (PR #43),
+                  part of "Phase 3" of Website Redesign
+Status:           completed
+  Proof:          PAW-17 Done (2024-07-22). PR #43 merged 2024-07-22.
+                  Confluence redesign doc Phase 3 marked COMPLETE.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Phase 3 section
+  Jira:           YES — PAW-17
+  GitHub:         YES — PR #43 (Jill, reviewed by Tim and Matt)
+  Slack:          YES — #engineering 2024-05-13 (Tim discusses horizontal
+                  layout), #design 2024-06-10 (Kim on comparison mockups),
+                  #general 2024-09-16 (almost done)
+  Webform:        NO
+
+Category:         past_documented
+
+Notes:            Tim's layout pattern is visible here — he chose horizontal
+                  columns for the comparison view. Kim maintained pink/blue
+                  accents on pet cards within the comparison view.
+
+
+================================================================================
+PROJECT 7: Donation Page
+================================================================================
+
+Canonical name:   Donation Page
+Alternate names:  "Build donation page" (PAW-15), "Donation page frontend"
+                  (PR #47), "donations feature" (Slack), part of "Phase 3"
+                  of Website Redesign
+Status:           completed
+  Proof:          PAW-15 Done (2024-04-05). PR #47 merged 2024-04-05.
+                  Confluence redesign doc Phase 3 marked COMPLETE.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Phase 3 section
+  Jira:           YES — PAW-15
+  GitHub:         YES — PR #47 (Tim, reviewed by Matt)
+  Slack:          YES — #design 2024-02-19 (Kim discusses donation page
+                  design with Sarah)
+  Webform:        NO
+
+Category:         past_documented
+
+Notes:            This is monetary donations only (dollars), not toy donations.
+                  Kim's color pattern is visible: green donate button, white
+                  payment section, pink/blue pet dedication cards.
+                  Matt's client-side browse pattern is visible: review comment
+                  tells Tim to load pet list once on mount.
+
+
+================================================================================
+PROJECT 8: Contact Form Page
+================================================================================
+
+Canonical name:   Contact Form Page
+Alternate names:  "Build contact form page" (PAW-14), "Contact form page"
+                  (PR #39)
+Status:           completed
+  Proof:          PAW-14 Done (2024-06-14). PR #39 merged 2024-06-14.
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-14
+  GitHub:         YES — PR #39 (Jill, reviewed by Tim)
+  Slack:          NO (no discussion of this page in Slack data)
+  Webform:        NO
+
+Category:         past_undocumented
+
+Notes:            Jill's first solo ticket. Tim reviewed and gave feedback
+                  on email validation and component reuse (Toast component).
+
+
+================================================================================
+PROJECT 9: Volunteer Portal
+================================================================================
+
+Canonical name:   Volunteer Portal
+Alternate names:  "Volunteer portal MVP" (roadmap), "Volunteer portal —
+                  backend API" (PAW-20), "Volunteer portal — frontend"
+                  (PAW-21), "Volunteer Portal Product Spec" (Confluence)
+Status:           completed
+  Proof:          PAW-20 Done (2024-10-08), PAW-21 Done (2024-10-28).
+                  PR #52 merged 2024-10-08, PR #55 merged 2024-10-28.
+                  Slack #general 2025-07-14 "Volunteer portal launched
+                  last month".
+
+Sources:
+  Confluence:     YES — "Volunteer Portal Product Spec"
+  Jira:           YES — PAW-20, PAW-21
+  GitHub:         YES — PR #52 (Jack, backend), PR #55 (Jill, frontend)
+  Slack:          YES — #general 2024-09-16 (Q4 planning), #engineering
+                  2024-10-07 (Jill on form layout), #engineering 2024-11-04
+                  (Jack on shifts endpoint), #general 2025-01-06 (almost done),
+                  #general 2025-07-14 (launched)
+  Webform:        NO
+
+Category:         past_documented
+
+Notes:            Both Tim's layout pattern (PR #55: Tim tells Jill to switch
+                  shelter selector from tabs to vertical left nav) and Matt's
+                  client-side browse pattern (PR #52 review: "15 shifts is
+                  nothing"; PR #55 review: approves loading all shifts at once)
+                  are visible in this project.
+
+
+================================================================================
+PROJECT 10: Shelter Events Browser
+================================================================================
+
+Canonical name:   Shelter Events Browser
+Alternate names:  "Build shelter events browser page" (PAW-34),
+                  "Shelter events browser" (PR #49)
+Status:           completed
+  Proof:          PAW-34 Done (2024-08-19). PR #49 merged 2024-08-19.
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-34
+  GitHub:         YES — PR #49 (Jack, reviewed by Matt)
+  Slack:          NO (no direct discussion; date format question in
+                  #engineering 2024-08-19 is tangentially related)
+  Webform:        NO
+
+Category:         past_undocumented
+
+Notes:            This PR contains the critical evidence for Matt's client-side
+                  browse pattern — Jack originally built it with per-click
+                  server calls, Matt told him to load everything upfront.
+
+
+================================================================================
+PROJECT 11: Site Navigation Improvements
+================================================================================
+
+Canonical name:   Site Navigation Improvements
+Alternate names:  "Site navigation improvements" (PAW-18), "Navigation
+                  consistency" (Q3 2024 roadmap in Confluence),
+                  "nav patterns" (PAW-18 description)
+Status:           active
+  Proof:          PAW-18 status "In Progress". Q3 2024 roadmap mentions it
+                  as ongoing. No resolved date.
+
+Sources:
+  Confluence:     NO (mentioned in Q3 2024 roadmap as having "No formal
+                  project doc", but no dedicated Confluence page)
+  Jira:           YES — PAW-18
+  GitHub:         YES — Tim's review comments on PR #43 (comparison layout)
+                  and PR #55 (shift browser layout) are related work
+  Slack:          YES — #engineering 2023-03-21 (categories layout),
+                  #engineering 2024-05-13 (comparison layout),
+                  #engineering 2025-02-17 (resource library layout)
+  Webform:        NO
+
+Category:         ongoing_undocumented
+
+Notes:            This is the undocumented ongoing project. Tim is the sole
+                  driver. No Confluence doc exists for it. Its existence must
+                  be pieced together from PAW-18, Tim's Slack messages about
+                  layout decisions on specific pages, and his PR review
+                  comments. The Q3 2024 roadmap is the only Confluence mention
+                  and it explicitly says there is no project doc.
+
+
+================================================================================
+PROJECT 12: Mobile Responsiveness
+================================================================================
+
+Canonical name:   Mobile Responsiveness
+Alternate names:  "Mobile responsiveness — phase 1" (PAW-19), "Mobile nav
+                  refactor" (PAW-30, PR #61), "mobile improvements" (Slack),
+                  "Phase 4" of Website Redesign
+Status:           active
+  Proof:          PAW-19 Done (2025-08-20) but PAW-30 Done (2025-08-20) —
+                  however, Confluence redesign doc Phase 4 still says
+                  "IN PROGRESS". Slack #general 2025-12-01 mentions "mobile
+                  improvements are rolling out" suggesting work continues.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Phase 4 section
+  Jira:           YES — PAW-19, PAW-30
+  GitHub:         YES — PR #61 (Jill, mobile nav refactor)
+  Slack:          YES — #general 2025-01-06 (priorities), #engineering
+                  2025-08-18 (Jill fixes mobile issues), #general 2025-12-01
+                  (still rolling out)
+  Webform:        NO
+
+Category:         ongoing_documented
+
+Notes:            Kim is doing mobile mockups. Jill is implementing. Some
+                  tickets are done (PAW-19, PAW-30) but the overall phase
+                  is still active per Confluence.
+
+
+================================================================================
+PROJECT 13: Supply Tracking
+================================================================================
+
+Canonical name:   Supply Tracking
+Alternate names:  "Supply tracking — backend" (PAW-23), "Supply tracking —
+                  frontend" (PAW-24), "Supply tracking backend" (PR #58),
+                  "supply tracking feature" (Jack in Slack)
+Status:           active
+  Proof:          PAW-23 (backend) Done (2025-07-02). PAW-24 (frontend)
+                  "In Progress". PR #58 merged 2025-07-02. Frontend not
+                  yet shipped.
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-23, PAW-24
+  GitHub:         YES — PR #58 (Jack, backend)
+  Slack:          YES — #engineering 2025-06-09 (Jack working on it,
+                  team discussing frontend layout)
+  Webform:        NO
+
+Category:         ongoing_undocumented
+
+Notes:            Backend is done, frontend is in progress. Matt accepted
+                  Jack's pagination decision for 30-40 items (PR #58) —
+                  this is the boundary case where Matt did NOT push for
+                  load-all, which helps define the limits of his pattern.
+
+
+================================================================================
+PROJECT 14: Supply Orders
+================================================================================
+
+Canonical name:   Supply Orders
+Alternate names:  "Supply orders feature — backend" (PAW-32),
+                  "supply orders" (Slack)
+Status:           active
+  Proof:          PAW-32 "In Progress". Slack #general 2025-12-01 Jack says
+                  "supply orders backend is done, just needs review" but
+                  Jira still says In Progress.
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-32
+  GitHub:         NO (no PR in the data for this feature)
+  Slack:          YES — #engineering 2025-11-10 (Jack asks Matt about API
+                  versioning for supply orders), #general 2025-12-01 (done,
+                  needs review)
+  Webform:        NO
+
+Category:         ongoing_undocumented
+
+
+================================================================================
+PROJECT 15: Event Calendar for Shelter Pages
+================================================================================
+
+Canonical name:   Event Calendar for Shelter Pages
+Alternate names:  "Add event calendar to shelter pages" (PAW-31),
+                  "events calendar endpoint" (Jack in Slack)
+Status:           active
+  Proof:          PAW-31 "In Progress".
+
+Sources:
+  Confluence:     NO
+  Jira:           YES — PAW-31
+  GitHub:         NO (no PR in data specifically for the calendar; PR #49
+                  is the events browser, a related but separate feature)
+  Slack:          YES — #engineering 2024-08-19 (Jack asks about date format
+                  normalization for events endpoint)
+  Webform:        NO
+
+Category:         ongoing_undocumented
+
+Notes:            PAW-31 says Jack builds API, Jill builds frontend. Distinct
+                  from the Shelter Events Browser (PAW-34/PR #49) which is
+                  a completed, separate page.
+
+
+================================================================================
+PROJECT 16: CI/CD Pipeline
+================================================================================
+
+Canonical name:   CI/CD Pipeline Setup
+Alternate names:  "Set up CI/CD pipeline" (PAW-1)
+Status:           completed
+  Proof:          PAW-1 Done (2023-01-18).
+
+Sources:
+  Confluence:     YES — mentioned in "PawFinder Engineering Onboarding Guide"
+                  (CI/CD handles deployment to staging)
+  Jira:           YES — PAW-1
+  GitHub:         NO
+  Slack:          NO
+  Webform:        NO
+
+Category:         past_documented (referenced in onboarding guide)
+
+
+================================================================================
+PROJECT 17: API Response Standardization
+================================================================================
+
+Canonical name:   API Response Standardization
+Alternate names:  "Standardize shelter API response format" (PAW-7, PR #27),
+                  "response shape" (Matt in Slack)
+Status:           completed
+  Proof:          PAW-7 Done (2023-05-19). PR #27 merged 2023-05-19.
+
+Sources:
+  Confluence:     YES — onboarding guide documents the { data: T, meta: ... }
+                  envelope format as the standard
+  Jira:           YES — PAW-7
+  GitHub:         YES — PR #27 (Matt)
+  Slack:          YES — #engineering 2023-05-10 (Matt announces refactor)
+  Webform:        NO
+
+Category:         past_documented
+
+
+================================================================================
+PROJECT 18: Shelter Partner Integration
+================================================================================
+
+Canonical name:   Shelter Partner Integration
+Alternate names:  "Shelter Partner Integration Spec" (Confluence)
+Status:           completed (initial implementation; future plans listed)
+  Proof:          Confluence doc exists as a technical spec. No Jira ticket
+                  in the data specifically for the initial build. The sync
+                  process described is operational.
+
+Sources:
+  Confluence:     YES — "Shelter Partner Integration Spec"
+  Jira:           NO (no ticket in the data for initial build)
+  GitHub:         NO
+  Slack:          NO
+  Webform:        NO
+
+Category:         past_documented
+
+Notes:            The Confluence doc mentions future plans (webhooks, bulk API,
+                  PetSync standard) that are not yet built. 12 partner shelters
+                  across 3 states as of last update.
+
+
+================================================================================
+PROJECT 19: Toy Donation Feature
+================================================================================
+
+Canonical name:   Toy Donation Feature
+Alternate names:  "donating toys" (webform #1), "donation question" (webform
+                  #2), "toys for shelter pets" (webform #3)
+Status:           proposed
+  Proof:          Three separate customer feedback submissions requesting this
+                  feature. No Jira ticket, no Slack discussion, no PR, no
+                  Confluence doc exists for it.
+
+Sources:
+  Confluence:     NO
+  Jira:           NO
+  GitHub:         NO
+  Slack:          NO (Sarah mentions customer feedback in #general 2025-10-06
+                  but does not name the specific requests)
+  Webform:        YES — Submission #1 (2024-06-03), Submission #2 (2024-11-19),
+                  Submission #3 (2025-03-22)
+
+Category:         proposed
+
+Notes:            This is the feature the AI system should propose. It does
+                  NOT exist in any form in the codebase. The existing monetary
+                  donation page (Project 7) is for donating dollars, not toys.
+                  The three customer requests ask for the ability to buy/donate
+                  toys to specific shelter animals. The AI should synthesize
+                  implementation guidance from the three discovered patterns
+                  (Kim's colors, Tim's layout, Matt's client-side browse).
+
+
+================================================================================
+PROJECT 20: Volunteer Hours Tracking
+================================================================================
+
+Canonical name:   Volunteer Hours Tracking
+Alternate names:  "volunteer hours tracking API" (Matt in Slack 2025-04-14)
+Status:           active
+  Proof:          Slack #engineering 2025-04-14: Matt says "Jack has a PR
+                  coming for the volunteer hours tracking API." No PR in the
+                  data yet, but work is in flight.
+
+Sources:
+  Confluence:     NO
+  Jira:           NO (no ticket in the data)
+  GitHub:         NO (PR not yet submitted as of the data cutoff)
+  Slack:          YES — #engineering 2025-04-14 (Matt mentions Jack's
+                  upcoming PR)
+  Webform:        YES — Submission #6 (Mike Nguyen, 2025-08-14) asks for
+                  downloadable volunteer hours report
+
+Category:         ongoing_undocumented
+
+Notes:            This is in-flight work that aligns with customer feedback
+                  submission #6 (volunteer hours export request). The volunteer
+                  portal dashboard already shows "basic stats (total hours
+                  volunteered)" per the Confluence spec, but an API for
+                  tracking/exporting hours is being built separately.
+
+
+================================================================================
+PROJECT 21: Website Redesign — Future Considerations
+================================================================================
+
+Canonical name:   Website Redesign — Future Considerations
+Alternate names:  "Dark mode", "Accessibility audit", "Animation/motion design"
+Status:           proposed
+  Proof:          Listed in the "Future Considerations" section of the
+                  Confluence "PawFinder Website Redesign" doc.
+
+Sources:
+  Confluence:     YES — "PawFinder Website Redesign" Future Considerations
+                  section lists:
+                  - Dark mode (requested by a few users, low priority for now)
+                  - Accessibility audit
+                  - Animation/motion design for page transitions
+  Jira:           NO
+  GitHub:         NO
+  Slack:          NO
+  Webform:        NO
+
+Category:         proposed
+
+Notes:            These are explicitly listed as future work in the redesign
+                  doc but have no Jira tickets, no assigned owners, and no
+                  timeline. They are lower priority than the current Phase 4
+                  mobile work.
+
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+#   Canonical Name                  Status      Category
+--  ------------------------------  ----------  ----------------------
+1   PawFinder Website Redesign      active      ongoing_documented
+2   Pet Profiles and Browse Page    completed   past_documented
+3   Pet Categories Page             completed   past_undocumented
+4   Pet Adoption Chooser            completed   past_undocumented
+5   Shelter Locations Page          completed   past_documented
+6   Shelter Comparison Feature      completed   past_documented
+7   Donation Page                   completed   past_documented
+8   Contact Form Page               completed   past_undocumented
+9   Volunteer Portal                completed   past_documented
+10  Shelter Events Browser          completed   past_undocumented
+11  Site Navigation Improvements    active      ongoing_undocumented
+12  Mobile Responsiveness           active      ongoing_documented
+13  Supply Tracking                 active      ongoing_undocumented
+14  Supply Orders                   active      ongoing_undocumented
+15  Event Calendar for Shelter Pages active      ongoing_undocumented
+16  CI/CD Pipeline Setup            completed   past_documented
+17  API Response Standardization    completed   past_documented
+18  Shelter Partner Integration     completed   past_documented
+19  Toy Donation Feature            proposed    proposed
+20  Volunteer Hours Tracking        active      ongoing_undocumented
+21  Redesign Future Considerations  proposed    proposed
+
+Counts by category:
+  past_documented:        8  (#2, #5, #6, #7, #9, #16, #17, #18)
+  past_undocumented:      4  (#3, #4, #8, #10)
+  ongoing_documented:     2  (#1, #12)
+  ongoing_undocumented:   5  (#11, #13, #14, #15, #20)
+  proposed:               2  (#19, #21)
+
+
+================================================================================
+ADDITIONAL SMALL ITEMS (not full projects)
+================================================================================
+
+These are standalone tasks/bugs that are not projects in their own right but
+exist in the data:
+
+- Auth token refresh bug fix (PAW-5, PR #12) — one-off bug fix
+- Flaky CI tests fix (PAW-10) — one-off bug fix
+- Update about page copy (PAW-12) — content task
+- Fix broken shelter links (PAW-22) — one-off bug fix
+- Fix pet card image fallback (PAW-26, PR #65) — one-off bug fix
+- Investigate slow shelter locations page (PAW-27) — backlog investigation
+- Update onboarding docs (PAW-28) — documentation task
+- Database migration postmortem (PAW-29) — incident response
+- Quarterly dependency updates (PAW-25, PR #63) — maintenance
+- Shelter info API endpoint (PAW-13, PR #35) — Jack's first ticket, part of
+  shelter pages work but listed as standalone
+- 2026 roadmap planning (PAW-33) — planning task, backlog
+================================================================================

@@ -60,6 +60,13 @@ interface CandidatePair {
   ambiguous?: boolean;
 }
 
+const CROSS_TYPE_PAIRS: [string, string][] = [
+  ["project", "decision"],
+  ["project", "process"],
+];
+
+const CROSS_TYPE_SIMILARITY_THRESHOLD = 0.5;
+
 const MergeDecisionSchema = z.object({
   decisions: z.array(z.object({
     entity_a: z.string(),
@@ -67,6 +74,7 @@ const MergeDecisionSchema = z.object({
     should_merge: z.boolean(),
     unsure: z.boolean().optional().describe("Set true if you cannot confidently decide"),
     canonical_name: z.string().optional(),
+    canonical_type: z.string().optional().describe("For cross-type pairs: the correct entity type after merging"),
     reason: z.string(),
   })),
 });
@@ -74,7 +82,11 @@ const MergeDecisionSchema = z.object({
 export const entityResolutionStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-entity-resolution");
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+
+  // Read Step 4's output (latest execution) directly by execution_id
+  const step4ExecId = await ctx.getStepExecutionId("pass1", 4);
+  const step4Filter = step4ExecId ? { execution_id: step4ExecId } : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(step4Filter).toArray()) as unknown as KB2GraphNodeType[];
 
   if (nodes.length === 0) throw new Error("No entities found — run entity extraction first");
 
@@ -93,12 +105,21 @@ RULES:
 - Do NOT merge if one is a component/part of the other (e.g. "Redis" the database vs "ElastiCache Redis" the cloud resource)
 - When merging, pick the most precise/canonical name as the canonical_name
 - Be conservative — only merge when confident they are the same entity
-- If you are unsure (e.g. "Priya" might or might not be "Priya Nair"), set unsure: true and should_merge: false. A human will review.`;
+- If you are unsure (e.g. "Priya" might or might not be "Priya Nair"), set unsure: true and should_merge: false. A human will review.
+
+CROSS-TYPE PAIRS:
+- Some pairs may have different entity types (e.g. one is a "project" and the other is a "decision"). Merge if they refer to the same real-world thing extracted under different types.
+- When merging cross-type pairs, set canonical_type to the most appropriate type: a body of work with timeline is "project", a specific choice or tradeoff is "decision", a repeatable workflow is "process".
+- Do NOT merge if one is a child/component of the other (e.g. a decision ABOUT a project is not the same entity as the project — those should remain separate).
+- Do NOT merge if the relationship is "this decision was made as part of this project" — that is a relationship, not a duplicate.`;
   if (ctx.config?.prompts?.entity_resolution?.system) {
     resolutionPrompt = ctx.config.prompts.entity_resolution.system;
   }
 
   await ctx.onProgress(`Finding merge candidates among ${nodes.length} entities...`, 5);
+
+  const nodeMap = new Map<string, KB2GraphNodeType>();
+  for (const n of nodes) nodeMap.set(n.node_id, { ...n });
 
   const peopleHints = ctx.config?.people_hints ?? [];
   const autoMergeFirstNames = resSettings?.auto_merge_first_names !== false;
@@ -106,6 +127,19 @@ RULES:
 
   const merges: { from: string; into: string; canonicalName: string; reason: string }[] = [];
   const mergedNodeIds = new Set<string>();
+
+  const applyMerge = (keep: KB2GraphNodeType, remove: KB2GraphNodeType, canonicalName: string, newType?: string) => {
+    const k = nodeMap.get(keep.node_id)!;
+    k.display_name = canonicalName;
+    k.aliases = [...new Set([keep.display_name, remove.display_name, ...keep.aliases, ...remove.aliases])]
+      .filter((a) => a.toLowerCase() !== canonicalName.toLowerCase());
+    k.attributes = { ...remove.attributes, ...keep.attributes };
+    k.confidence = keep.confidence === "high" || remove.confidence === "high" ? "high" : keep.confidence;
+    k.source_refs = [...keep.source_refs, ...remove.source_refs];
+    if (newType) k.type = newType as any;
+    nodeMap.delete(remove.node_id);
+    mergedNodeIds.add(remove.node_id);
+  };
 
   // Pre-LLM heuristic: person entity auto-merges
   const personNodes = nodes.filter((n) => n.type === "team_member" && !mergedNodeIds.has(n.node_id));
@@ -136,7 +170,6 @@ RULES:
     let targetFullName: string | null = null;
     let reason = "";
 
-    // People hints: match against canonical names
     for (const hint of peopleHints) {
       const canonical = typeof hint === "string" ? hint : hint.name;
       if (!canonical) continue;
@@ -154,7 +187,6 @@ RULES:
       }
     }
 
-    // First-name match: single-token "Matt" -> only "Matt Chen" if unique
     if (!targetFullName && isSingleToken && autoMergeFirstNames) {
       const first = tokens[0]!.toLowerCase();
       const full = firstNameToFullName.get(first);
@@ -164,7 +196,6 @@ RULES:
       }
     }
 
-    // Dotted name: "matt.chen" -> "Matt Chen"
     if (!targetFullName && hasDots && autoMergeDotted) {
       const normNode = normalizeForMatch(node.display_name);
       const matches = personNodes.filter(
@@ -191,46 +222,19 @@ RULES:
 
     if (!removeNode || removeNode === keepNode) {
       if (reason.startsWith("people hint") && normalizeForMatch(node.display_name) !== normalizeForMatch(targetFullName!)) {
-        const mergedAliases = [...new Set([node.display_name, ...node.aliases])].filter((a) => a.toLowerCase() !== targetFullName!.toLowerCase());
-        await tc.graph_nodes.updateOne(
-          { node_id: node.node_id, run_id: ctx.runId },
-          { $set: { display_name: targetFullName!, aliases: mergedAliases } },
-        );
+        const k = nodeMap.get(node.node_id)!;
+        k.aliases = [...new Set([node.display_name, ...node.aliases])].filter((a) => a.toLowerCase() !== targetFullName!.toLowerCase());
+        k.display_name = targetFullName!;
         merges.push({ from: node.display_name, into: targetFullName!, canonicalName: targetFullName!, reason: `pre-LLM heuristic: ${reason}` });
       }
       continue;
     }
 
-    const canonicalName = targetFullName;
-    const mergedAliases = [...new Set([
-      keepNode.display_name,
-      removeNode.display_name,
-      ...keepNode.aliases,
-      ...removeNode.aliases,
-    ])].filter((a) => a.toLowerCase() !== canonicalName.toLowerCase());
-
-    await tc.graph_nodes.updateOne(
-      { node_id: keepNode.node_id, run_id: ctx.runId },
-      {
-        $set: {
-          display_name: canonicalName,
-          aliases: mergedAliases,
-          attributes: { ...removeNode.attributes, ...keepNode.attributes },
-          confidence: keepNode.confidence === "high" || removeNode.confidence === "high" ? "high" : keepNode.confidence,
-        },
-        $push: {
-          source_refs: { $each: removeNode.source_refs },
-        } as any,
-      },
-    );
-
-    await tc.graph_nodes.deleteOne({ node_id: removeNode.node_id, run_id: ctx.runId });
-    mergedNodeIds.add(removeNode.node_id);
-
+    applyMerge(keepNode, removeNode, targetFullName);
     merges.push({
       from: removeNode.display_name,
-      into: canonicalName,
-      canonicalName,
+      into: targetFullName,
+      canonicalName: targetFullName,
       reason: `pre-LLM heuristic: ${reason}`,
     });
   }
@@ -290,11 +294,77 @@ RULES:
     }
   }
 
+  // 5A: Pre-seed candidates from Step 4's _likely_duplicates annotations
+  const nodeByName = new Map<string, KB2GraphNodeType>();
+  for (const node of nodes) {
+    if (mergedNodeIds.has(node.node_id)) continue;
+    nodeByName.set(node.display_name.toLowerCase(), node);
+  }
+
+  const candidateKey = (a: KB2GraphNodeType, b: KB2GraphNodeType) =>
+    [a.node_id, b.node_id].sort().join("|||");
+  const existingPairKeys = new Set(candidates.map((c) => candidateKey(c.nodeA, c.nodeB)));
+
+  for (const node of nodes) {
+    if (mergedNodeIds.has(node.node_id)) continue;
+    const likelyDupes = node.attributes?._likely_duplicates as string[] | undefined;
+    if (!likelyDupes?.length) continue;
+    for (const dupeName of likelyDupes) {
+      const other = nodeByName.get(dupeName.toLowerCase());
+      if (!other || other.node_id === node.node_id) continue;
+      if (mergedNodeIds.has(other.node_id)) continue;
+      const key = candidateKey(node, other);
+      if (existingPairKeys.has(key)) continue;
+      existingPairKeys.add(key);
+      candidates.push({
+        nodeA: node,
+        nodeB: other,
+        reason: `pre-seeded from step4 _likely_duplicates`,
+        score: 0.7,
+      });
+    }
+  }
+
+  // 5B: Cross-type merge candidates (project<->decision, project<->process)
+  for (const [typeA, typeB] of CROSS_TYPE_PAIRS) {
+    const nodesA = byType.get(typeA) ?? [];
+    const nodesB = byType.get(typeB) ?? [];
+    for (const a of nodesA) {
+      if (mergedNodeIds.has(a.node_id)) continue;
+      for (const b of nodesB) {
+        if (mergedNodeIds.has(b.node_id)) continue;
+        const key = candidateKey(a, b);
+        if (existingPairKeys.has(key)) continue;
+
+        if (aliasOverlap(a, b)) {
+          existingPairKeys.add(key);
+          candidates.push({ nodeA: a, nodeB: b, reason: `cross-type alias overlap (${typeA}↔${typeB})`, score: 0.9 });
+          continue;
+        }
+        if (substringMatch(a.display_name, b.display_name)) {
+          existingPairKeys.add(key);
+          candidates.push({ nodeA: a, nodeB: b, reason: `cross-type substring match (${typeA}↔${typeB}): "${a.display_name}" / "${b.display_name}"`, score: 0.75, ambiguous: true });
+          continue;
+        }
+        const nameSim = tokenSimilarity(a.display_name, b.display_name);
+        if (nameSim >= CROSS_TYPE_SIMILARITY_THRESHOLD) {
+          existingPairKeys.add(key);
+          candidates.push({ nodeA: a, nodeB: b, reason: `cross-type name similarity (${typeA}↔${typeB}) ${nameSim.toFixed(2)}`, score: nameSim });
+        }
+      }
+    }
+  }
+
   candidates.sort((a, b) => b.score - a.score);
 
   await ctx.onProgress(`Found ${candidates.length} candidate pairs for LLM review`, 15);
 
   if (candidates.length === 0) {
+    for (const n of nodeMap.values()) {
+      if (n.attributes?._likely_duplicates) delete n.attributes._likely_duplicates;
+    }
+    const earlyResolved = [...nodeMap.values()].map(({ _id, ...rest }) => ({ ...rest, execution_id: ctx.executionId }));
+    if (earlyResolved.length > 0) await tc.graph_nodes.insertMany(earlyResolved as any[]);
     const finalCount = nodes.length - merges.length;
     await ctx.onProgress(`Entity resolution complete: ${nodes.length} → ${finalCount} entities (${merges.length} pre-LLM merges)`, 100);
     return {
@@ -356,6 +426,7 @@ RULES:
           ambiguousCards.push({
             card_id: randomUUID(),
             run_id: ctx.runId,
+            execution_id: ctx.executionId,
             card_type: "duplicate_cluster",
             severity: "S3",
             title: `Possible duplicate: "${pair.nodeA.display_name}" and "${pair.nodeB.display_name}"`,
@@ -387,30 +458,8 @@ RULES:
       const removeNode = keepNode === pair.nodeA ? pair.nodeB : pair.nodeA;
 
       const canonicalName = decision.canonical_name || keepNode.display_name;
-      const mergedAliases = [...new Set([
-        keepNode.display_name,
-        removeNode.display_name,
-        ...keepNode.aliases,
-        ...removeNode.aliases,
-      ])].filter((a) => a.toLowerCase() !== canonicalName.toLowerCase());
-
-      await tc.graph_nodes.updateOne(
-        { node_id: keepNode.node_id, run_id: ctx.runId },
-        {
-          $set: {
-            display_name: canonicalName,
-            aliases: mergedAliases,
-            attributes: { ...removeNode.attributes, ...keepNode.attributes },
-            confidence: keepNode.confidence === "high" || removeNode.confidence === "high" ? "high" : keepNode.confidence,
-          },
-          $push: {
-            source_refs: { $each: removeNode.source_refs },
-          } as any,
-        },
-      );
-
-      await tc.graph_nodes.deleteOne({ node_id: removeNode.node_id, run_id: ctx.runId });
-      mergedNodeIds.add(removeNode.node_id);
+      const newType = (decision.canonical_type && keepNode.type !== removeNode.type) ? decision.canonical_type : undefined;
+      applyMerge(keepNode, removeNode, canonicalName, newType);
 
       merges.push({
         from: removeNode.display_name,
@@ -423,6 +472,20 @@ RULES:
     if (ambiguousCards.length > 0) {
       await tc.verification_cards.insertMany(ambiguousCards);
     }
+  }
+
+  // Strip _likely_duplicates from surviving nodes
+  for (const n of nodeMap.values()) {
+    if (n.attributes?._likely_duplicates) {
+      delete n.attributes._likely_duplicates;
+    }
+  }
+
+  // Write resolved nodes with this execution's id
+  await ctx.onProgress("Writing resolved entities...", 95);
+  const resolvedNodes = [...nodeMap.values()].map(({ _id, ...rest }) => ({ ...rest, execution_id: ctx.executionId }));
+  if (resolvedNodes.length > 0) {
+    await tc.graph_nodes.insertMany(resolvedNodes as any[]);
   }
 
   const finalCount = nodes.length - merges.length;

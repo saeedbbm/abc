@@ -24,7 +24,7 @@ const ExtractedClaimsSchema = z.object({
 export const extractClaimsStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-extract-claims");
-  const stepId = "pass1-step-14";
+  const stepId = "pass1-step-17";
   const extractClaimsSystemPrompt = ctx.config?.prompts?.extract_claims?.system ?? `You extract atomic factual claims from knowledge base pages.
 Each claim should be a single, self-contained factual statement that can be independently verified.
 
@@ -35,8 +35,12 @@ Rules:
 - Mark truth_status as "direct" if stated explicitly, "inferred" if derived from context.
 - List entity names referenced in each claim in entity_refs.`;
 
-  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
-  const humanPages = (await tc.human_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2HumanPageType[];
+  const epExecId = await ctx.getStepExecutionId("pass1", 15);
+  const epFilter = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const entityPages = (await tc.entity_pages.find(epFilter).toArray()) as unknown as KB2EntityPageType[];
+  const hpExecId = await ctx.getStepExecutionId("pass1", 15);
+  const hpFilter = hpExecId ? { execution_id: hpExecId } : { run_id: ctx.runId };
+  const humanPages = (await tc.human_pages.find(hpFilter).toArray()) as unknown as KB2HumanPageType[];
 
   const claims: KB2ClaimType[] = [];
   let totalLLMCalls = 0;
@@ -54,6 +58,7 @@ Rules:
         claims.push({
           claim_id: claimId,
           run_id: ctx.runId,
+          execution_id: ctx.executionId,
           text: item.text,
           entity_ids: [page.node_id],
           source_page_id: page.page_id,
@@ -70,11 +75,6 @@ Rules:
             section_heading: (r as any).section_heading,
           })),
         });
-
-        await tc.entity_pages.updateOne(
-          { page_id: page.page_id, run_id: ctx.runId },
-          { $set: { [`sections.${si}.items.${ii}.claim_id`]: claimId } },
-        );
       }
     }
 
@@ -127,6 +127,7 @@ Rules:
       claims.push({
         claim_id: randomUUID(),
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         text: claim.text,
         entity_ids: [],
         source_page_id: page.page_id,
@@ -144,7 +145,6 @@ Rules:
   }
 
   if (claims.length > 0) {
-    await tc.claims.deleteMany({ run_id: ctx.runId });
     await tc.claims.insertMany(claims);
   }
 

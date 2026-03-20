@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "crypto"; 
 import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
@@ -51,7 +51,7 @@ const LLMVerifyCardSchema = z.object({
 export const createVerifyCardsStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-verify-cards");
-  const stepId = "pass1-step-15";
+  const stepId = "pass1-step-18";
   const BATCH_SIZE = ctx.config?.pipeline_settings?.verification?.batch_size ?? 25;
   const createVerifyCardsSystemPrompt = ctx.config?.prompts?.create_verify_cards?.system ?? `You review verification card candidates for a company knowledge base.
 For each candidate, decide whether to keep it and rewrite it for a human reviewer.
@@ -68,12 +68,31 @@ RULES:
 - Write a description that explains what's at stake if this is wrong
 - Missing section cards for sections unlikely to have data should be S4 or filtered
 - Unknown owner cards for minor libraries or tools should be S4 or filtered
-- Inferred claims about critical systems (payments, auth, databases) should be S1 or S2`;
+- Inferred claims about critical systems (payments, auth, databases) should be S1 or S2
+- Discovery items (truth_status=inferred, from conversation analysis) should only get S1/S2 cards if they represent critical factual claims. Most discovery items are S3 or should be filtered.
+- Convention/pattern entities are inherently inferred — do NOT create cards questioning their existence. Only create cards if a specific factual claim within them is questionable.`;
 
-  const claims = (await tc.claims.find({ run_id: ctx.runId }).toArray()) as unknown as KB2ClaimType[];
-  const nodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const edges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
-  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 17);
+  const claimsFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
+  const claims = (await tc.claims.find(claimsFilter).toArray()) as unknown as KB2ClaimType[];
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  const nodeExecIds = [step9ExecId, step10ExecId].filter(Boolean);
+  const nodesFilter = nodeExecIds.length > 0
+    ? { execution_id: { $in: nodeExecIds } }
+    : { run_id: ctx.runId };
+  const nodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+  const step6ExecId = await ctx.getStepExecutionId("pass1", 6);
+  const step7ExecId = await ctx.getStepExecutionId("pass1", 7);
+  const step11ExecId = await ctx.getStepExecutionId("pass1", 11);
+  const edgeExecIds = [step6ExecId, step7ExecId, step11ExecId].filter(Boolean);
+  const edgesFilter = edgeExecIds.length > 0
+    ? { execution_id: { $in: edgeExecIds } }
+    : { run_id: ctx.runId };
+  const edges = (await tc.graph_edges.find(edgesFilter).toArray()) as unknown as KB2GraphEdgeType[];
+  const epExecId = await ctx.getStepExecutionId("pass1", 14);
+  const epFilter = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const entityPages = (await tc.entity_pages.find(epFilter).toArray()) as unknown as KB2EntityPageType[];
 
   const nodeById = new Map<string, KB2GraphNodeType>();
   for (const n of nodes) nodeById.set(n.node_id, n);
@@ -87,14 +106,18 @@ RULES:
 
   for (const claim of claims) {
     if (claim.truth_status === "inferred") {
-      const page = claim.source_page_id ? pageById.get(claim.source_page_id) : undefined;
+      const sourcePage = claim.source_page_id ? pageById.get(claim.source_page_id) : undefined;
+      if (sourcePage) {
+        const sourceNode = nodeById.get(sourcePage.node_id);
+        if (sourceNode?.attributes?.is_convention) continue;
+      }
       candidates.push({
         type: "inferred_claim",
         raw_text: claim.text,
-        entity_name: page?.title,
+        entity_name: sourcePage?.title,
         page_id: claim.source_page_id,
         page_type: claim.source_page_type,
-        page_title: page?.title,
+        page_title: sourcePage?.title,
         claim_ids: [claim.claim_id],
         source_refs: claim.source_refs ?? [],
       });
@@ -245,6 +268,21 @@ RULES:
     await ctx.onProgress(`Phase 2: processed ${Math.min(i + BATCH_SIZE, candidates.length)}/${candidates.length} candidates`, pct);
   }
 
+  const MAX_CARDS = 30;
+  if (survivingCards.length > MAX_CARDS) {
+    const severityOrder: Record<string, number> = { S1: 0, S2: 1, S3: 2, S4: 3 };
+    const indices = survivingCards.map((_, i) => i);
+    indices.sort((a, b) => (severityOrder[survivingCards[a].severity] ?? 4) - (severityOrder[survivingCards[b].severity] ?? 4));
+    const kept = indices.slice(0, MAX_CARDS);
+    const keptSet = new Set(kept);
+    const trimmedCards = survivingCards.filter((_, i) => keptSet.has(i));
+    const trimmedCandidates = survivingCandidates.filter((_, i) => keptSet.has(i));
+    survivingCards.length = 0;
+    survivingCards.push(...trimmedCards);
+    survivingCandidates.length = 0;
+    survivingCandidates.push(...trimmedCandidates);
+  }
+
   await ctx.onProgress(`Phase 2 complete: ${survivingCards.length}/${candidates.length} cards kept`, 65);
 
   // ------ Phase 3: Attach source refs mechanically ------
@@ -310,11 +348,14 @@ RULES:
     });
   }
 
+  const dupExecId = await ctx.getStepExecutionId("pass1", 5);
+  const dupCardFilter = dupExecId
+    ? { execution_id: dupExecId, card_type: "duplicate_cluster" }
+    : { run_id: ctx.runId, card_type: "duplicate_cluster" };
   const existingDupCards = await tc.verification_cards
-    .find({ run_id: ctx.runId, card_type: "duplicate_cluster" })
+    .find(dupCardFilter)
     .toArray();
 
-  await tc.verification_cards.deleteMany({ run_id: ctx.runId, card_type: { $ne: "duplicate_cluster" } });
   if (finalCards.length > 0) {
     await tc.verification_cards.insertMany(finalCards);
   }

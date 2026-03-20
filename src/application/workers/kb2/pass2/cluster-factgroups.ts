@@ -37,10 +37,10 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress("Loading claims...", 0);
 
-  const claims = await tc.claims.find({ run_id: ctx.runId }).toArray();
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const claimsFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
+  const claims = await tc.claims.find(claimsFilter).toArray();
   if (claims.length === 0) return { groups_created: 0, total_claims: 0 };
-
-  await tc.fact_groups.deleteMany({ run_id: ctx.runId });
 
   await ctx.onProgress(`Embedding ${claims.length} claim texts...`, 10);
 
@@ -116,6 +116,7 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
         groups.push({
           group_id: groupId,
           run_id: ctx.runId,
+          execution_id: ctx.executionId,
           canonical_claim_id: (canonClaim as any).claim_id,
           member_claim_ids: memberIds,
           group_type: cluster.group_type,
@@ -135,8 +136,11 @@ export const clusterFactGroupsStep: StepFunction = async (ctx) => {
   }
 
   for (const [claimId, groupId] of claimToGroup) {
+    const claimUpdateFilter = claimsExecId
+      ? { claim_id: claimId, execution_id: claimsExecId }
+      : { claim_id: claimId, run_id: ctx.runId };
     await tc.claims.updateOne(
-      { claim_id: claimId, run_id: ctx.runId },
+      claimUpdateFilter,
       { $set: { fact_group_id: groupId } },
     );
   }

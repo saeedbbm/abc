@@ -1,6 +1,18 @@
 import { MongoClient, type Db, type Collection } from "mongodb";
 
-const client = new MongoClient(process.env.MONGODB_CONNECTION_STRING || "mongodb://localhost:27017");
+const MONGODB_URI =
+  process.env.MONGODB_CONNECTION_STRING || "mongodb://localhost:27017";
+
+// ---------------------------------------------------------------------------
+// Resilient singleton — survives Next.js HMR & auto-reconnects after restart
+// ---------------------------------------------------------------------------
+const g = globalThis as unknown as { _mongoClient?: MongoClient };
+
+if (!g._mongoClient) {
+  g._mongoClient = new MongoClient(MONGODB_URI);
+}
+
+const client: MongoClient = g._mongoClient;
 
 // ---------------------------------------------------------------------------
 // Default database (backwards-compatible)
@@ -63,6 +75,7 @@ export interface TenantCollections {
   raw_inputs: Collection;
   input_snapshots: Collection;
   graph_nodes: Collection;
+  graph_nodes_pre_resolution: Collection;
   graph_edges: Collection;
   claims: Collection;
   fact_groups: Collection;
@@ -83,6 +96,7 @@ export function getTenantCollections(companySlug: string): TenantCollections {
     raw_inputs: tdb.collection("kb2_raw_inputs"),
     input_snapshots: tdb.collection("kb2_input_snapshots"),
     graph_nodes: tdb.collection("kb2_graph_nodes"),
+    graph_nodes_pre_resolution: tdb.collection("kb2_graph_nodes_pre_resolution"),
     graph_edges: tdb.collection("kb2_graph_edges"),
     claims: tdb.collection("kb2_claims"),
     fact_groups: tdb.collection("kb2_fact_groups"),

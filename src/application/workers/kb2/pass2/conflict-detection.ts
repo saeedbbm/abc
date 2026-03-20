@@ -25,8 +25,12 @@ export const conflictDetectionStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress("Analyzing fact groups for conflicts...", 0);
 
-  const groups = await tc.fact_groups.find({ run_id: ctx.runId }).toArray();
-  const claims = await tc.claims.find({ run_id: ctx.runId }).toArray();
+  const fgExecId = await ctx.getStepExecutionId("pass2", 1);
+  const fgFilter = fgExecId ? { execution_id: fgExecId } : { run_id: ctx.runId };
+  const groups = await tc.fact_groups.find(fgFilter).toArray();
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const claimsFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
+  const claims = await tc.claims.find(claimsFilter).toArray();
   const claimById = new Map(claims.map((c) => [c.claim_id, c]));
 
   const multiMemberGroups = groups.filter((g) => (g.member_claim_ids as string[]).length >= 2);
@@ -69,8 +73,11 @@ export const conflictDetectionStep: StepFunction = async (ctx) => {
         const group = batch.find((g) => g.group_id === conflict.group_id);
         if (!group) continue;
 
+        const fgUpdateFilter = fgExecId
+          ? { group_id: group.group_id, execution_id: fgExecId }
+          : { group_id: group.group_id, run_id: ctx.runId };
         await tc.fact_groups.updateOne(
-          { group_id: group.group_id, run_id: ctx.runId },
+          fgUpdateFilter,
           { $set: { group_type: "conflict" } },
         );
 
@@ -78,6 +85,7 @@ export const conflictDetectionStep: StepFunction = async (ctx) => {
         await tc.verification_cards.insertOne({
           card_id: randomUUID(),
           run_id: ctx.runId,
+          execution_id: ctx.executionId,
           card_type: "conflict",
           severity: conflict.severity,
           title: `Conflict: ${(canonClaim?.text ?? "Unknown").slice(0, 80)}`,

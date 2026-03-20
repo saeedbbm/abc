@@ -135,6 +135,7 @@ export const ENTITY_PAGE_TEMPLATES: Partial<Record<KB2NodeType, KB2PageTemplate>
       { name: "Domain Expertise", intent: "Topics and areas they are the go-to person for", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
       { name: "Current Focus", intent: "Active projects and primary work area", requirement: "MUST_IF_PRESENT", maxBullets: 4 },
       { name: "Past Contributions", intent: "Projects they led or significantly contributed to", requirement: "OPTIONAL", maxBullets: 8 },
+      { name: "Established Conventions", intent: "Recurring patterns, design conventions, or architectural rules this person consistently applies across projects", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
     ],
   },
 
@@ -276,6 +277,7 @@ export const STANDARD_HUMAN_PAGES: HumanPageCategory[] = [
   { category: "onboarding", layer: "company", title: "Onboarding", description: "Getting started guide for new employees", relatedEntityTypes: ["team_member", "team", "repository", "environment"] },
   { category: "architecture_overview", layer: "engineering", title: "System Architecture", description: "High-level architecture, repository map, data flow, infrastructure", relatedEntityTypes: ["repository", "infrastructure", "cloud_resource", "database", "integration", "environment"] },
   { category: "decisions_tradeoffs", layer: "engineering", title: "Other Decisions & Tradeoffs", description: "Architectural and design decisions not tied to a specific project", relatedEntityTypes: ["decision", "repository", "infrastructure", "database", "environment"] },
+  { category: "hidden_conventions", layer: "engineering", title: "Hidden Conventions & Patterns", description: "Cross-cutting conventions discovered from repeated behavior — design patterns, architecture patterns, and team conventions that were never formally documented", relatedEntityTypes: ["decision", "team_member"] },
   { category: "processes", layer: "engineering", title: "Team Processes & Workflows", description: "Repeatable workflows, procedures, and practices", relatedEntityTypes: ["process", "team"] },
   { category: "environments_deploy", layer: "engineering", title: "Environments & Deployment", description: "Dev/staging/prod, CI/CD pipelines, deploy process", relatedEntityTypes: ["environment", "pipeline", "repository"] },
   { category: "past_documented", layer: "engineering", title: "Past Projects (Documented)", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project", "team_member"] },

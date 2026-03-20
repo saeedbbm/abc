@@ -1,0 +1,419 @@
+================================================================================
+GROUND TRUTH — SECTION G: KEY KNOWLEDGE BASE PAGES
+================================================================================
+
+The 3 most important project pages and 3 most important decision pages that
+the AI knowledge base should be able to produce. Each includes: title, key
+facts, related entities, and items the system should flag for human
+verification.
+
+These represent the ideal output — what a perfectly functioning Pidrax
+knowledge base would generate.
+
+
+================================================================================
+TOP 3 PROJECT PAGES
+================================================================================
+
+
+================================================================================
+PROJECT PAGE 1: PawFinder Website Redesign
+================================================================================
+
+Why this is a top project:
+  Largest project in the data. Spans the entire 2023-2025 timeline. Contains
+  4 phases, many sub-projects, involves every team member. Most cross-
+  referenced entity in all sources. Still active.
+
+--- Ideal KB Page Content ---
+
+Title:          PawFinder Website Redesign
+
+Status:         Active (Phase 4 in progress)
+
+Owner:          Sarah (PM), with Kim (design), Tim (frontend lead)
+
+Timeline:
+  - Phase 1 (Q1-Q2 2023): Pet profiles and browse page — COMPLETE
+  - Phase 2 (Q3-Q4 2023): Shelter locations and partner pages — COMPLETE
+  - Phase 3 (Q1-Q2 2024): Donation page and shelter comparison — COMPLETE
+  - Phase 4 (2025-present): Mobile responsiveness and polish — IN PROGRESS
+
+Key facts:
+  - Started January 2023, replacing a 2019-era design
+  - React + TypeScript frontend with CSS Modules
+  - Pet profile cards use pink/blue gender indicators per Kim's design
+  - Financial CTAs (Sponsor, Donate) use green styling
+  - Shelter comparison uses horizontal layout; category browsing uses
+    vertical sidebar layout
+  - Beta launched April 2023, each subsequent phase added features
+  - Phase 4 focuses on mobile responsiveness (Jill implementing, Kim
+    designing mobile mockups)
+
+Related Jira tickets:
+  PAW-2, PAW-3, PAW-4, PAW-6, PAW-9, PAW-11, PAW-15, PAW-16 (Epic),
+  PAW-17, PAW-18, PAW-19, PAW-30
+
+Related PRs:
+  #18, #31, #43, #47, #61
+
+Related Confluence docs:
+  "PawFinder Website Redesign" (primary), "Q3 2024 Product Roadmap"
+
+Related Slack threads:
+  16+ conversations across #general, #design, #engineering (2023-01 through
+  2025-12)
+
+Items to flag for human verification:
+  - Phase 4 status: Confluence says "IN PROGRESS" but several sub-tickets
+    (PAW-19, PAW-30) are marked Done. Is Phase 4 actually still active or
+    should it be marked complete?
+  - PAW-16 (Epic) is "In Progress" — when should this be resolved?
+  - Is there a Phase 5 planned, or does the redesign end with Phase 4?
+
+
+================================================================================
+PROJECT PAGE 2: Volunteer Portal
+================================================================================
+
+Why this is a top project:
+  Most recent large completed project. Involves both backend and frontend.
+  Contains evidence of both Tim's layout pattern and Matt's browse pattern.
+  Has a dedicated Confluence product spec. Launched mid-2025.
+
+--- Ideal KB Page Content ---
+
+Title:          Volunteer Portal
+
+Status:         Completed (launched ~June 2025)
+
+Owner:          Sarah (spec), Jack (backend), Jill (frontend)
+
+Timeline:
+  - Aug 2024: Product spec written (Confluence)
+  - Sep-Oct 2024: Backend API built by Jack (PR #52)
+  - Oct 2024: Frontend built by Jill (PR #55)
+  - Jan 2025: "almost done" (Slack)
+  - Jul 2025: launched (Slack)
+
+Key facts:
+  - Allows volunteers to sign up for shifts at shelters
+  - Backend: Node.js/Express API with PostgreSQL, endpoints for shifts, signups
+  - Frontend: React with shelter selector as vertical sidebar (changed from
+    tabs on Tim's recommendation)
+  - Shift lists are loaded fully per shelter (Matt's recommendation — "15
+    shifts is nothing", no need to paginate)
+  - Shift signup handles capacity with 422 response on full shifts
+  - DELETE for cancellation is idempotent (Matt's review feedback)
+  - Features: shift browser, signup/cancel, capacity display, dashboard
+    with basic stats (total hours, shifts completed)
+
+Related Jira tickets:
+  PAW-20 (backend), PAW-21 (frontend)
+
+Related PRs:
+  #52 (backend), #55 (frontend)
+
+Related Confluence docs:
+  "Volunteer Portal Product Spec"
+
+Related Slack threads:
+  #general 2024-09-16, #engineering 2024-10-07, #engineering 2024-11-04,
+  #general 2025-01-06, #general 2025-07-14, #engineering 2025-04-14
+
+Items to flag for human verification:
+  - Customer feedback #6 (Mike Nguyen, 2025-08-14) asks for a downloadable
+    volunteer hours report. This aligns with work already in flight:
+    Slack 2025-04-14 has Matt saying "Jack has a PR coming for the volunteer
+    hours tracking API." The PR is not yet in the data but work is underway.
+  - The Confluence spec mentions a potential future "donate your time" CTA
+    that would require revisiting the visual treatment (currently no
+    financial elements on volunteer pages).
+  - Exact launch date is unclear — Slack says "launched last month" on
+    July 14, 2025, so approximately June 2025.
+
+
+================================================================================
+PROJECT PAGE 3: Toy Donation Feature (Proposed)
+================================================================================
+
+Why this is a top project:
+  This is the feature the AI system should discover and propose. It does not
+  exist yet. It is the primary "synthesis" task: the AI must combine customer
+  feedback with discovered team patterns to propose a concrete implementation.
+
+--- Ideal KB Page Content ---
+
+Title:          Toy Donation Feature (Proposed)
+
+Status:         Proposed — not yet in any backlog or roadmap
+
+Origin:         Three independent customer feedback submissions over 10 months:
+  - Lisa M. (2024-06-03): wants to donate physical toys her dog no longer uses
+  - David Chen (2024-11-19): wants to buy a toy for a specific cat seen on
+    the browse page
+  - Rachel Torres (2025-03-22): family wants to buy toys for specific shelter
+    animals, asks about a gift shop
+
+Core request:   Allow users to select a shelter pet and donate/purchase a toy
+                specifically for that animal.
+
+Relationship to existing features:
+  - NOT the same as the monetary donation page (which accepts dollars, not
+    physical goods)
+  - Would integrate with the pet browse/profile system (users select a pet)
+  - Could live alongside the existing donation page or as a separate feature
+
+Recommended implementation based on team conventions:
+
+  UI Design:
+  - Pet cards in the toy donation flow should use pink accents for female
+    animals and blue accents for male animals (consistent with pet profile
+    cards, browse page, and donation page dedication cards — Kim's established
+    approach)
+  - The purchase/donate CTA should be green (consistent with the Sponsor
+    button on pet cards and the Donate button on the donation page — Kim's
+    approach for financial actions)
+  - Payment/checkout section should use a clean white background (consistent
+    with the donation page payment form)
+
+  Layout:
+  - The pet selection interface should use a vertical sidebar or list on the
+    left for browsing/selecting a pet (consistent with the categories page,
+    shelter selector on volunteer portal, and resource library — Tim's
+    approach for "choose one from a list" interactions)
+  - If a comparison view is ever needed (e.g., comparing toy options), use
+    horizontal columns (consistent with shelter comparison page)
+
+  Data Loading:
+  - Each shelter typically has 8-15 adoptable pets. Load the full pet list
+    in a single API call on page mount and handle browsing/selection entirely
+    client-side (consistent with the adoption chooser page, donation page pet
+    dedication, shelter events browser, and volunteer shift list — Matt's
+    approach for small datasets under ~20 items)
+  - No need for server-side pagination for the pet list
+
+  Technical Stack:
+  - Frontend: React + TypeScript, CSS Modules (per team standard)
+  - Backend: New API endpoint(s) in pawfinder-api, follow the standard
+    { data: T, meta: { ... } } response envelope
+  - Database: PostgreSQL, new table(s) for toy inventory/donations
+
+Items to flag for human verification:
+  - Scope decision: physical toy donation only, virtual toy purchase only,
+    or both? Customer requests span both use cases.
+  - Does PawFinder want to maintain toy inventory, or integrate with a
+    third-party retailer?
+  - Pricing and payment: should this use the existing payment processing
+    from the donation page?
+  - Should the toy donation be visible on the pet's profile page?
+
+
+================================================================================
+TOP 3 DECISION PAGES
+================================================================================
+
+
+================================================================================
+DECISION PAGE 1: Kim's Color Convention
+================================================================================
+
+Why this is a top decision:
+  Affects every pet-facing page and every financial CTA on the site. Applied
+  consistently across 3+ years of work. Never formally documented as a rule.
+  The AI must discover it by cross-referencing Kim's design decisions across
+  multiple Slack conversations, Confluence design notes, and PR descriptions.
+
+--- Ideal KB Page Content ---
+
+Title:          Pet Gender Colors and Financial CTA Colors
+
+Status:         Active, consistently applied
+
+Owner:          Kim (UX Designer)
+
+Convention:
+  - Female animal UI elements: pink accent
+  - Male animal UI elements: blue accent
+  - Financial CTA buttons (Sponsor, Donate, Purchase): green
+  - Payment form backgrounds: white, minimal visual noise
+  - Non-financial action buttons (Visit, View, etc.): blue or neutral gray
+  - Pages with no financial element: standard blues and grays
+
+Applied on:
+  - Pet profile cards (browse page) — pink/blue gender indicator, green
+    Sponsor button
+  - Shelter locations page — blue Visit button (not green, because it's
+    not a financial action)
+  - Donation page — green Donate button, white payment section, pink/blue
+    pet dedication cards
+  - Shelter comparison page — pink/blue accents on pet cards within the
+    comparison view
+  - Volunteer portal — standard blues and grays (no financial elements)
+
+Evidence trail (chronological):
+  1. Slack #design 2023-03-14 — Kim's original pet card design
+  2. Slack #design 2023-10-02 — blue Visit button (negative case)
+  3. Slack #design 2024-02-19 — donation page design
+  4. Slack #design 2024-06-10 — comparison page mockups
+  5. Slack #design 2025-03-10 — volunteer portal (absence of green)
+  6. Confluence "Website Redesign" Phases 1, 2, 3 — design notes
+  7. GitHub PRs #18, #47 — implementation references
+
+Documentation gap:
+  No single document states "our site-wide color convention is..."
+  The pattern must be inferred from Kim's repeated choices across pages.
+  The Confluence redesign doc comes closest, but describes each phase's
+  choices separately rather than abstracting them into a rule.
+
+Items to flag for human verification:
+  - Is this an intentional site-wide convention or coincidental consistency?
+    (Answer: it's intentional, but Kim has never written it as a formal rule)
+  - Should this be formalized in a design system document?
+  - Does it apply to future features like the proposed toy donation page?
+    (Answer: yes, based on the pattern)
+
+
+================================================================================
+DECISION PAGE 2: Tim's Layout Convention
+================================================================================
+
+Why this is a top decision:
+  Determines the fundamental page structure for every navigation/selection
+  and comparison interface. Applied across 4+ pages and 3 years. Completely
+  undocumented — no Confluence page, no design system entry. Must be
+  discovered entirely from Slack messages and PR review comments.
+
+--- Ideal KB Page Content ---
+
+Title:          Selection vs. Comparison Page Layout
+
+Status:         Active, consistently applied
+
+Owner:          Tim (Senior Frontend Developer)
+
+Convention:
+  - When user is selecting/choosing from a list: vertical sidebar/menu on
+    the left side of the page
+  - When user is comparing items: horizontal columnar layout across the page
+  - When user is entering data (forms): single column, top-to-bottom
+
+Applied on:
+  Selection layout (vertical left):
+  - Pet categories page (2023)
+  - Shelter locations page (2023) — shelter list as vertical panel on left
+  - Volunteer portal shelter selector (2024) — changed from tabs to vertical
+    nav on Tim's review feedback
+  - Resource library page (2025) — categories on left as vertical list
+
+  Comparison layout (horizontal):
+  - Shelter comparison page (2024) — shelters laid out left-to-right as
+    columns, attributes as rows
+
+  Form layout (single column):
+  - Volunteer signup form (2024) — Tim says "single column for forms"
+
+Evidence trail (chronological):
+  1. Slack #engineering 2023-03-21 — categories page layout
+  2. GitHub PR #31 (2023-09-18) — Tim's own shelter locations PR
+  3. Slack #engineering 2024-05-13 — comparison layout reasoning
+  4. GitHub PR #43 (2024-07-09) — Tim approves horizontal comparison grid
+  5. Slack #engineering 2024-10-07 — volunteer form layout
+  6. GitHub PR #55 (2024-10-16) — Tim corrects Jill's tabs to vertical nav
+  7. Slack #engineering 2025-02-17 — resource library layout
+
+Documentation gap:
+  Completely undocumented. PAW-18 ("Site navigation improvements") tracks
+  ongoing navigation work but has no linked Confluence doc. The Q3 2024
+  roadmap explicitly says "No formal project doc" for this area.
+
+Items to flag for human verification:
+  - Should this be formalized as a design guideline?
+  - Are there edge cases where this convention should be violated?
+  - Kim is aware of Tim's layout thinking — she says "Tim had specific
+    ideas about the layout for that one so I worked with his wireframes"
+    (Slack 2024-06-10). Matt engages with the reasoning in Slack
+    2024-05-13. Sarah's Confluence doc references "Tim's design direction."
+    So this is not purely Tim's internal engineering decision — the team
+    has awareness, but no one has documented it as a formal guideline.
+
+
+================================================================================
+DECISION PAGE 3: Matt's Client-Side Browse Pattern
+================================================================================
+
+Why this is a top decision:
+  Determines the data loading architecture for every browse/list feature.
+  Has clear impact on both frontend and backend (affects whether API
+  endpoints need pagination). Exists only in GitHub PRs. The hardest
+  pattern to discover because it requires reading PR descriptions and
+  review comment threads across multiple PRs over 2 years.
+
+--- Ideal KB Page Content ---
+
+Title:          Client-Side Browse for Small Datasets
+
+Status:         Active, consistently applied
+
+Owner:          Matt (Architect)
+
+Convention:
+  - For browse/list features with fewer than ~20 items: fetch the entire
+    list in a single API call on page mount, store in component state,
+    handle navigation (next/prev/selection) entirely client-side
+  - For lists of ~30-40+ items with growth potential: server-side pagination
+    is acceptable
+  - The threshold is approximately 20 items
+
+Applied on:
+  Load-all (under ~20 items):
+  - Adoption chooser page — 8-15 adoptable pets (PR #23, Matt's own code)
+  - Donation page pet dedication — 10-12 adoptable pets (PR #47, Matt's
+    review comment)
+  - Shelter events browser — 5-12 events per shelter (PR #49, Matt corrects
+    Jack's per-click fetching)
+  - Volunteer shift list — 10-15 shifts per shelter (PR #52 and #55, Matt
+    approves load-all)
+
+  Paginated (over ~20 items):
+  - Supply tracking — 30-40 items with growth potential (PR #58, Matt
+    approves Jack's pagination decision, says "borderline but probably
+    fine since it could grow")
+
+Evidence trail (chronological):
+  1. GitHub PR #23 (2023-07-24) — Matt's own adoption chooser implementation
+  2. GitHub PR #47 (2024-03-27) — Matt tells Tim to load pet list once
+  3. GitHub PR #49 (2024-08-07) — Matt tells Jack to load events upfront
+  4. GitHub PR #52 (2024-09-25) — Matt: "15 shifts is nothing"
+  5. GitHub PR #55 (2024-10-21) — Matt approves Jill's load-all for shifts
+  6. GitHub PR #58 (2025-06-18) — Matt accepts pagination for 30-40 items
+
+Documentation gap:
+  Completely undocumented. Not in Confluence, not in Slack, not in the
+  onboarding guide. Exists only in GitHub PR descriptions and review
+  comments. The onboarding guide documents the API response envelope format
+  but says nothing about when to paginate vs. load all.
+
+Items to flag for human verification:
+  - What is the exact threshold? Is it 20 items, or more nuanced?
+  - Should this be documented in the onboarding guide or API design doc?
+  - Does the frontend team (Tim, Jill) know this is Matt's preferred
+    pattern, or do they just follow his PR feedback?
+  - As the shelter network grows (currently 12 partners), will some
+    "small" lists become "large" lists?
+
+
+================================================================================
+CROSS-REFERENCES BETWEEN TOP DECISIONS AND TOP PROJECTS
+================================================================================
+
+                      Website Redesign   Volunteer Portal   Toy Donation
+                      ----------------   ----------------   ------------
+Kim's colors          YES (all phases)   NO (no financial)  YES (proposed)
+Tim's layout          YES (comparison)   YES (shelter nav)  YES (proposed)
+Matt's browse         YES (donation pg)  YES (shift list)   YES (proposed)
+
+The Toy Donation feature is the only project where all three hidden patterns
+converge in the AI's recommendation. This is the primary synthesis test for
+the knowledge base system.
+================================================================================

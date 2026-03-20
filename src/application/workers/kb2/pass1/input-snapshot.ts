@@ -98,20 +98,15 @@ export const inputSnapshotStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress(`Parsed ${allDocs.length} documents. Saving snapshot...`, 70);
 
-  await tc.input_snapshots.updateOne(
-    { run_id: ctx.runId },
-    {
-      $set: {
-        run_id: ctx.runId,
-        company_slug: companySlug,
-        parsed_documents: allDocs,
-        stats: { ...stats, total: allDocs.length },
-        raw_stats: rawStats,
-        created_at: new Date().toISOString(),
-      },
-    },
-    { upsert: true },
-  );
+  await tc.input_snapshots.insertOne({
+    run_id: ctx.runId,
+    execution_id: ctx.executionId,
+    company_slug: companySlug,
+    parsed_documents: allDocs,
+    stats: { ...stats, total: allDocs.length },
+    raw_stats: rawStats,
+    created_at: new Date().toISOString(),
+  });
 
   await ctx.onProgress(`Snapshot saved: ${allDocs.length} documents`, 100);
 

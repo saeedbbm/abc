@@ -34,13 +34,21 @@ const GeneratedHumanPageSchema = z.object({
 
 export const generateHumanPagesStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-gen-human-pages");
-  const stepId = "pass1-step-12";
+  const stepId = "pass1-step-15";
   const tc = getTenantCollections(ctx.companySlug);
 
-  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
-  if (entityPages.length === 0) throw new Error("No entity pages found — run step 11 first");
+  const epExecId = await ctx.getStepExecutionId("pass1", 14);
+  const epFilter = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const entityPages = (await tc.entity_pages.find(epFilter).toArray()) as unknown as KB2EntityPageType[];
+  if (entityPages.length === 0) throw new Error("No entity pages found — run step 14 first");
 
-  const graphNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  const nodeExecIds = [step9ExecId, step10ExecId].filter(Boolean);
+  const nodesFilter = nodeExecIds.length > 0
+    ? { execution_id: { $in: nodeExecIds } }
+    : { run_id: ctx.runId };
+  const graphNodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
   const nodeById = new Map<string, KB2GraphNodeType>();
   for (const n of graphNodes) nodeById.set(n.node_id, n);
 
@@ -53,7 +61,7 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
     (ep) => !proposedTicketNodeIds.has(ep.node_id),
   );
 
-  const planArtifact = await ctx.getStepArtifact("pass1", 9);
+  const planArtifact = await ctx.getStepArtifact("pass1", 12);
   const humanPlans = planArtifact?.human_pages ?? [];
 
   const entityPageByNodeType = new Map<string, KB2EntityPageType[]>();
@@ -102,12 +110,20 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
         relatedPages.push(...pagesOfType);
       }
     }
-    const cappedPages = relatedPages.slice(0, MAX_ENTITY_PAGES);
+    let filteredRelatedPages = relatedPages;
+    if (hpDef.category === "hidden_conventions") {
+      filteredRelatedPages = relatedPages.filter((ep) => {
+        const node = nodeById.get(ep.node_id);
+        return node?.type === "team_member" || node?.attributes?.is_convention === true;
+      });
+    }
+    const cappedPages = filteredRelatedPages.slice(0, MAX_ENTITY_PAGES);
 
     if (cappedPages.length === 0) {
       const page: KB2HumanPageType = {
         page_id: plan.page_id,
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         title: hpDef.title,
         layer: hpDef.layer as KB2HumanPageLayer,
         category: hpDef.category,
@@ -192,10 +208,22 @@ ${entityPagesContext}`,
         };
       }).filter(Boolean) as { entity_page_id: string; section_name: string; item_index: number }[];
 
+      const entityNodeIds = (p.entity_refs ?? [])
+        .map((name) => {
+          const lower = name.toLowerCase();
+          const node = graphNodes.find((n) =>
+            n.display_name.toLowerCase() === lower ||
+            n.aliases.some((a) => a.toLowerCase() === lower),
+          );
+          return node?.node_id;
+        })
+        .filter(Boolean) as string[];
+
       return {
         heading: p.heading,
         body: p.body,
         entity_refs: p.entity_refs,
+        entity_node_ids: entityNodeIds,
         source_items: sourceItems,
       };
     });
@@ -203,6 +231,7 @@ ${entityPagesContext}`,
     const page: KB2HumanPageType = {
       page_id: plan.page_id,
       run_id: ctx.runId,
+      execution_id: ctx.executionId,
       title: hpDef.title,
       layer: hpDef.layer as KB2HumanPageLayer,
       category: hpDef.category,
@@ -219,7 +248,6 @@ ${entityPagesContext}`,
   }
 
   if (pages.length > 0) {
-    await tc.human_pages.deleteMany({ run_id: ctx.runId });
     await tc.human_pages.insertMany(pages);
   }
 

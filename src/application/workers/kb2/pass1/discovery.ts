@@ -39,18 +39,26 @@ RULES:
 - Source document types: Confluence = documented technical content, Jira = project tracking/ticketing, Slack = team conversations, GitHub = code/PRs, Customer Feedback = external user reports
 - If evidence comes from Confluence AND Jira, the project is DOCUMENTED
 - If evidence comes only from Jira, the project exists but may be UNDOCUMENTED (no Confluence docs)
-- If evidence comes only from Slack/GitHub, it is fully DISCOVERED/UNDOCUMENTED`;
+- If evidence comes only from Slack/GitHub, it is fully DISCOVERED/UNDOCUMENTED
+- A "project" is a multi-ticket initiative or feature with a defined scope. One-off bug fixes, dependency updates, and maintenance tasks are NOT projects — they are tickets at most.
+- Do NOT create a discovery for work that is just a single Jira ticket — that is already tracked.
+- For customer feedback: only create a proposed project/ticket if the same theme appears in 2+ submissions OR if the request describes a feature with clear scope.`;
 
 export const discoveryStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-discovery");
   const stepId = "pass1-step-8";
   const tc = getTenantCollections(ctx.companySlug);
 
-  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
-  const existingNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
+  const nodesExecId = await ctx.getStepExecutionId("pass1", 5);
+  const nodesFilter = nodesExecId ? { execution_id: nodesExecId } : { run_id: ctx.runId };
+  const existingNodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
 
   const existingEntityList = existingNodes
     .map((n) => `- ${n.display_name} [${n.type}]`)
@@ -88,6 +96,8 @@ export const discoveryStep: StepFunction = async (ctx) => {
 
   await ctx.onProgress(`Analyzing ${conversationDocs.length} documents for undocumented work...`, 5);
 
+  let runningEntityList = existingEntityList;
+
   for (let i = 0; i < conversationDocs.length; i += BATCH_SIZE) {
     if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const batch = conversationDocs.slice(i, i + BATCH_SIZE);
@@ -102,7 +112,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
     const result = await structuredGenerate({
       model,
       system: discoveryPrompt,
-      prompt: `EXISTING ENTITIES (do not re-discover these):\n${existingEntityList}\n\nDOCUMENTS TO ANALYZE:\n${batchText}`,
+      prompt: `EXISTING ENTITIES (do not re-discover these):\n${runningEntityList}\n\nDOCUMENTS TO ANALYZE:\n${batchText}`,
       schema: DiscoverySchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
@@ -121,14 +131,34 @@ export const discoveryStep: StepFunction = async (ctx) => {
     const discoveries = Array.isArray(result?.discoveries) ? result.discoveries : [];
     allDiscoveries.push(...discoveries);
 
+    for (const d of discoveries) {
+      runningEntityList += `\n- ${d.display_name} [${d.type}]`;
+    }
+
     await ctx.onProgress(
       `Batch ${batchNum}/${totalBatches}: found ${discoveries.length} discoveries (${allDiscoveries.length} total)`,
       Math.round(5 + (batchNum / totalBatches) * 80),
     );
   }
 
+  const seenDiscoveries = new Map<string, typeof allDiscoveries[0]>();
+  for (const d of allDiscoveries) {
+    const key = d.display_name.toLowerCase().trim();
+    if (!seenDiscoveries.has(key)) {
+      seenDiscoveries.set(key, d);
+    } else {
+      const existing = seenDiscoveries.get(key)!;
+      existing.evidence = `${existing.evidence}\n\nAdditional evidence: ${d.evidence}`;
+      if (d.confidence === "high" || (d.confidence === "medium" && existing.confidence === "low")) {
+        existing.confidence = d.confidence;
+      }
+      existing.related_entities = [...new Set([...existing.related_entities, ...d.related_entities])];
+    }
+  }
+  const dedupedDiscoveries = [...seenDiscoveries.values()];
+
   const existingNames = new Set(existingNodes.map((n) => n.display_name.toLowerCase()));
-  const uniqueDiscoveries = allDiscoveries.filter((d) => !existingNames.has(d.display_name.toLowerCase()));
+  const uniqueDiscoveries = dedupedDiscoveries.filter((d) => !existingNames.has(d.display_name.toLowerCase()));
 
   const newNodes: KB2GraphNodeType[] = [];
   for (const disc of uniqueDiscoveries) {
@@ -136,6 +166,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
     newNodes.push({
       node_id: randomUUID(),
       run_id: ctx.runId,
+      execution_id: ctx.executionId,
       type: validType as any,
       display_name: disc.display_name,
       aliases: [],
@@ -143,6 +174,9 @@ export const discoveryStep: StepFunction = async (ctx) => {
         discovery_category: disc.category,
         description: disc.description,
         related_entities: disc.related_entities,
+        status: disc.category.startsWith("past_") ? "completed" :
+                disc.category.startsWith("ongoing_") ? "active" : "proposed",
+        documentation_level: "undocumented",
       },
       source_refs: [{
         source_type: (() => {
@@ -177,7 +211,10 @@ export const discoveryStep: StepFunction = async (ctx) => {
       type: d.type,
       category: d.category,
       confidence: d.confidence,
-      evidence_preview: d.evidence.slice(0, 100),
+      description: d.description,
+      evidence: d.evidence,
+      source_document: d.source_document,
+      related_entities: d.related_entities,
     })),
   };
 };

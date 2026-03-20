@@ -286,7 +286,30 @@ function SourcesTab({
       }
     }
 
-    // 5. Sentence-level best match (high threshold to avoid wrong highlights)
+    // 5. Speaker-header-stripped match: remove leading "Name [date]:" from excerpt
+    const speakerStripped = cleanExcerpt.replace(/^\s*\w[\w\s.]*\[[\d\-\/]+\]:\s*\n?/, "").trim();
+    if (speakerStripped !== cleanExcerpt && speakerStripped.length > 20) {
+      const normStripped = normalizeForMatch(speakerStripped);
+      if (normFull.includes(normStripped)) {
+        const paragraphs: { text: string; start: number; end: number }[] = [];
+        const paraRe2 = /(?:\S[\s\S]*?)(?=\n\s*\n|$)/g;
+        let pm2: RegExpExecArray | null;
+        while ((pm2 = paraRe2.exec(content)) !== null) {
+          paragraphs.push({ text: pm2[0], start: pm2.index, end: pm2.index + pm2[0].length });
+        }
+        for (let i = 0; i < paragraphs.length; i++) {
+          let combined = "";
+          for (let j = i; j < paragraphs.length; j++) {
+            combined += (j > i ? " " : "") + paragraphs[j].text;
+            if (normalizeForMatch(combined).includes(normStripped)) {
+              return wrapMatch(content, paragraphs[i].start, paragraphs[j].end - paragraphs[i].start);
+            }
+          }
+        }
+      }
+    }
+
+    // 6. Sentence-level best match (high threshold to avoid wrong highlights)
     const excerptWords = new Set(excerptLower.split(/\s+/).filter((w) => w.length > 3));
     if (excerptWords.size >= 3) {
       const sentences = content.split(/(?<=[.!?\n])\s+/);
@@ -310,7 +333,7 @@ function SourcesTab({
       }
     }
 
-    // 6. No confident match -- show content without highlight rather than highlight wrong spot
+    // 7. No confident match -- show content without highlight rather than highlight wrong spot
     return <span className="whitespace-pre-wrap">{content}</span>;
   };
 

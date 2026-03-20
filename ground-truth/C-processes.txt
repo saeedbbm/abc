@@ -1,0 +1,203 @@
+================================================================================
+GROUND TRUTH — SECTION C: PROCESSES
+================================================================================
+
+Every repeatable workflow or practice the team follows, whether formally
+documented or informally practiced.
+
+Total process count: 9
+
+
+================================================================================
+PROCESS 1: PR Review and Merge Workflow
+================================================================================
+
+Name:       PR Review and Merge Workflow
+Status:     active
+Description:
+  1. Developer creates a feature branch from main
+  2. Opens a PR with a description of what was built and why
+  3. Gets at least one approval (Matt or Tim for most things)
+  4. Squash merge to main
+  5. CI/CD auto-deploys to staging
+  6. Manual promotion from staging to production
+
+Sources:
+  Confluence:   YES — "PawFinder Engineering Onboarding Guide" PR Process section
+  Jira:         NO
+  GitHub:       YES — every PR in the data follows this workflow
+  Slack:        NO (not discussed as a process, just practiced)
+
+
+================================================================================
+PROCESS 2: CI/CD Pipeline
+================================================================================
+
+Name:       CI/CD Pipeline (GitHub Actions)
+Status:     active
+Description:
+  - GitHub Actions runs automated tests on every PR
+  - On merge to main, auto-deploys to staging
+  - Manual promotion from staging to production
+  - CI runs frontend tests (Vitest + RTL), backend tests (Jest), and
+    E2E tests (Playwright)
+
+Sources:
+  Confluence:   YES — "PawFinder Engineering Onboarding Guide" (PR Process,
+                Testing sections)
+  Jira:         YES — PAW-1 (initial setup)
+  GitHub:       YES — referenced in PR descriptions ("CI runs all tests")
+  Slack:        YES — #engineering 2023-09-11 (Tim complains about flaky CI)
+
+
+================================================================================
+PROCESS 3: Shelter Data Sync
+================================================================================
+
+Name:       Shelter Partner Data Sync
+Status:     active
+Description:
+  1. Scheduler triggers sync every 15 minutes
+  2. For API shelters: fetch from their endpoints
+  3. For CSV shelters: process new uploads since last sync
+  4. Normalize data to internal schema
+  5. Diff against current database
+  6. Apply inserts, updates, soft-deletes
+  7. Invalidate relevant caches
+  Process is idempotent. Matt gets alerted if 3+ consecutive failures
+  for any shelter.
+
+Sources:
+  Confluence:   YES — "Shelter Partner Integration Spec" (full description)
+  Jira:         NO
+  GitHub:       NO
+  Slack:        NO
+
+
+================================================================================
+PROCESS 4: Database Migration Process
+================================================================================
+
+Name:       Database Migration Process
+Status:     active
+Description:
+  - Migrations live in /db/migrations in the API repo, timestamped
+  - Run with: npm run db:migrate
+  - Create new migration: npm run db:migrate:create -- --name name
+  - Post-incident rule: any migration on tables over 10K rows must be
+    reviewed by Matt before deploying
+  - CI pipeline flags ALTER TABLE statements on large tables
+
+Sources:
+  Confluence:   YES — "PawFinder Engineering Onboarding Guide" Database section,
+                "Incident Postmortem" Resolution section
+  Jira:         YES — PAW-29 (postmortem task)
+  GitHub:       NO
+  Slack:        YES — #engineering 2024-01-22 (Jack asks where migrations are,
+                Matt points to /db/migrations)
+
+
+================================================================================
+PROCESS 5: Design Handoff Process
+================================================================================
+
+Name:       Design Handoff (Kim to Frontend)
+Status:     informal
+Description:
+  Kim creates designs in Figma, shares the Figma link with the implementing
+  developer (Tim or Jill). Sometimes shares mockups in #design Slack channel.
+  No formal design review gate — Kim and Sarah discuss designs in #design,
+  then Kim hands off directly to the developer.
+
+Sources:
+  Confluence:   NO
+  Jira:         NO (tickets reference "Kim's designs" but no handoff process)
+  GitHub:       YES — PR descriptions reference "per Kim's designs" (PR #18,
+                PR #47)
+  Slack:        YES — #general 2023-04-03 (Kim: "design handoff for profile
+                cards is done, Tim has the Figma link"), #design conversations
+                where Kim discusses designs with Sarah
+
+
+================================================================================
+PROCESS 6: Quarterly Dependency Updates
+================================================================================
+
+Name:       Quarterly Dependency Updates
+Status:     active
+Description:
+  Tim performs quarterly dependency bumps for the frontend repo. Includes
+  updating React, testing libraries, and patching known vulnerabilities.
+
+Sources:
+  Confluence:   NO
+  Jira:         YES — PAW-25 ("Quarterly dependency updates — Q3 2025")
+  GitHub:       YES — PR #63 ("Dependency updates Q3 2025")
+  Slack:        NO
+
+
+================================================================================
+PROCESS 7: Code Review Assignment
+================================================================================
+
+Name:       Code Review Assignment
+Status:     informal
+Description:
+  Reviews are assigned by mentorship relationship, not strictly by repo.
+  Matt reviews all of Jack's PRs regardless of repo (including Jack's
+  pawfinder-web PR #49). Tim reviews all of Jill's PRs. When one is
+  absent, the other covers. No formal CODEOWNERS file mentioned.
+  - Jack's PRs: always reviewed by Matt (even web-repo PRs like PR #49)
+  - Jill's PRs: always reviewed by Tim (sometimes also Matt, e.g. PR #55)
+  - Tim's PRs: reviewed by Matt
+  - Matt's PRs: reviewed by Tim
+
+Sources:
+  Confluence:   YES — "PawFinder Engineering Onboarding Guide" says "Get at
+                least one approval (Matt or Tim for most things)"
+  Jira:         NO
+  GitHub:       YES — visible in reviewer assignments across all PRs
+  Slack:        YES — #engineering 2025-04-14 (Matt asks Tim to cover reviews
+                while he's out)
+
+
+================================================================================
+PROCESS 8: Sprint Planning and Standup
+================================================================================
+
+Name:       Sprint Planning and Standups
+Status:     informal
+Description:
+  Sarah manages sprint planning and assigns work. Standups appear to happen
+  (Slack #general 2023-04-03 "Team standup notes") but are not consistently
+  visible in the data. Sprint numbers are referenced in Jira tickets
+  (Sprint 1 through Sprint 32). Quarterly planning sessions occur
+  (Q1 2023, Q4 2024, Q3 2024 roadmap).
+
+Sources:
+  Confluence:   YES — "Q3 2024 Product Roadmap"
+  Jira:         YES — Sprint fields on all tickets
+  GitHub:       NO
+  Slack:        YES — #general 2023-04-03 (standup notes), #general 2024-09-16
+                (Q4 planning), #general 2023-01-17 (Q1 priorities)
+
+
+================================================================================
+PROCESS 9: Onboarding New Developers
+================================================================================
+
+Name:       New Developer Onboarding
+Status:     active
+Description:
+  New devs shadow a senior team member for their first couple weeks.
+  Backend devs shadow Matt, frontend devs shadow Tim. An onboarding
+  guide exists in Confluence. Kim updates design system docs.
+
+Sources:
+  Confluence:   YES — "PawFinder Engineering Onboarding Guide"
+  Jira:         YES — PAW-28 ("Update onboarding docs for new developers")
+  GitHub:       NO
+  Slack:        YES — #general 2024-01-08 (Sarah announces Jack, Matt will
+                onboard him), #engineering 2024-01-22 (Jack's first week),
+                #engineering 2024-06-03 (Jill's first week, Tim helping)
+================================================================================

@@ -40,6 +40,8 @@ export const KB2EdgeTypeEnum = z.enum([
   "RUNS_ON",
   "BUILT_BY",
   "RESOLVES",
+  "PROPOSED_BY",
+  "APPLIES_TO",
 ]);
 export type KB2EdgeType = z.infer<typeof KB2EdgeTypeEnum>;
 
@@ -103,6 +105,7 @@ export type KB2EvidenceRefType = z.infer<typeof KB2EvidenceRef>;
 export const KB2GraphNode = z.object({
   node_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   type: KB2NodeTypeEnum,
   display_name: z.string(),
   aliases: z.array(z.string()).default([]),
@@ -116,6 +119,7 @@ export type KB2GraphNodeType = z.infer<typeof KB2GraphNode>;
 export const KB2GraphEdge = z.object({
   edge_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   source_node_id: z.string(),
   target_node_id: z.string(),
   type: KB2EdgeTypeEnum,
@@ -127,6 +131,7 @@ export type KB2GraphEdgeType = z.infer<typeof KB2GraphEdge>;
 export const KB2Claim = z.object({
   claim_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   text: z.string(),
   entity_ids: z.array(z.string()).default([]),
   source_page_id: z.string().optional(),
@@ -194,6 +199,7 @@ export type KB2VerificationCardType = z.infer<typeof KB2VerificationCard>;
 export const KB2EntityPage = z.object({
   page_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   node_id: z.string(),
   node_type: KB2NodeTypeEnum,
   title: z.string(),
@@ -225,6 +231,7 @@ export type KB2EntityPageType = z.infer<typeof KB2EntityPage>;
 export const KB2HumanPage = z.object({
   page_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   title: z.string(),
   layer: KB2HumanPageLayerEnum,
   category: z.string(),
@@ -232,6 +239,7 @@ export const KB2HumanPage = z.object({
     heading: z.string(),
     body: z.string(),
     entity_refs: z.array(z.string()).default([]),
+    entity_node_ids: z.array(z.string()).default([]),
     source_items: z.array(z.object({
       entity_page_id: z.string(),
       section_name: z.string(),
@@ -286,6 +294,22 @@ export const KB2RunStep = z.object({
     input_tokens: z.number().default(0),
     output_tokens: z.number().default(0),
     cost_usd: z.number().default(0),
+  }).optional(),
+  highlight_failures: z.object({
+    checked_at: z.string(),
+    algorithm_version: z.number(),
+    failures: z.array(z.string()),
+    total_checked: z.number(),
+    failure_details: z.array(z.object({
+      entity_key: z.string(),
+      source_ref: z.object({
+        source_type: z.string(),
+        doc_id: z.string(),
+        title: z.string(),
+        excerpt_preview: z.string(),
+      }),
+      reason: z.string(),
+    })),
   }).optional(),
 });
 export type KB2RunStepType = z.infer<typeof KB2RunStep>;

@@ -10,8 +10,10 @@ export const evidenceUpgradeStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   await ctx.onProgress("Loading low-confidence claims...", 0);
 
+  const claimsExecId = await ctx.getStepExecutionId("pass1", 14);
+  const claimsBaseFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
   const claims = await tc.claims
-    .find({ run_id: ctx.runId, confidence: "low" })
+    .find({ ...claimsBaseFilter, confidence: "low" })
     .toArray();
 
   if (claims.length === 0) {
@@ -40,8 +42,11 @@ export const evidenceUpgradeStep: StepFunction = async (ctx) => {
       });
 
       if (results.length >= 2) {
+        const claimUpdateFilter = claimsExecId
+          ? { claim_id: claim.claim_id, execution_id: claimsExecId }
+          : { claim_id: claim.claim_id, run_id: ctx.runId };
         await tc.claims.updateOne(
-          { claim_id: claim.claim_id, run_id: ctx.runId },
+          claimUpdateFilter,
           { $set: { confidence: "medium" } },
         );
         upgradedCount++;

@@ -1,0 +1,346 @@
+================================================================================
+GROUND TRUTH — SECTION D: TEAM MEMBERS
+================================================================================
+
+Every team member appearing in the input data, with role, responsibilities,
+ownership areas, and linked decisions/patterns from Section B.
+
+Total team member count: 6
+
+
+================================================================================
+MEMBER 1: Matt
+================================================================================
+
+Full name:      Matt (no last name given in data)
+Role:           Architect / Tech Lead
+Joined:         Before 2023 (pre-dates the data)
+
+Responsibilities:
+  - Owns all backend/API architecture
+  - Reviews all backend PRs (every PR by Jack goes through Matt)
+  - Reviews Tim's PRs
+  - Sets coding standards and API design patterns
+  - Manages database migrations (post-incident: must approve large-table
+    migrations)
+  - Receives alerts for shelter data sync failures
+  - Onboards new backend developers (onboarded Jack in Jan 2024)
+
+Repos:          pawfinder/pawfinder-api (primary), pawfinder/pawfinder-web
+                (authors and reviews)
+
+Authored PRs:
+  - PR #12 (Auth token refresh fix, 2023-02-06) — pawfinder-web
+  - PR #23 (Adoption chooser page, 2023-07-24) — pawfinder-web
+  - PR #27 (API response standardization, 2023-05-15) — pawfinder-api
+
+Reviewed PRs:
+  - PR #18 (Tim's pet profile cards)
+  - PR #35 (Jack's shelter info endpoint)
+  - PR #43 (Jill's shelter comparison — also reviewed by Tim)
+  - PR #47 (Tim's donation page)
+  - PR #49 (Jack's shelter events browser)
+  - PR #52 (Jack's volunteer portal backend)
+  - PR #55 (Jill's volunteer portal frontend — also reviewed by Tim)
+  - PR #58 (Jack's supply tracking backend)
+  - PR #63 (Tim's quarterly dependency updates Q3 2025)
+
+Jira tickets:
+  - PAW-1 (CI/CD setup)
+  - PAW-3 (Pet search and filter backend)
+  - PAW-5 (Auth token refresh bug)
+  - PAW-7 (API response standardization)
+  - PAW-8 (Adoption chooser page)
+  - PAW-28 (Update onboarding docs)
+  - PAW-29 (DB migration postmortem)
+
+Associated decisions from Section B:
+  - Decision 3: Matt's Client-Side Browse Pattern (OWNER)
+  - Decision 6: Standardized API Response Envelope (OWNER)
+  - Decision 7: PostgreSQL (inferred — onboarding guide states the standard
+    but does not attribute who chose it)
+  - Decision 8: Squash Merge to Main (inferred — same caveat)
+  - Decision 11: ISO 8601 Date Format (OWNER)
+  - Decision 12: Structured Data Over Raw Strings (OWNER)
+  - Decision 13: Idempotent DELETE Endpoints (OWNER)
+  - Decision 14: Shelter Data Sync Architecture (OWNER)
+  - Decision 15: Migration Review for Large Tables (OWNER)
+  - Decision 16: API Versioning Convention (OWNER)
+
+Key quote (re: architecture philosophy):
+  Slack 2023-05-10: "the response shape is a mess right now — different
+  formats for different routes. going to standardize everything"
+
+
+================================================================================
+MEMBER 2: Sarah
+================================================================================
+
+Full name:      Sarah (no last name given in data)
+Role:           PM / CTO
+Joined:         Before 2023 (pre-dates the data)
+
+Responsibilities:
+  - Product strategy and roadmapping
+  - Sprint planning and prioritization
+  - Customer feedback review ("quarterly feedback review" in Slack)
+  - Stakeholder communication
+  - Approves design direction (works closely with Kim)
+  - Wrote the Confluence product specs (Volunteer Portal, Redesign doc)
+  - Sets quarterly priorities
+
+Repos:          None (does not commit code)
+
+Authored PRs:   None
+Reviewed PRs:   None
+
+Jira tickets:
+  - PAW-12 (Update about page copy)
+  - PAW-33 (2026 roadmap planning)
+  - Reporter on most tickets (she creates/assigns work in planning)
+
+Associated decisions from Section B:
+  - None owned, but approves Kim's design direction
+
+Key quotes:
+  Slack 2023-01-09: "we're kicking off planning for Q1 this week. I'll be
+  scheduling 1:1s with everyone to talk priorities"
+  Slack 2025-10-06: "we've been getting more customer feedback lately about
+  some new feature ideas. I'll be going through it all this week"
+
+
+================================================================================
+MEMBER 3: Tim
+================================================================================
+
+Full name:      Tim (no last name given in data)
+Role:           Senior Frontend Developer
+Joined:         Before 2023 (pre-dates the data)
+
+Responsibilities:
+  - Leads all frontend architecture decisions
+  - Reviews all of Jill's PRs; fills in for Matt on other reviews when
+    Matt is out
+  - Mentors Jill (hands-on: first-week pairing, code review guidance)
+  - Owns quarterly dependency updates
+  - Manages React, TypeScript, CSS Modules standards on the frontend
+
+Repos:          pawfinder/pawfinder-web (primary)
+
+Authored PRs:
+  - PR #18 (Pet profile cards, 2023-03-28)
+  - PR #31 (Shelter locations page, 2023-09-18)
+  - PR #47 (Donation page frontend, 2024-03-25)
+  - PR #63 (Quarterly dependency updates Q3 2025, 2025-09-08)
+
+Reviewed PRs:
+  - PR #12 (Matt's auth token refresh fix)
+  - PR #23 (Matt's adoption chooser)
+  - PR #39 (Jill's contact form)
+  - PR #43 (Jill's shelter comparison — also reviewed by Matt)
+  - PR #55 (Jill's volunteer portal frontend — also reviewed by Matt)
+  - PR #61 (Jill's mobile nav refactor)
+  - PR #65 (Jill's pet card image fallback)
+
+Jira tickets:
+  - PAW-4 (Pet browse page layout)
+  - PAW-6 (Pet categories page — frontend layout)
+  - PAW-9 (Shelter locations page)
+  - PAW-10 (Fix flaky CI tests)
+  - PAW-15 (Donation page frontend)
+  - PAW-18 (Site navigation improvements — ongoing)
+  - PAW-25 (Quarterly dependency updates Q3 2025)
+
+Associated decisions from Section B:
+  - Decision 2: Tim's Layout Convention (OWNER)
+  - Decision 5: CSS Modules with camelCase (OWNER/enforcer)
+  - Decision 10: Frontend Testing Stack (inferred — onboarding guide states
+    the standard but does not attribute who chose it)
+
+Key quote (re: layout thinking):
+  Slack 2024-05-13: "horizontal layout...shelters laid out left to right
+  across the top so you can scan across and compare attributes"
+
+
+================================================================================
+MEMBER 4: Kim
+================================================================================
+
+Full name:      Kim (no last name given in data)
+Role:           UX Designer
+Joined:         Before 2023 (pre-dates the data)
+
+Responsibilities:
+  - All UI/UX design work (Figma mockups)
+  - Color choices, visual styling, layout aesthetics
+  - Design handoffs to frontend developers (Tim, Jill)
+  - Maintains design system documentation
+  - Works closely with Sarah on product direction
+  - Handles mobile mockups for Phase 4
+
+Repos:          None (does not commit code)
+
+Authored PRs:   None
+Reviewed PRs:   None
+
+Jira tickets:
+  - PAW-2 (Design pet profile cards)
+  - PAW-11 (Shelter locations page — design)
+
+Associated decisions from Section B:
+  - Decision 1: Kim's Color Convention (OWNER)
+
+Key quotes:
+  Slack 2023-03-14: "pink accent for the girls and blue for the boys"
+  Slack 2024-02-19: "main donate button I'm making green — it's a
+  financial action"
+  Slack 2025-03-10: "no financial stuff on this page so it's just our
+  standard blues and grays"
+
+
+================================================================================
+MEMBER 5: Jack
+================================================================================
+
+Full name:      Jack (no last name given in data)
+Role:           Junior Backend Developer
+Joined:         January 2024
+  Proof:        Slack #general 2024-01-08 (Sarah: "Jack starts Monday"),
+                Slack #engineering 2024-01-22 (Jack's first week questions)
+
+Responsibilities:
+  - Backend API development
+  - Database work, API endpoints
+  - First ticket: PAW-13 (Shelter info API endpoint)
+  - Shadowed Matt during onboarding
+
+Repos:          pawfinder/pawfinder-api (primary), pawfinder/pawfinder-web
+                (PR #49 — shelter events browser is a web-repo PR)
+
+Authored PRs:
+  - PR #35 (Shelter info endpoint, 2024-03-12)
+  - PR #49 (Shelter events browser, 2024-08-05)
+  - PR #52 (Volunteer portal backend, 2024-09-23)
+  - PR #58 (Supply tracking backend, 2025-06-16)
+
+Reviewed PRs:   None (too junior to be a reviewer in the data)
+
+Jira tickets:
+  - PAW-13 (Shelter info endpoint)
+  - PAW-20 (Volunteer portal backend)
+  - PAW-23 (Supply tracking backend)
+  - PAW-31 (Event calendar — API part)
+  - PAW-32 (Supply orders backend)
+  - PAW-34 (Shelter events browser)
+
+Associated decisions from Section B:
+  - None owned — Jack implements others' patterns and is often corrected
+    by Matt (PRs #49, #52, #58) and Tim (n/a — Tim doesn't review Jack)
+
+Growth trajectory visible in the data:
+  - Jan 2024: asking basic questions (where are migrations, how to parse
+    hours, what date format to use)
+  - Mid 2024: building features solo (events browser, volunteer backend)
+    but still getting corrected by Matt on architectural patterns
+  - 2025: making reasonable architecture calls (pagination for 30-40
+    supply items — Matt approves)
+
+
+================================================================================
+MEMBER 6: Jill
+================================================================================
+
+Full name:      Jill (no last name given in data)
+Role:           Junior Frontend Developer
+Joined:         June 2024
+  Proof:        Slack #engineering 2024-06-03 (Jill's first week, Tim
+                helps her set up)
+
+Responsibilities:
+  - Frontend development
+  - Implements Kim's designs in React
+  - First ticket: PAW-14 (Contact form page)
+  - Shadowed Tim during onboarding
+
+Repos:          pawfinder/pawfinder-web (primary)
+
+Authored PRs:
+  - PR #39 (Contact form page, 2024-06-10)
+  - PR #43 (Shelter comparison feature, 2024-07-08)
+  - PR #55 (Volunteer portal frontend, 2024-10-14)
+  - PR #61 (Mobile nav refactor, 2025-08-11)
+  - PR #65 (Pet card image fallback, 2025-10-20)
+
+Reviewed PRs:   None (too junior to be a reviewer in the data)
+
+Jira tickets:
+  - PAW-14 (Contact form page)
+  - PAW-17 (Shelter comparison page)
+  - PAW-19 (Mobile responsiveness phase 1)
+  - PAW-21 (Volunteer portal frontend)
+  - PAW-22 (Fix broken shelter links on about page)
+  - PAW-24 (Supply tracking frontend — in progress)
+  - PAW-26 (Fix pet card image fallback)
+  - PAW-30 (Mobile nav refactor)
+
+Associated decisions from Section B:
+  - None owned — Jill implements Tim's and Kim's patterns and is corrected
+    by Tim (PR #55: layout change from tabs to vertical nav, PR #39:
+    email validation and component reuse)
+
+Growth trajectory visible in the data:
+  - Jun 2024: first week questions about CSS modules vs styled-components,
+    Tim teaching her camelCase convention
+  - Jul 2024: building shelter comparison solo (PR #43), still getting
+    layout corrections from Tim
+  - Oct 2024: volunteer portal frontend, more confident but Tim still
+    adjusts her layout choices
+  - 2025: handling dependency updates, mobile refactors
+
+
+================================================================================
+TEAM STRUCTURE SUMMARY
+================================================================================
+
+Backend:
+  Matt (architect, lead) → Jack (junior, Jan 2024)
+
+Frontend:
+  Tim (senior, lead) → Jill (junior, Jun 2024)
+
+Design:
+  Kim (UX designer, works with Sarah)
+
+Product:
+  Sarah (PM/CTO, owns roadmap and customer feedback)
+
+Reporting lines (implied, not explicit):
+  Sarah sets priorities → Matt and Tim execute → Jack and Jill implement
+  Kim ↔ Sarah (design direction) → Kim → Tim/Jill (design handoff)
+
+
+================================================================================
+KNOWLEDGE DISTRIBUTION
+================================================================================
+
+Who knows what (relevant for bus factor analysis):
+
+Kim's color pattern:
+  - Kim (creator), Sarah (approved), Tim (implements), Jill (implements)
+  - NOT Jack, NOT Matt (Matt has not commented on colors in any PR)
+
+Tim's layout pattern:
+  - Tim (creator), Jill (learns from Tim's corrections)
+  - Matt (aware — engages with Tim's comparison layout reasoning in Slack
+    2024-05-13, asks follow-up questions)
+  - Kim (aware — says "Tim had specific ideas about the layout" in Slack
+    2024-06-10, worked with his wireframes)
+  - Sarah (aware — her Confluence redesign doc references "Tim's design
+    direction" for the comparison page)
+  - NOT Jack
+
+Matt's client-side browse pattern:
+  - Matt (creator), Jack (learns from Matt's corrections), Tim (sees in
+    PR #23 description and PR #47 review)
+  - NOT Jill, NOT Kim, NOT Sarah
+================================================================================

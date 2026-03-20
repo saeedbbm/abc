@@ -25,10 +25,15 @@ export async function GET(
   const { companySlug } = await params;
   const type = request.nextUrl.searchParams.get("type");
   const runId = request.nextUrl.searchParams.get("run_id");
+  const executionId = request.nextUrl.searchParams.get("execution_id");
   const tc = getTenantCollections(companySlug);
 
   const filter: Record<string, any> = {};
-  if (runId) filter.run_id = runId;
+  if (executionId) {
+    filter.execution_id = executionId;
+  } else if (runId) {
+    filter.run_id = runId;
+  }
 
   switch (type) {
     case "raw_input": {
@@ -62,7 +67,13 @@ export async function GET(
       });
     }
     case "inputs": {
-      const doc = await tc.input_snapshots.findOne(filter, { sort: { created_at: -1 } });
+      if (executionId) {
+        const doc = await tc.input_snapshots.findOne({ execution_id: executionId });
+        if (doc) return Response.json({ snapshot: doc });
+      }
+      const inputFilter: Record<string, any> = {};
+      if (runId) inputFilter.run_id = runId;
+      const doc = await tc.input_snapshots.findOne(inputFilter, { sort: { created_at: -1 } });
       return Response.json({ snapshot: doc });
     }
     case "people": {
@@ -108,36 +119,66 @@ export async function GET(
       return Response.json({ people: derived });
     }
     case "graph_nodes": {
-      const gnFilter = { ...filter };
-      if (!gnFilter.run_id) {
-        const runIdsWithNodes = await kb2GraphNodesCollection.distinct("run_id");
+      if (executionId) {
+        const nodes = await tc.graph_nodes.find({ execution_id: executionId }).toArray();
+        if (nodes.length > 0) return Response.json({ nodes });
+      }
+      let effectiveRunId = runId ?? undefined;
+      if (!effectiveRunId) {
+        const runIdsWithNodes = await tc.graph_nodes.distinct("run_id");
         if (runIdsWithNodes.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithNodes }, company_slug: companySlug, status: "completed" },
+          const latestRun = await tc.runs.findOne(
+            { run_id: { $in: runIdsWithNodes }, status: "completed" },
             { sort: { completed_at: -1 }, projection: { run_id: 1 } },
           );
-          if (latestRun) gnFilter.run_id = latestRun.run_id;
+          if (latestRun) effectiveRunId = (latestRun as any).run_id;
         }
       }
-      const nodes = await kb2GraphNodesCollection.find(gnFilter).toArray();
+      const gnFilter: Record<string, any> = {};
+      if (effectiveRunId) gnFilter.run_id = effectiveRunId;
+      const nodes = await tc.graph_nodes.find(gnFilter).toArray();
       return Response.json({ nodes });
     }
     case "graph_edges": {
-      const edges = await kb2GraphEdgesCollection.find(filter).toArray();
+      if (executionId) {
+        const edges = await tc.graph_edges.find({ execution_id: executionId }).toArray();
+        if (edges.length > 0) return Response.json({ edges });
+      }
+      const edgeFilter: Record<string, any> = {};
+      if (runId) edgeFilter.run_id = runId;
+      const edges = await tc.graph_edges.find(edgeFilter).toArray();
       return Response.json({ edges });
     }
     case "claims": {
-      const claims = await kb2ClaimsCollection.find(filter).toArray();
+      if (executionId) {
+        const claims = await tc.claims.find({ execution_id: executionId }).toArray();
+        if (claims.length > 0) return Response.json({ claims });
+      }
+      const claimsFilter: Record<string, any> = {};
+      if (runId) claimsFilter.run_id = runId;
+      const claims = await tc.claims.find(claimsFilter).toArray();
       return Response.json({ claims });
     }
     case "fact_groups": {
-      const groups = await kb2FactGroupsCollection.find(filter).toArray();
+      if (executionId) {
+        const groups = await tc.fact_groups.find({ execution_id: executionId }).toArray();
+        if (groups.length > 0) return Response.json({ groups });
+      }
+      const fgFilter: Record<string, any> = {};
+      if (runId) fgFilter.run_id = runId;
+      const groups = await tc.fact_groups.find(fgFilter).toArray();
       return Response.json({ groups });
     }
     case "verify_cards": {
-      const vcFilter = { ...filter };
-      if (!vcFilter.run_id) {
-        const runIdsWithCards = await kb2VerificationCardsCollection.distinct("run_id");
+      if (executionId) {
+        const cards = await tc.verification_cards.find({ execution_id: executionId }).toArray();
+        if (cards.length > 0) return Response.json({ cards });
+      }
+      const vcFilter: Record<string, any> = {};
+      if (runId) {
+        vcFilter.run_id = runId;
+      } else {
+        const runIdsWithCards = await tc.verification_cards.distinct("run_id");
         if (runIdsWithCards.length > 0) {
           const latestRun = await kb2RunsCollection.findOne(
             { run_id: { $in: runIdsWithCards }, company_slug: companySlug, status: "completed" },
@@ -146,13 +187,19 @@ export async function GET(
           if (latestRun) vcFilter.run_id = latestRun.run_id;
         }
       }
-      const cards = await kb2VerificationCardsCollection.find(vcFilter).toArray();
+      const cards = await tc.verification_cards.find(vcFilter).toArray();
       return Response.json({ cards });
     }
     case "entity_pages": {
-      const epFilter = { ...filter };
-      if (!epFilter.run_id) {
-        const runIdsWithEP = await kb2EntityPagesCollection.distinct("run_id");
+      if (executionId) {
+        const pages = await tc.entity_pages.find({ execution_id: executionId }).toArray();
+        if (pages.length > 0) return Response.json({ pages });
+      }
+      const epFilter: Record<string, any> = {};
+      if (runId) {
+        epFilter.run_id = runId;
+      } else {
+        const runIdsWithEP = await tc.entity_pages.distinct("run_id");
         if (runIdsWithEP.length > 0) {
           const latestRun = await kb2RunsCollection.findOne(
             { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
@@ -161,13 +208,19 @@ export async function GET(
           if (latestRun) epFilter.run_id = latestRun.run_id;
         }
       }
-      const pages = await kb2EntityPagesCollection.find(epFilter).toArray();
+      const pages = await tc.entity_pages.find(epFilter).toArray();
       return Response.json({ pages });
     }
     case "human_pages": {
-      const hpFilter = { ...filter };
-      if (!hpFilter.run_id) {
-        const runIdsWithHP = await kb2HumanPagesCollection.distinct("run_id");
+      if (executionId) {
+        const pages = await tc.human_pages.find({ execution_id: executionId }).toArray();
+        if (pages.length > 0) return Response.json({ pages });
+      }
+      const hpFilter: Record<string, any> = {};
+      if (runId) {
+        hpFilter.run_id = runId;
+      } else {
+        const runIdsWithHP = await tc.human_pages.distinct("run_id");
         if (runIdsWithHP.length > 0) {
           const latestRun = await kb2RunsCollection.findOne(
             { run_id: { $in: runIdsWithHP }, company_slug: companySlug, status: "completed" },
@@ -176,7 +229,7 @@ export async function GET(
           if (latestRun) hpFilter.run_id = latestRun.run_id;
         }
       }
-      const pages = await kb2HumanPagesCollection.find(hpFilter).toArray();
+      const pages = await tc.human_pages.find(hpFilter).toArray();
       return Response.json({ pages });
     }
     case "runs": {
@@ -204,9 +257,15 @@ export async function GET(
       return Response.json({ calls });
     }
     case "tickets": {
-      const tFilter = { ...filter };
-      if (!tFilter.run_id) {
-        const runIdsWithTickets = await kb2TicketsCollection.distinct("run_id");
+      if (executionId) {
+        const tickets = await tc.tickets.find({ execution_id: executionId }).sort({ created_at: -1 }).toArray();
+        if (tickets.length > 0) return Response.json({ tickets });
+      }
+      const tFilter: Record<string, any> = {};
+      if (runId) {
+        tFilter.run_id = runId;
+      } else {
+        const runIdsWithTickets = await tc.tickets.distinct("run_id");
         if (runIdsWithTickets.length > 0) {
           const latestRun = await kb2RunsCollection.findOne(
             { run_id: { $in: runIdsWithTickets }, company_slug: companySlug, status: "completed" },
@@ -215,13 +274,19 @@ export async function GET(
           if (latestRun) tFilter.run_id = latestRun.run_id;
         }
       }
-      const tickets = await kb2TicketsCollection.find(tFilter).sort({ created_at: -1 }).toArray();
+      const tickets = await tc.tickets.find(tFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ tickets });
     }
     case "howto": {
-      const htFilter = { ...filter };
-      if (!htFilter.run_id) {
-        const runIdsWithHowto = await kb2HowtoCollection.distinct("run_id");
+      if (executionId) {
+        const howtos = await tc.howto.find({ execution_id: executionId }).sort({ created_at: -1 }).toArray();
+        if (howtos.length > 0) return Response.json({ howtos });
+      }
+      const htFilter: Record<string, any> = {};
+      if (runId) {
+        htFilter.run_id = runId;
+      } else {
+        const runIdsWithHowto = await tc.howto.distinct("run_id");
         if (runIdsWithHowto.length > 0) {
           const latestRun = await kb2RunsCollection.findOne(
             { run_id: { $in: runIdsWithHowto }, company_slug: companySlug, status: "completed" },
@@ -230,13 +295,20 @@ export async function GET(
           if (latestRun) htFilter.run_id = latestRun.run_id;
         }
       }
-      const howtos = await kb2HowtoCollection.find(htFilter).sort({ created_at: -1 }).toArray();
+      const howtos = await tc.howto.find(htFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ howtos });
     }
-    case "graph_nodes": {
-      if (!runId) return Response.json({ error: "run_id required" }, { status: 400 });
-      const nodes = await tc.graph_nodes.find({ run_id: runId }).toArray();
-      return Response.json({ nodes });
+    case "highlight_check": {
+      const hcExecId = request.nextUrl.searchParams.get("execution_id");
+      if (hcExecId) {
+        const hcStep = await tc.run_steps.findOne({ execution_id: hcExecId });
+        return Response.json({ highlight_failures: (hcStep as any)?.highlight_failures ?? null });
+      }
+      if (!runId) return Response.json({ error: "run_id or execution_id required" }, { status: 400 });
+      const hcStepId = request.nextUrl.searchParams.get("step_id");
+      if (!hcStepId) return Response.json({ error: "step_id required" }, { status: 400 });
+      const hcStep = await tc.run_steps.findOne({ run_id: runId, step_id: hcStepId }, { sort: { execution_number: -1 } });
+      return Response.json({ highlight_failures: (hcStep as any)?.highlight_failures ?? null });
     }
     case "parsed_doc": {
       const docId = request.nextUrl.searchParams.get("doc_id");
@@ -292,11 +364,57 @@ export async function GET(
           return true;
         });
         if (titleMatch) return Response.json({ document: titleMatch });
+
+        const partialMatch = docs.find((d: any) => {
+          const title = (d.title ?? "").toLowerCase();
+          if (docIdLower.startsWith(title) || title.startsWith(docIdLower)) {
+            if (sourceTypeLower) {
+              return (d.provider ?? "").toLowerCase() === sourceTypeLower;
+            }
+            return true;
+          }
+          return false;
+        });
+        if (partialMatch) return Response.json({ document: partialMatch });
       }
 
       return Response.json({ error: "Document not found" }, { status: 404 });
     }
     default:
       return Response.json({ error: `Unknown type: ${type}` }, { status: 400 });
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ companySlug: string }> },
+) {
+  const { companySlug } = await params;
+  const body = await request.json();
+  const tc = getTenantCollections(companySlug);
+
+  switch (body.type) {
+    case "save_highlight_check": {
+      const { run_id, step_id, execution_id: saveExecId, highlight_failures } = body;
+      if (!highlight_failures) {
+        return Response.json({ error: "highlight_failures required" }, { status: 400 });
+      }
+      if (saveExecId) {
+        await tc.run_steps.updateOne(
+          { execution_id: saveExecId },
+          { $set: { highlight_failures } },
+        );
+      } else if (run_id && step_id) {
+        await tc.run_steps.updateOne(
+          { run_id, step_id },
+          { $set: { highlight_failures } },
+        );
+      } else {
+        return Response.json({ error: "execution_id or (run_id + step_id) required" }, { status: 400 });
+      }
+      return Response.json({ ok: true });
+    }
+    default:
+      return Response.json({ error: `Unknown POST type: ${body.type}` }, { status: 400 });
   }
 }

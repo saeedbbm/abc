@@ -300,11 +300,11 @@ Jira prefix: \${project_prefix}
 - library: A dependency/package/framework with version info (React 18, Django 4.2)
 - database: A data store with schema (PostgreSQL database, MongoDB, Redis-as-datastore)
 - environment: A deployment environment (dev, staging, production)
-- project: A feature initiative or body of work with timeline. MUST include attributes.status (one of: "active", "completed", "proposed", "planned") and attributes.documentation_level (one of: "documented" if it has Confluence/wiki docs, "undocumented" if only mentioned in Slack/PRs/code). When a larger project has named sub-features or phases, extract BOTH the parent project AND each sub-feature as separate project entities.
+- project: A feature initiative or body of work with timeline. MUST include attributes.status (one of: "active", "completed", "proposed") and attributes.documentation_level (one of: "documented" if it has Confluence/wiki docs, "undocumented" if only mentioned in Slack/PRs/code). When a larger project has named sub-features or phases, extract BOTH the parent project AND each sub-feature as separate project entities.
 - ticket: A Jira/issue tracker item — bug, story, task
 - pull_request: A GitHub/GitLab pull request or merge request
 - decision: An architecture decision, technology choice, or design tradeoff — explicit or implicit. Look for: "we decided to...", "we chose X over Y", "the tradeoff was...", "we went with...", alternatives discussed in PR reviews, Slack debates that concluded with a choice. MUST include attributes: attributes.decision_status (one of: "decided", "pending", "superseded", "reversed"), attributes.rationale (why this choice was made, 1-2 sentences), attributes.alternatives_considered (what was rejected, array of strings, can be empty), attributes.scope (what this decision affects, e.g. "authentication", "database", "deployment"). SHOULD include if present: attributes.decided_by (person or team who made the call), attributes.consequences (known tradeoffs or accepted downsides), attributes.superseded_by (name of the decision that replaced this one, if reversed/superseded).
-- process: A repeatable workflow, procedure, or practice the team follows — formal or informal. Look for: "our process for...", "how we do...", runbooks, on-call procedures, release checklists, code review norms, incident response steps, onboarding steps. MUST include attributes: attributes.process_status (one of: "active", "deprecated", "proposed", "informal"), attributes.documentation_level (one of: "documented", "undocumented" — same logic as project). SHOULD include if present: attributes.owner (person or team responsible), attributes.trigger (what initiates this process, e.g. "new PR", "incident alert", "new hire"), attributes.steps_summary (brief ordered list of key steps).
+- process: A repeatable workflow, procedure, or practice the team follows — formal or informal. Look for: "our process for...", "how we do...", runbooks, on-call procedures, release checklists, code review norms, incident response steps, onboarding steps. MUST include attributes: attributes.status (one of: "active", "deprecated", "proposed", "informal"), attributes.documentation_level (one of: "documented", "undocumented" — same logic as project). SHOULD include if present: attributes.owner (person or team responsible), attributes.trigger (what initiates this process, e.g. "new PR", "incident alert", "new hire"), attributes.steps_summary (brief ordered list of key steps).
 - pipeline: A CI/CD pipeline or automation workflow (GitHub Actions ci.yml, deploy.yml). This is an AUTOMATED workflow, not a human process.
 - customer_feedback: A customer service ticket or feedback item from Zendesk/support systems (CFB-xxxx). NOT a Jira ticket.
 
@@ -396,15 +396,57 @@ RULES:
 - Be conservative — only merge when confident they are the same entity
 - If you are unsure, set unsure: true and should_merge: false. A human will review.
 - For person entities: if one name is a first-name-only mention and the other is a full name with the same first name, and there is no other person with that first name, merge them.
-- Names like 'matt.chen' and 'Matt Chen' are always the same person — merge them.`,
+- Names like 'matt.chen' and 'Matt Chen' are always the same person — merge them.
+
+CROSS-TYPE PAIRS:
+- Some pairs may have different entity types (e.g. one is a "project" and the other is a "decision"). Merge if they refer to the same real-world thing extracted under different types.
+- When merging cross-type pairs, set canonical_type to the most appropriate type: a body of work with timeline is "project", a specific choice or tradeoff is "decision", a repeatable workflow is "process".
+- Do NOT merge if one is a child/component of the other (e.g. a decision ABOUT a project is not the same entity as the project — those should remain separate).
+- Do NOT merge if the relationship is "this decision was made as part of this project" — that is a relationship, not a duplicate.`,
   },
   extraction_validation: {
-    system_gap: `You are a quality assurance reviewer for a knowledge base entity extraction system. Your job is to find entities that the primary extraction missed. Be thorough but precise — only flag real entities, not attributes or components.`,
+    system_gap: `You are a quality assurance reviewer for a knowledge base entity extraction system. Your job is to find entities that the primary extraction missed. Be thorough but precise — only flag real entities, not attributes or components.
+
+For each missed entity, you MUST provide an evidence_excerpt: an exact verbatim quote from the source document that mentions or evidences the entity. Copy the text word-for-word — do NOT paraphrase or summarize. The excerpt must clearly reference the entity and include enough surrounding context to be meaningful on its own (at minimum the full sentence).`,
     system_judge: `You are the final judge for entity extraction validation. For each candidate:
 - ADD: The entity is real and missing from the existing list. Assign the correct type from: team_member, team, client_company, client_person, repository, integration, infrastructure, cloud_resource, library, database, environment, project, decision, process, ticket, pull_request, pipeline, customer_feedback.
 - REJECT: The entity is already covered, is not a real entity, or is an attribute/component of an existing entity.
 - RETYPE: The entity exists but the suggested type is wrong. Provide the correct type.
 Be precise. Only ADD genuinely missing entities.`,
+    system_attr_inference: `You are an attribute inference engine for a knowledge base system. You receive entities with their source excerpts and must infer missing attributes.
+
+## PROJECT STATUS
+
+Allowed values: active, completed, proposed, planned.
+
+CRITICAL: A project's status describes the OVERALL initiative, not any single ticket or PR.
+- The excerpts may mention Jira ticket statuses (Done, In Progress, Backlog) and PR states (merged, open). These describe individual work items, NOT the project as a whole.
+- A project is "completed" ONLY when ALL evidence points to it being finished — every ticket Done, every PR merged, no further references to outstanding work, and no ongoing discussion.
+- A project is "active" if there are ANY In Progress tickets, open PRs, or recent Slack/comment mentions of ongoing work — even if most tickets are Done and some PRs are merged.
+- A project is "proposed" if it is only discussed as a future idea with no work started.
+- A project is "planned" if tickets/epics exist but no development work has begun.
+- When in doubt between "active" and "completed", prefer "active".
+
+## DECISION ATTRIBUTES
+
+- "rationale": why the decision was made. Only fill if the excerpts state or strongly imply the reason.
+- "scope": which project, feature, or area it affects.
+- "decided_by": the person or group who made it. Only fill if explicitly named.
+- Omit any field where the excerpts lack clear evidence.
+
+## PROCESS STATUS
+
+Allowed values: active, deprecated, proposed, informal.
+- "active": the process has formal documentation (e.g., a Confluence page with defined steps) and is currently followed.
+- "informal": the process is practiced but NOT formally documented — only visible in Slack conversations, PR review patterns, or casual mentions.
+- "deprecated": evidence indicates the process is no longer followed or has been replaced.
+- "proposed": the process is discussed as something the team should adopt but hasn't yet.
+
+## GENERAL RULES
+
+- DO NOT hallucinate. If the excerpts do not contain enough information, omit the field (return undefined). An empty field is always better than a guess.
+- "reasoning": REQUIRED. You must quote the specific evidence from the excerpts that led to your conclusion. For example: "PAW-34 Done + PR #49 merged + no further references → completed" or "PAW-32 In Progress → project still active despite other tickets being Done".
+- "confidence": "high" = clear, unambiguous evidence; "medium" = reasonable inference from partial evidence; "low" = weak signal, limited data.`,
   },
   discovery: {
     system: `You analyze company knowledge base documents and an existing entity list to discover MISSING projects and tickets that should exist but were never formally documented.

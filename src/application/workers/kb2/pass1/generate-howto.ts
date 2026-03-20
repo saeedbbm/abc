@@ -51,11 +51,29 @@ const HowtoResultSchema = z.object({
 export const generateHowtoStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-generate-howto");
-  const stepId = "pass1-step-13";
+  const stepId = "pass1-step-16";
 
-  const entityPages = (await tc.entity_pages.find({ run_id: ctx.runId }).toArray()) as unknown as KB2EntityPageType[];
-  const graphNodes = (await tc.graph_nodes.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphNodeType[];
-  const graphEdges = (await tc.graph_edges.find({ run_id: ctx.runId }).toArray()) as unknown as KB2GraphEdgeType[];
+  const epExecId = await ctx.getStepExecutionId("pass1", 14);
+  const epFilter = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
+  const entityPages = (await tc.entity_pages.find(epFilter).toArray()) as unknown as KB2EntityPageType[];
+  const step9ExecId = await ctx.getStepExecutionId("pass1", 9);
+  const step10ExecId = await ctx.getStepExecutionId("pass1", 10);
+  const nodeExecIds = [step9ExecId, step10ExecId].filter(Boolean);
+  const nodesFilter = nodeExecIds.length > 0
+    ? { execution_id: { $in: nodeExecIds } }
+    : { run_id: ctx.runId };
+  const graphNodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+  const edgesExecId = await ctx.getStepExecutionId("pass1", 6);
+  const edgesFilter = edgesExecId ? { execution_id: edgesExecId } : { run_id: ctx.runId };
+  const graphEdges = (await tc.graph_edges.find(edgesFilter).toArray()) as unknown as KB2GraphEdgeType[];
+  for (const stepNum of [7, 11]) {
+    const execId = await ctx.getStepExecutionId("pass1", stepNum);
+    if (execId) {
+      const extra = (await tc.graph_edges.find({ execution_id: execId }).toArray()) as unknown as KB2GraphEdgeType[];
+      const edgeSet = new Set(graphEdges.map((e) => e.edge_id));
+      for (const e of extra) { if (!edgeSet.has(e.edge_id)) graphEdges.push(e); }
+    }
+  }
 
   const proposedTicketNodes = graphNodes.filter((n) =>
     PROPOSED_TICKET_CATEGORIES.has(n.attributes?.discovery_category ?? ""),
@@ -171,6 +189,7 @@ ${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedCo
     const doc = {
       howto_id: randomUUID(),
       run_id: ctx.runId,
+      execution_id: ctx.executionId,
       ticket_id: node.node_id,
       title: `How-To: ${node.display_name}`,
       sections: result.sections ?? [],
@@ -186,7 +205,6 @@ ${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedCo
   }
 
   if (howtoDocs.length > 0) {
-    await tc.howto.deleteMany({ run_id: ctx.runId });
     await tc.howto.insertMany(howtoDocs);
   }
 

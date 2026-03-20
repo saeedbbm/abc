@@ -37,6 +37,7 @@ import {
   Save,
   Info,
   Ban,
+  RefreshCw,
 } from "lucide-react";
 import { KB2RightPanel } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
@@ -94,11 +95,38 @@ interface RunStep {
   duration_ms?: number;
   summary?: string;
   artifact?: unknown;
+  progress_log?: { detail: string; percent: number; step_percent?: number; ts: string }[];
   metrics?: {
     llm_calls: number;
     input_tokens: number;
     output_tokens: number;
     cost_usd: number;
+  };
+  highlight_failures?: {
+    checked_at: string;
+    algorithm_version: number;
+    failures: string[];
+    total_checked: number;
+    failure_details: Array<{
+      entity_key: string;
+      source_ref: { source_type: string; doc_id: string; title: string; excerpt_preview: string };
+      reason: string;
+    }>;
+  };
+  judge_result?: {
+    overall_score: number;
+    pass: boolean;
+    sub_scores: { name: string; score: number; max: number; reason: string }[];
+    issues: { severity: string; message: string; entity: string | null }[];
+    recommendations: string[];
+    judge_model?: string;
+    cross_check_model?: string;
+    agreement_rate?: number;
+    tokens_used?: number;
+    cost_usd?: number;
+    evaluated_at?: string;
+    llm_judge_error?: string;
+    cross_check_details?: Record<string, unknown>;
   };
 }
 
@@ -118,9 +146,33 @@ interface LogEntry {
   type: string;
   detail?: string;
   percent?: number;
+  step_percent?: number;
+  step_id?: string;
+  step_number?: number;
+  total_steps?: number;
+  step_name?: string;
+  pass?: string;
+  duration_ms?: number;
+  summary?: string;
+  steps_remaining?: number;
+  error?: string;
+  metrics?: { llm_calls?: number; input_tokens?: number; output_tokens?: number; cost_usd?: number };
+  started_at?: string;
   message?: string;
   runId?: string;
   status?: string;
+}
+
+interface StepTrackerEntry {
+  step_number: number;
+  step_name: string;
+  pass: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  started_at?: string;
+  duration_ms?: number;
+  summary?: string;
+  error?: string;
+  metrics?: { llm_calls?: number; cost_usd?: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +423,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
   // Live log
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [stepTracker, setStepTracker] = useState<StepTrackerEntry[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -461,9 +514,18 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       if (pipelineRunning) return;
       setPipelineRunning(true);
       setLogEntries([]);
+      setStepTracker([]);
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+
+      const activeRunId = (body.reuseRunId as string | undefined) ?? reuseRunId || selectedRunId;
+      const pollInterval = setInterval(() => {
+        if (activeRunId) {
+          fetchRunSteps(activeRunId);
+          fetchRuns();
+        }
+      }, 5_000);
 
       try {
         const res = await fetch(`/api/${companySlug}/kb2/run`, {
@@ -475,6 +537,10 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
           }),
           signal: ctrl.signal,
         });
+
+        if (activeRunId) {
+          setTimeout(() => { fetchRunSteps(activeRunId); fetchRuns(); }, 1_500);
+        }
 
         const reader = res.body?.getReader();
         if (!reader) return;
@@ -495,6 +561,31 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
             try {
               const entry: LogEntry = JSON.parse(line.slice(6));
               setLogEntries((prev) => [...prev, entry]);
+
+              if (entry.type === "step_started") {
+                setStepTracker((prev) => {
+                  const existing = prev.find((s) => s.step_number === entry.step_number && s.pass === entry.pass);
+                  if (existing) {
+                    return prev.map((s) => s === existing ? { ...s, status: "running", started_at: entry.started_at } : s);
+                  }
+                  return [...prev, {
+                    step_number: entry.step_number!, step_name: entry.step_name!, pass: entry.pass!,
+                    status: "running", started_at: entry.started_at,
+                  }];
+                });
+              } else if (entry.type === "step_completed") {
+                setStepTracker((prev) => prev.map((s) =>
+                  s.step_number === entry.step_number && s.pass === entry.pass
+                    ? { ...s, status: "completed", duration_ms: entry.duration_ms, summary: entry.summary, metrics: entry.metrics }
+                    : s,
+                ));
+              } else if (entry.type === "step_failed") {
+                setStepTracker((prev) => prev.map((s) =>
+                  s.step_number === entry.step_number && s.pass === entry.pass
+                    ? { ...s, status: entry.error?.includes("cancelled") ? "cancelled" : "failed", duration_ms: entry.duration_ms, error: entry.error }
+                    : s,
+                ));
+              }
 
               if (entry.type === "done" || entry.type === "error") {
                 fetchRuns();
@@ -521,16 +612,56 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
           },
         ]);
       } finally {
+        clearInterval(pollInterval);
         setPipelineRunning(false);
         abortRef.current = null;
       }
     },
-    [companySlug, pipelineRunning, reuseRunId, fetchRuns, fetchRunSteps],
+    [companySlug, pipelineRunning, reuseRunId, selectedRunId, fetchRuns, fetchRunSteps],
   );
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logEntries]);
+
+  useEffect(() => {
+    if (pipelineRunning || logEntries.length > 0 || runSteps.length === 0) return;
+    const selectedSteps: RunStep[] = [];
+    const seen = new Set<string>();
+    for (const [stepId, execId] of Object.entries(selectedExecutions)) {
+      if (execId === "__new__") continue;
+      const step = runSteps.find((s) => s.execution_id === execId) ?? runSteps.find((s) => s.step_id === stepId);
+      if (step && !seen.has(step.step_id)) {
+        seen.add(step.step_id);
+        selectedSteps.push(step);
+      }
+    }
+    selectedSteps.sort((a, b) => (a.step_number ?? 0) - (b.step_number ?? 0));
+
+    const synthetic: LogEntry[] = [];
+    for (const s of selectedSteps) {
+      if (s.progress_log?.length) {
+        for (const p of s.progress_log) {
+          synthetic.push({ type: "progress", detail: p.detail, percent: p.percent, step_percent: p.step_percent });
+        }
+      } else if (s.status === "completed" || s.status === "failed" || s.status === "cancelled") {
+        synthetic.push({
+          type: "progress",
+          detail: `[${s.pass} Step ${s.step_number}] ${s.status === "completed" ? "Completed" : s.status}: ${s.name}${s.summary ? ` — ${s.summary}` : ""}${s.duration_ms != null ? ` (${(s.duration_ms / 1000).toFixed(1)}s)` : ""}`,
+          percent: 100,
+        });
+      }
+    }
+    if (synthetic.length > 0) {
+      const lastRun = runs.find((r) => r.run_id === selectedRunId);
+      if (lastRun?.status === "completed") {
+        synthetic.push({ type: "done" as const, runId: selectedRunId } as LogEntry);
+      } else if (lastRun?.status === "failed") {
+        synthetic.push({ type: "error", message: lastRun.error ?? "Pipeline failed" } as LogEntry);
+      }
+      setLogEntries(synthetic);
+    }
+  }, [runSteps, pipelineRunning, selectedRunId, runs, selectedExecutions]);
 
   // -------------------------------------------------------------------------
   // All step names for dropdowns
@@ -666,7 +797,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       keys: [
         { key: "entity_extraction", label: "Entity Extraction" },
         { key: "entity_resolution", label: "Entity Resolution" },
-        { key: "extraction_validation", label: "Extraction Validation", subKeys: ["system_gap", "system_judge"] },
+        { key: "extraction_validation", label: "Extraction Validation", subKeys: ["system_attr_inference", "system_gap", "system_judge"] },
         { key: "discovery", label: "Discovery" },
         { key: "graph_enrichment", label: "Graph Enrichment" },
         { key: "generate_entity_pages", label: "Entity Page Generation" },
@@ -1674,12 +1805,13 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
             )}
 
             <Tabs defaultValue="config" className="w-full">
-              <TabsList className="w-full grid grid-cols-5">
+              <TabsList className="w-full grid grid-cols-6">
                 <TabsTrigger value="config" className="text-xs">Config</TabsTrigger>
                 <TabsTrigger value="prompt" className="text-xs">Prompt</TabsTrigger>
                 <TabsTrigger value="template" className="text-xs">Template</TabsTrigger>
                 <TabsTrigger value="run" className="text-xs">Run Info</TabsTrigger>
                 <TabsTrigger value="results" className="text-xs">Results</TabsTrigger>
+                <TabsTrigger value="judge" className="text-xs">Judge</TabsTrigger>
               </TabsList>
 
               <TabsContent value="config" className="space-y-4 mt-4">
@@ -1854,73 +1986,84 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                   const promptKey = STEP_PROMPT_MAP[selectedStepName];
                   if (!promptKey) return <p className="text-xs text-muted-foreground">This step has no configurable prompt.</p>;
                   const entry = prompts[promptKey];
-                  if (!entry) return <p className="text-xs text-muted-foreground">Prompt not found in config.</p>;
-                  const fields = typeof entry === "object" ? Object.entries(entry).filter(([k]) => k !== "se_notes") : [];
-                  const rawPrompt = typeof entry === "object" && (entry as any).system ? (entry as any).system : "";
-                  let rendered = rawPrompt;
-                  if (rawPrompt) {
-                    const vars: Record<string, string> = {
-                      company_name: profile.company_name ?? "",
-                      company_description: profile.company_context ?? "",
-                      company_context: profile.company_context ?? "",
-                      business_model: profile.business_model ?? "",
-                      project_prefix: profile.project_prefix ?? "",
-                      known_team_members: Array.isArray(profile.known_team_members) && profile.known_team_members.length ? profile.known_team_members.join(", ") : "none specified",
-                      known_repos_rule: Array.isArray(profile.known_repos) && profile.known_repos.length ? `Known repos: ${profile.known_repos.join(", ")}. Prefer these canonical names over variants.` : "",
-                      known_clients_rule: Array.isArray(profile.known_client_companies) && profile.known_client_companies.length ? `Known client companies: ${profile.known_client_companies.join(", ")}. Classify these as client_company.` : "",
-                      tech_stack_section: profile.tech_stack_notes ? `Tech stack notes: ${profile.tech_stack_notes}` : "",
-                      environments_section: Array.isArray(profile.deployment_environments) && profile.deployment_environments.length ? `Deployment environments: ${profile.deployment_environments.join(", ")}` : "",
-                      se_notes_section: profile.se_notes ? `Additional SE notes: ${profile.se_notes}` : "",
-                    };
+                  const promptSection = PROMPT_SECTIONS
+                    .flatMap(s => s.keys)
+                    .find(k => k.key === promptKey);
+                  const subKeys = promptSection?.subKeys;
+                  const fields: [string, unknown][] = subKeys && subKeys.length > 0
+                    ? subKeys.map(sk => [sk, (entry as any)?.[sk] ?? ""])
+                    : typeof entry === "object"
+                      ? Object.entries(entry).filter(([k]) => k !== "se_notes")
+                      : [];
+                  if (fields.length === 0 && !entry) return <p className="text-xs text-muted-foreground">Prompt not found in config.</p>;
+                  const vars: Record<string, string> = {
+                    company_name: profile.company_name ?? "",
+                    company_description: profile.company_context ?? "",
+                    company_context: profile.company_context ?? "",
+                    business_model: profile.business_model ?? "",
+                    project_prefix: profile.project_prefix ?? "",
+                    known_team_members: Array.isArray(profile.known_team_members) && profile.known_team_members.length ? profile.known_team_members.join(", ") : "none specified",
+                    known_repos_rule: Array.isArray(profile.known_repos) && profile.known_repos.length ? `Known repos: ${profile.known_repos.join(", ")}. Prefer these canonical names over variants.` : "",
+                    known_clients_rule: Array.isArray(profile.known_client_companies) && profile.known_client_companies.length ? `Known client companies: ${profile.known_client_companies.join(", ")}. Classify these as client_company.` : "",
+                    tech_stack_section: profile.tech_stack_notes ? `Tech stack notes: ${profile.tech_stack_notes}` : "",
+                    environments_section: Array.isArray(profile.deployment_environments) && profile.deployment_environments.length ? `Deployment environments: ${profile.deployment_environments.join(", ")}` : "",
+                    se_notes_section: profile.se_notes ? `Additional SE notes: ${profile.se_notes}` : "",
+                  };
+                  const renderPrompt = (text: string) => {
+                    let r = text;
                     for (const [k, v] of Object.entries(vars)) {
-                      if (v) rendered = rendered.replace(new RegExp(`\\$\\{${k}\\}`, "g"), v);
-                      else rendered = rendered.replace(new RegExp(`\\$\\{${k}\\}\\n?`, "g"), "");
+                      if (v) r = r.replace(new RegExp(`\\$\\{${k}\\}`, "g"), v);
+                      else r = r.replace(new RegExp(`\\$\\{${k}\\}\\n?`, "g"), "");
                     }
-                  }
+                    return r;
+                  };
                   return (
-                    <div className="grid grid-cols-2 gap-4 min-h-[44rem]">
-                      {/* Left: Editable prompt */}
-                      <div className="flex flex-col">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="text-xs font-semibold">Edit Prompt: {promptKey}</h3>
-                          <Button
-                            size="sm"
-                            onClick={() => saveConfigSection(`Prompt: ${promptKey}`, { prompts })}
-                            disabled={configSaving}
-                          >
-                            {configSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                            Save
-                          </Button>
-                        </div>
-                        {fields.map(([subKey, val]) => (
-                          <div key={subKey} className="flex-1 flex flex-col">
-                            <label className="text-[10px] font-medium mb-1 text-muted-foreground">{subKey}</label>
-                            <Textarea
-                              value={typeof val === "string" ? val : ""}
-                              onChange={(e) => {
-                                const newPrompts = { ...prompts };
-                                const newEntry = { ...(newPrompts[promptKey] ?? {}) };
-                                (newEntry as any)[subKey] = e.target.value;
-                                newPrompts[promptKey] = newEntry;
-                                setPrompts(newPrompts);
-                              }}
-                              className="flex-1 text-xs font-mono resize-y min-h-[40rem] whitespace-pre-wrap break-words"
-                            />
-                          </div>
-                        ))}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-semibold">Prompts: {promptKey}</h3>
+                        <Button
+                          size="sm"
+                          onClick={() => saveConfigSection(`Prompt: ${promptKey}`, { prompts })}
+                          disabled={configSaving}
+                        >
+                          {configSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                          Save All
+                        </Button>
                       </div>
-                      {/* Right: Rendered preview */}
-                      <div className="flex flex-col">
-                        <div className="mb-2">
-                          <h3 className="text-xs font-semibold">Rendered Preview</h3>
-                          <p className="text-[10px] text-muted-foreground">What the LLM will receive (variables filled from Config).</p>
-                        </div>
-                        {rawPrompt ? (
-                          <pre className="flex-1 text-[10px] font-mono bg-muted/50 rounded p-3 overflow-auto whitespace-pre-wrap break-words min-h-[40rem]">{rendered}</pre>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">No system prompt to preview.</p>
-                        )}
-                      </div>
+                      {fields.map(([subKey, val]) => (
+                        <Card key={subKey}>
+                          <CardHeader className="py-2 px-4">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{subKey}</div>
+                          </CardHeader>
+                          <CardContent className="px-4 pb-4 pt-0">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="flex flex-col">
+                                <label className="text-[10px] font-medium mb-1 text-muted-foreground">Edit Prompt</label>
+                                <Textarea
+                                  value={typeof val === "string" ? val : ""}
+                                  onChange={(e) => {
+                                    const newPrompts = { ...prompts };
+                                    const newEntry = { ...(newPrompts[promptKey] ?? {}) };
+                                    (newEntry as any)[subKey] = e.target.value;
+                                    newPrompts[promptKey] = newEntry;
+                                    setPrompts(newPrompts);
+                                  }}
+                                  className="flex-1 text-xs font-mono resize-y min-h-[20rem] whitespace-pre-wrap break-words leading-relaxed"
+                                />
+                              </div>
+                              <div className="flex flex-col">
+                                <label className="text-[10px] font-medium mb-1 text-muted-foreground">Rendered (what LLM receives)</label>
+                                <pre className="flex-1 text-xs font-mono bg-muted/50 rounded-md border p-3 overflow-auto whitespace-pre-wrap break-words min-h-[20rem] leading-relaxed">
+                                  {typeof val === "string" && val.trim() ? renderPrompt(val) : <span className="text-muted-foreground italic">No prompt configured</span>}
+                                </pre>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                      {fields.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No prompts configured for this step.</p>
+                      )}
                     </div>
                   );
                 })()}
@@ -2047,35 +2190,39 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                         <p className="text-xs text-muted-foreground">This step has not been executed in the selected run.</p>
                       )}
 
-                      <Card>
-                        <CardHeader className="pb-1">
-                          <div className="flex items-center gap-2">
-                            <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-                            <h3 className="text-xs font-semibold">Run Log</h3>
-                            {pipelineRunning && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
-                            {!pipelineRunning && logEntries.length > 0 && (
-                              <Button variant="ghost" size="sm" className="ml-auto h-5 text-[10px]" onClick={() => setLogEntries([])}>Clear</Button>
-                            )}
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          {logEntries.length === 0 ? (
-                            <p className="text-[11px] text-muted-foreground py-2">No log entries yet. Run a step to see live output here.</p>
-                          ) : (
-                            <ScrollArea className="max-h-64">
-                              <div className="font-mono text-[11px] space-y-0.5">
-                                {logEntries.map((entry, i) => (
-                                  <div key={i} className={entry.type === "error" ? "text-red-500" : entry.type === "done" ? "text-emerald-500 font-medium" : "text-muted-foreground"}>
-                                    {entry.type === "progress" && <>{entry.percent != null && <span className="text-foreground mr-2">[{entry.percent}%]</span>}{entry.detail}</>}
-                                    {entry.type === "done" && <>Pipeline completed</>}
-                                    {entry.type === "error" && <>Error: {entry.message}</>}
-                                  </div>
-                                ))}
+                      {(() => {
+                        const stepLogEntries: LogEntry[] = pipelineRunning
+                          ? logEntries.filter((e) => e.step_id === stepKey || e.type === "done" || e.type === "error")
+                          : (runStep?.progress_log ?? []).map((p: any) => ({ type: "progress" as const, detail: p.detail, percent: p.percent, step_percent: p.step_percent }));
+                        return (
+                          <Card>
+                            <CardHeader className="pb-1">
+                              <div className="flex items-center gap-2">
+                                <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+                                <h3 className="text-xs font-semibold">Run Log</h3>
+                                {pipelineRunning && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
                               </div>
-                            </ScrollArea>
-                          )}
-                        </CardContent>
-                      </Card>
+                            </CardHeader>
+                            <CardContent>
+                              {stepLogEntries.length === 0 ? (
+                                <p className="text-[11px] text-muted-foreground py-2">No log entries yet. Run a step to see live output here.</p>
+                              ) : (
+                                <div className="max-h-64 overflow-y-auto">
+                                  <div className="font-mono text-[11px] space-y-0.5">
+                                    {stepLogEntries.map((entry, i) => (
+                                      <div key={i} className={entry.type === "error" ? "text-red-500" : entry.type === "done" ? "text-emerald-500 font-medium" : "text-muted-foreground"}>
+                                        {entry.type === "progress" && <>{entry.percent != null && <span className="text-foreground mr-2">[{entry.percent}%]</span>}{entry.step_percent != null && entry.step_percent !== entry.percent && <span className="text-blue-500 mr-2">[Step {entry.step_percent}%]</span>}{entry.detail}</>}
+                                        {entry.type === "done" && <>Pipeline completed</>}
+                                        {entry.type === "error" && <>Error: {entry.message}</>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })()}
                     </>
                   );
                 })()}
@@ -2127,7 +2274,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
                   const isInputSnapshotStep = selectedStepName?.toLowerCase().includes("input") && selectedStepName?.toLowerCase().includes("snapshot");
                   if (isInputSnapshotStep) {
-                    return <>{resultHeader}<InputSnapshotViewer companySlug={companySlug} runId={selectedRunId} artifact={artifact as Record<string, unknown>} /></>;
+                    return <>{resultHeader}<InputSnapshotViewer companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} artifact={artifact as Record<string, unknown>} /></>;
                   }
 
                   const isEmbedStep = selectedStepName?.toLowerCase().includes("embed");
@@ -2137,7 +2284,102 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
                   const isEntityExtractionStep = selectedStepName?.toLowerCase().includes("entity") && selectedStepName?.toLowerCase().includes("extract");
                   if (isEntityExtractionStep && (artifact as any)?.entities_by_type) {
-                    return <>{resultHeader}<EntityExtractionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                    return <>{resultHeader}<EntityExtractionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                  }
+
+                  const isExtractionValidationStep = selectedStepName?.toLowerCase().includes("extraction") && selectedStepName?.toLowerCase().includes("validation");
+                  if (isExtractionValidationStep && (artifact as any)?.recovery_details) {
+                    return <>{resultHeader}<ExtractionValidationViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                  }
+
+                  const isEntityResolutionStep = selectedStepName?.toLowerCase().includes("entity") && selectedStepName?.toLowerCase().includes("resolution");
+                  if (isEntityResolutionStep && (artifact as any)?.merges) {
+                    return <>{resultHeader}<EntityResolutionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                  }
+
+                  const isGraphBuildStep = selectedStepName === "Graph Build" && (artifact as any)?.total_edges != null;
+                  if (isGraphBuildStep) {
+                    const a = artifact as { total_edges: number; relationship_edges: number; mentioned_in_edges: number; nodes_processed: number };
+                    return (
+                      <>
+                        {resultHeader}
+                        <div className="space-y-3">
+                          <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Graph Build</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div className="border rounded-md p-2 text-center">
+                              <div className="text-lg font-bold">{a.nodes_processed}</div>
+                              <div className="text-[10px] text-muted-foreground">Nodes Processed</div>
+                            </div>
+                            <div className="border rounded-md p-2 text-center">
+                              <div className="text-lg font-bold">{a.total_edges}</div>
+                              <div className="text-[10px] text-muted-foreground">Total Edges</div>
+                            </div>
+                            <div className="border rounded-md p-2 text-center">
+                              <div className="text-lg font-bold">{a.relationship_edges}</div>
+                              <div className="text-[10px] text-muted-foreground">Relationship Edges</div>
+                            </div>
+                            <div className="border rounded-md p-2 text-center">
+                              <div className="text-lg font-bold">{a.mentioned_in_edges}</div>
+                              <div className="text-[10px] text-muted-foreground">MENTIONED_IN Edges</div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {a.relationship_edges > 0
+                              ? `Built ${a.relationship_edges} entity-to-entity relationships from embedded _relationships attributes, plus ${a.mentioned_in_edges} document mention edges.`
+                              : `No embedded _relationships found on nodes. Built ${a.mentioned_in_edges} MENTIONED_IN edges by scanning document content for entity names. Relationship edges will be discovered in Step 7 (Graph Enrichment) via LLM.`}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  }
+
+                  const isGraphEnrichmentStep = selectedStepName === "Graph Enrichment" && (artifact as any)?.new_edges != null;
+                  if (isGraphEnrichmentStep) {
+                    return <>{resultHeader}<GraphEnrichmentViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isDiscovery({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<DiscoveryViewer artifact={artifact as any} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                  }
+
+                  if (isAttributeCompletion({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<AttributeCompletionViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isPatternSynthesis({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<PatternSynthesisViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isGraphReEnrichment({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<GraphReEnrichmentViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isPagePlan({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<PagePlanViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isGraphRAGRetrieval({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<GraphRAGRetrievalViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isEntityPagesGenerated({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<EntityPagesGeneratedViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isHumanPagesGenerated({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<HumanPagesGeneratedViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isHowtoGenerated({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<HowtoGeneratedViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isClaimsExtracted({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<ClaimsExtractedViewer artifact={artifact as any} /></>;
+                  }
+
+                  if (isVerifyCards({ name: selectedStepName } as RunStep, artifact)) {
+                    return <>{resultHeader}<VerifyCardsViewer artifact={artifact as any} /></>;
                   }
 
                   return (
@@ -2154,6 +2396,207 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                         </CardContent>
                       </Card>
                     </>
+                  );
+                })()}
+              </TabsContent>
+
+              <TabsContent value="judge" className="space-y-4 mt-4">
+                {(() => {
+                  const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
+                  const match = allS.find((s) => s.name === selectedStepName);
+                  if (!match || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see judge results.</p>;
+                  const stepKey = `${match.pass}-step-${match.index}`;
+                  const runStep = getSelectedStep(stepKey);
+
+                  if (!runStep) return <p className="text-xs text-muted-foreground">No run data available for this step.</p>;
+                  if (runStep.status === "running") {
+                    return (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Step is running… judge results will appear when complete.</span>
+                      </div>
+                    );
+                  }
+
+                  const jr = runStep.judge_result;
+                  if (!jr) return <p className="text-xs text-muted-foreground">No judge result available. This step may not have an LLM-as-Judge evaluation, or it hasn&apos;t been run yet.</p>;
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`text-2xl font-bold ${jr.pass ? "text-emerald-600" : "text-red-600"}`}>
+                          {jr.overall_score}%
+                        </div>
+                        <Badge variant={jr.pass ? "default" : "destructive"} className="text-xs">
+                          {jr.pass ? "PASS" : "FAIL"}
+                        </Badge>
+                        {jr.evaluated_at && <span className="text-[10px] text-muted-foreground">{new Date(jr.evaluated_at).toLocaleString()}</span>}
+                      </div>
+
+                      {jr.llm_judge_error && (
+                        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-3">
+                          <div className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">LLM Judge Error</div>
+                          <pre className="text-[10px] text-red-600 dark:text-red-300 whitespace-pre-wrap">{jr.llm_judge_error}</pre>
+                        </div>
+                      )}
+
+                      {jr.sub_scores.length > 0 && (
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <h3 className="text-sm font-semibold">Sub-Scores</h3>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            {jr.sub_scores.map((s, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <div className="w-40 text-xs truncate" title={s.name}>{s.name}</div>
+                                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${s.score >= 80 ? "bg-emerald-500" : s.score >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                                    style={{ width: `${Math.min(100, (s.score / s.max) * 100)}%` }}
+                                  />
+                                </div>
+                                <div className="w-10 text-xs text-right font-mono">{s.score}</div>
+                                <div className="w-48 text-[10px] text-muted-foreground truncate" title={s.reason}>{s.reason}</div>
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {jr.issues.length > 0 && (
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <h3 className="text-sm font-semibold">Issues ({jr.issues.length})</h3>
+                          </CardHeader>
+                          <CardContent className="space-y-1">
+                            {jr.issues.map((issue, i) => (
+                              <div key={i} className={`flex items-start gap-2 text-xs rounded px-2 py-1 ${issue.severity === "high" ? "bg-red-50 dark:bg-red-950/20" : issue.severity === "medium" ? "bg-amber-50 dark:bg-amber-950/20" : "bg-muted/50"}`}>
+                                <Badge variant="outline" className={`text-[9px] shrink-0 ${issue.severity === "high" ? "border-red-300 text-red-700" : issue.severity === "medium" ? "border-amber-300 text-amber-700" : "border-muted"}`}>
+                                  {issue.severity}
+                                </Badge>
+                                <span>{issue.message}</span>
+                                {issue.entity && <span className="text-muted-foreground">({issue.entity})</span>}
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {jr.recommendations.length > 0 && (
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <h3 className="text-sm font-semibold">Recommendations</h3>
+                          </CardHeader>
+                          <CardContent>
+                            <ul className="list-disc list-inside space-y-1">
+                              {jr.recommendations.map((r, i) => (
+                                <li key={i} className="text-xs text-muted-foreground">{r}</li>
+                              ))}
+                            </ul>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                        {jr.judge_model && (
+                          <div className="border rounded-md p-2">
+                            <div className="text-[10px] text-muted-foreground">Judge Model</div>
+                            <div className="text-xs font-mono truncate" title={jr.judge_model}>{jr.judge_model}</div>
+                          </div>
+                        )}
+                        {jr.cross_check_model && (
+                          <div className="border rounded-md p-2">
+                            <div className="text-[10px] text-muted-foreground">Cross-Check</div>
+                            <div className="text-xs font-mono truncate" title={jr.cross_check_model}>{jr.cross_check_model}</div>
+                          </div>
+                        )}
+                        {jr.tokens_used != null && (
+                          <div className="border rounded-md p-2">
+                            <div className="text-[10px] text-muted-foreground">Tokens</div>
+                            <div className="text-xs font-mono">{jr.tokens_used.toLocaleString()}</div>
+                          </div>
+                        )}
+                        {jr.cost_usd != null && (
+                          <div className="border rounded-md p-2">
+                            <div className="text-[10px] text-muted-foreground">Cost</div>
+                            <div className="text-xs font-mono">${jr.cost_usd.toFixed(4)}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {jr.cross_check_details && (() => {
+                        const cc = jr.cross_check_details;
+                        const eff = cc.effectiveness as Record<string, unknown> | string | undefined;
+                        const verdict = typeof eff === "string" ? eff : typeof eff === "object" && eff ? String((eff as Record<string, unknown>).verdict ?? "unknown") : "unknown";
+                        const perScore = (cc.per_score_comparison ?? []) as { name: string; judge_score: number; cross_check_score: number; delta: number; agreed: boolean }[];
+                        const agreedCount = typeof eff === "object" && eff ? Number((eff as Record<string, unknown>).agreed_count ?? 0) : (cc.agreements as number ?? 0);
+                        const disagreedCount = typeof eff === "object" && eff ? Number((eff as Record<string, unknown>).disagreed_count ?? 0) : (cc.disagreements as number ?? 0);
+                        const ccIssues = (cc.unique_cross_check_issues ?? []) as ({ severity?: string; message: string; entity?: string | null } | string)[];
+                        const ccRecs = (cc.unique_cross_check_recommendations ?? []) as string[];
+
+                        return (
+                          <Card>
+                            <CardHeader className="pb-2">
+                              <h3 className="text-sm font-semibold">Cross-Check Details</h3>
+                              <Badge variant="outline" className={`text-[9px] w-fit ${verdict === "high_value" || verdict === "useful" ? "border-emerald-300 text-emerald-700" : verdict === "conflicting" || verdict === "low_value" ? "border-red-300 text-red-700" : "border-muted text-muted-foreground"}`}>
+                                {verdict}
+                              </Badge>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                              <div className="flex gap-4 text-xs">
+                                <span className="text-emerald-600">{agreedCount} agreements</span>
+                                <span className="text-red-600">{disagreedCount} disagreements</span>
+                                {jr.agreement_rate != null && <span className="text-muted-foreground">({Math.round(jr.agreement_rate * 100)}% agreement)</span>}
+                              </div>
+
+                              {perScore.length > 0 && (
+                                <div>
+                                  <div className="text-[10px] font-medium mb-1">Score Comparison</div>
+                                  <div className="space-y-1">
+                                    {perScore.map((ps, i) => (
+                                      <div key={i} className="flex items-center gap-2 text-[10px]">
+                                        <span className="w-32 truncate" title={ps.name}>{ps.name}</span>
+                                        <span className="font-mono w-8 text-right">{ps.judge_score}</span>
+                                        <span className="text-muted-foreground">vs</span>
+                                        <span className="font-mono w-8 text-right">{ps.cross_check_score}</span>
+                                        <span className={`w-12 text-right ${ps.agreed ? "text-emerald-600" : "text-red-600"}`}>
+                                          Δ{ps.delta}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {ccIssues.length > 0 && (
+                                <div>
+                                  <div className="text-[10px] font-medium mb-1">Unique Cross-Check Findings ({ccIssues.length})</div>
+                                  {ccIssues.map((issue, i) => {
+                                    const msg = typeof issue === "string" ? issue : issue.message;
+                                    const sev = typeof issue === "string" ? undefined : issue.severity;
+                                    return (
+                                      <div key={i} className="text-[10px] text-muted-foreground flex gap-1">
+                                        {sev && <span className={`shrink-0 ${sev === "warning" ? "text-amber-600" : sev === "error" ? "text-red-600" : "text-muted-foreground"}`}>[{sev}]</span>}
+                                        <span>• {msg}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {ccRecs.length > 0 && (
+                                <div>
+                                  <div className="text-[10px] font-medium mb-1">Cross-Check Recommendations ({ccRecs.length})</div>
+                                  {ccRecs.map((r, i) => (
+                                    <div key={i} className="text-[10px] text-muted-foreground">• {r}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })()}
+                    </div>
                   );
                 })()}
               </TabsContent>
@@ -2400,28 +2843,80 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         {/* Right: inspector + log */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Live log (shown when pipeline is running or has entries) */}
-          {(pipelineRunning || logEntries.length > 0) && (
+          {(pipelineRunning || logEntries.length > 0) && (() => {
+            const completedSteps = stepTracker.filter((s) => s.status === "completed");
+            const runningStep = stepTracker.find((s) => s.status === "running");
+            const failedStep = stepTracker.find((s) => s.status === "failed" || s.status === "cancelled");
+            const totalSteps = runningStep?.step_number ? (logEntries.find((e) => e.total_steps)?.total_steps ?? stepTracker.length) : stepTracker.length;
+            const totalDurationMs = stepTracker.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0);
+            const totalCost = stepTracker.reduce((sum, s) => sum + (s.metrics?.cost_usd ?? 0), 0);
+            const lastProgress = [...logEntries].reverse().find((e) => e.type === "progress" && e.percent != null);
+
+            return (
             <div className="border-b">
               <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/30">
                 <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium">Live Log</span>
-                {pipelineRunning && (
-                  <Loader2 className="h-3 w-3 animate-spin text-blue-500 ml-auto" />
+                <span className="text-xs font-medium">Pipeline Log</span>
+                {pipelineRunning && lastProgress?.percent != null && (
+                  <span className="text-[10px] font-mono text-blue-500">{lastProgress.percent}%</span>
                 )}
+                {pipelineRunning && (
+                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                )}
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  {completedSteps.length}/{totalSteps} steps
+                  {totalDurationMs > 0 && <> &middot; {(totalDurationMs / 1000).toFixed(1)}s</>}
+                  {totalCost > 0 && <> &middot; ${totalCost.toFixed(4)}</>}
+                </span>
                 {!pipelineRunning && logEntries.length > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="ml-auto h-5 text-[10px]"
-                    onClick={() => setLogEntries([])}
+                    className="h-5 text-[10px]"
+                    onClick={() => { setLogEntries([]); setStepTracker([]); }}
                   >
                     Clear
                   </Button>
                 )}
               </div>
-              <ScrollArea className="h-40">
+
+              {stepTracker.length > 0 && (
+                <div className="px-3 py-2 border-b bg-muted/10 space-y-1">
+                  {stepTracker.map((step) => (
+                    <div key={`${step.pass}-${step.step_number}`} className="flex items-center gap-2 text-[11px]">
+                      {step.status === "completed" && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
+                      {step.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-blue-500 shrink-0" />}
+                      {step.status === "failed" && <XCircle className="h-3 w-3 text-red-500 shrink-0" />}
+                      {step.status === "cancelled" && <Ban className="h-3 w-3 text-orange-500 shrink-0" />}
+                      <span className="font-mono text-muted-foreground w-8 shrink-0">
+                        {step.pass === "pass1" ? "P1" : "P2"}.{step.step_number}
+                      </span>
+                      <span className={step.status === "running" ? "text-blue-600 dark:text-blue-400 font-medium" : step.status === "failed" || step.status === "cancelled" ? "text-red-600 dark:text-red-400" : "text-foreground"}>
+                        {step.step_name}
+                      </span>
+                      {step.duration_ms != null && (
+                        <span className="text-muted-foreground font-mono">{(step.duration_ms / 1000).toFixed(1)}s</span>
+                      )}
+                      {step.metrics?.llm_calls != null && step.metrics.llm_calls > 0 && (
+                        <span className="text-muted-foreground font-mono">{step.metrics.llm_calls} LLM</span>
+                      )}
+                      {step.metrics?.cost_usd != null && step.metrics.cost_usd > 0 && (
+                        <span className="text-muted-foreground font-mono">${step.metrics.cost_usd.toFixed(4)}</span>
+                      )}
+                      {step.summary && step.status === "completed" && (
+                        <span className="text-muted-foreground truncate">&mdash; {step.summary}</span>
+                      )}
+                      {step.error && (
+                        <span className="text-red-500 truncate">&mdash; {step.error}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <ScrollArea className="h-32">
                 <div className="p-3 font-mono text-[11px] space-y-0.5">
-                  {logEntries.map((entry, i) => (
+                  {logEntries.filter((e) => e.type === "progress" || e.type === "done" || e.type === "error").map((entry, i) => (
                     <div
                       key={i}
                       className={
@@ -2435,29 +2930,21 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                       {entry.type === "progress" && (
                         <>
                           {entry.percent != null && (
-                            <span className="text-foreground mr-2">
-                              [{entry.percent}%]
-                            </span>
+                            <span className="text-foreground mr-2">[{entry.percent}%]</span>
                           )}
                           {entry.detail}
                         </>
                       )}
-                      {entry.type === "done" && (
-                        <>
-                          Pipeline completed — run{" "}
-                          <span className="font-mono">{entry.runId}</span>
-                        </>
-                      )}
-                      {entry.type === "error" && (
-                        <>Error: {entry.message}</>
-                      )}
+                      {entry.type === "done" && <>Pipeline completed</>}
+                      {entry.type === "error" && <>Error: {entry.message}</>}
                     </div>
                   ))}
                   <div ref={logEndRef} />
                 </div>
               </ScrollArea>
             </div>
-          )}
+            );
+          })()}
 
           {/* Step inspector */}
           {selectedRunId ? (
@@ -2946,7 +3433,7 @@ function ViewLLMCallInline({ companySlug, runId, callId, batchIndex }: { company
   );
 }
 
-function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources }: {
+function EntityExtractionViewer({ artifact, companySlug, runId, executionId, stepId, onSelectSources }: {
   artifact: {
     total_entities: number;
     llm_calls: number;
@@ -2954,6 +3441,8 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
   };
   companySlug?: string;
   runId?: string;
+  executionId?: string;
+  stepId?: string;
   onSelectSources?: (refs: EntityEntry["source_refs"]) => void;
 }) {
   const [filterType, setFilterType] = useState<string>("all");
@@ -2965,7 +3454,8 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
 
   useEffect(() => {
     if (!companySlug || !runId) return;
-    fetch(`/api/${companySlug}/kb2?type=graph_nodes&run_id=${runId}`)
+    const params = executionId ? `execution_id=${executionId}` : `run_id=${runId}`;
+    fetch(`/api/${companySlug}/kb2?type=graph_nodes&${params}`)
       .then((r) => r.json())
       .then((data) => {
         const map: typeof graphNodes = {};
@@ -2981,34 +3471,46 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
       .catch(() => setNodesLoaded(true));
   }, [companySlug, runId]);
 
-  // --- Highlight check: batch-fetch source docs and test excerpt matching ---
+  // --- Highlight check: load saved results or compute + save ---
+  const HIGHLIGHT_ALGO_VERSION = 4;
   const [highlightFailures, setHighlightFailures] = useState<Set<string>>(new Set());
   const [highlightChecked, setHighlightChecked] = useState(false);
+  const [highlightComputing, setHighlightComputing] = useState(false);
+  const highlightCancelRef = useRef(false);
 
-  useEffect(() => {
+  const computeHighlights = useCallback(async (forceRecompute = false) => {
     if (!companySlug || !runId) return;
+    highlightCancelRef.current = false;
     setHighlightChecked(false);
     setHighlightFailures(new Set());
+    setHighlightComputing(true);
 
-    const allRefs: { source_type: string; doc_id: string }[] = [];
-    for (const entries of Object.values(artifact.entities_by_type)) {
-      for (const e of entries) {
-        for (const r of e.source_refs) {
-          allRefs.push({ source_type: r.source_type, doc_id: r.doc_id });
-        }
-      }
-    }
-    const uniqueKeys = new Map<string, { source_type: string; doc_id: string }>();
-    for (const r of allRefs) {
-      const k = `${r.source_type}:${r.doc_id}`;
-      if (!uniqueKeys.has(k)) uniqueKeys.set(k, r);
-    }
+    const SPEAKER_HEADER_RE = /^\s*\w[\w\s.]*\[[\d\-\/]+\]:\s*$/m;
 
     const excerptMatchesContent = (content: string, excerpt: string): boolean => {
       if (!excerpt || !content) return false;
       const clean = excerpt.slice(0, 300).trim();
       if (content.toLowerCase().includes(clean.toLowerCase())) return true;
-      if (normalizeForMatch(content).includes(normalizeForMatch(clean))) return true;
+      const normContent = normalizeForMatch(content);
+      if (normContent.includes(normalizeForMatch(clean))) return true;
+      const bodyOnly = clean.replace(/^\s*\w[\w\s.]*\[[\d\-\/]+\]:\s*\n?/, "").trim();
+      if (bodyOnly !== clean && bodyOnly.length > 20) {
+        if (normContent.includes(normalizeForMatch(bodyOnly))) return true;
+      }
+      const lines = clean.split("\n");
+      const chunks: string[] = [];
+      let cur: string[] = [];
+      for (const line of lines) {
+        if (SPEAKER_HEADER_RE.test(line)) {
+          if (cur.length > 0) chunks.push(cur.join("\n").trim());
+          cur = [];
+        } else {
+          cur.push(line);
+        }
+      }
+      if (cur.length > 0) chunks.push(cur.join("\n").trim());
+      const nonEmpty = chunks.filter((c) => c.length > 0);
+      if (nonEmpty.length >= 2 && nonEmpty.every((c) => { const nc = normalizeForMatch(c); return nc.length < 10 || normContent.includes(nc); })) return true;
       const excerptWords = new Set(clean.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
       if (excerptWords.size >= 3) {
         const sentences = content.split(/(?<=[.!?\n])\s+/);
@@ -3021,7 +3523,39 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
       return false;
     };
 
-    const fetchAll = async () => {
+    try {
+      if (!forceRecompute && (executionId || stepId)) {
+        try {
+          const params = new URLSearchParams({ type: "highlight_check" });
+          if (executionId) params.set("execution_id", executionId);
+          else { params.set("run_id", runId!); params.set("step_id", stepId!); }
+          const res = await fetch(`/api/${companySlug}/kb2?${params}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.highlight_failures && data.highlight_failures.algorithm_version === HIGHLIGHT_ALGO_VERSION) {
+              if (highlightCancelRef.current) return;
+              setHighlightFailures(new Set(data.highlight_failures.failures));
+              setHighlightChecked(true);
+              return;
+            }
+          }
+        } catch { /* fall through to compute */ }
+      }
+
+      const allRefs: { source_type: string; doc_id: string }[] = [];
+      for (const entries of Object.values(artifact.entities_by_type)) {
+        for (const e of entries) {
+          for (const r of e.source_refs) {
+            allRefs.push({ source_type: r.source_type, doc_id: r.doc_id });
+          }
+        }
+      }
+      const uniqueKeys = new Map<string, { source_type: string; doc_id: string }>();
+      for (const r of allRefs) {
+        const k = `${r.source_type}:${r.doc_id}`;
+        if (!uniqueKeys.has(k)) uniqueKeys.set(k, r);
+      }
+
       const docContents = new Map<string, string>();
       const entries = [...uniqueKeys.entries()];
       const BATCH = 6;
@@ -3044,24 +3578,66 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
         }));
         for (const [key, content] of results) docContents.set(key, content);
       }
+      if (highlightCancelRef.current) return;
 
       const failures = new Set<string>();
-      for (const [type, entries] of Object.entries(artifact.entities_by_type)) {
-        for (const e of entries) {
+      const failureDetails: Array<{ entity_key: string; source_ref: { source_type: string; doc_id: string; title: string; excerpt_preview: string }; reason: string }> = [];
+      let totalChecked = 0;
+
+      for (const [type, ents] of Object.entries(artifact.entities_by_type)) {
+        for (const e of ents) {
+          totalChecked++;
           const entityKey = `${type}:${e.display_name}`;
           for (const ref of e.source_refs) {
             const cacheKey = `${ref.source_type}:${ref.doc_id}`;
             const content = docContents.get(cacheKey) ?? "";
-            if (!content) { failures.add(entityKey); break; }
-            if (ref.excerpt && !excerptMatchesContent(content, ref.excerpt)) { failures.add(entityKey); break; }
+            if (!content) {
+              failures.add(entityKey);
+              failureDetails.push({ entity_key: entityKey, source_ref: { source_type: ref.source_type, doc_id: ref.doc_id, title: ref.title, excerpt_preview: (ref.excerpt ?? "").slice(0, 120) }, reason: "no_content" });
+              break;
+            }
+            if (ref.excerpt && !excerptMatchesContent(content, ref.excerpt)) {
+              failures.add(entityKey);
+              failureDetails.push({ entity_key: entityKey, source_ref: { source_type: ref.source_type, doc_id: ref.doc_id, title: ref.title, excerpt_preview: (ref.excerpt ?? "").slice(0, 120) }, reason: "no_match" });
+              break;
+            }
           }
         }
       }
+
       setHighlightFailures(failures);
       setHighlightChecked(true);
-    };
-    fetchAll();
-  }, [companySlug, runId, artifact.entities_by_type]);
+
+      if (executionId || stepId) {
+        try {
+          await fetch(`/api/${companySlug}/kb2`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "save_highlight_check",
+              run_id: runId,
+              step_id: stepId,
+              execution_id: executionId,
+              highlight_failures: {
+                checked_at: new Date().toISOString(),
+                algorithm_version: HIGHLIGHT_ALGO_VERSION,
+                failures: [...failures],
+                total_checked: totalChecked,
+                failure_details: failureDetails,
+              },
+            }),
+          });
+        } catch { /* save is best-effort */ }
+      }
+    } finally {
+      setHighlightComputing(false);
+    }
+  }, [companySlug, runId, executionId, stepId, artifact.entities_by_type]);
+
+  useEffect(() => {
+    computeHighlights();
+    return () => { highlightCancelRef.current = true; };
+  }, [computeHighlights]);
 
   const types = Object.keys(artifact.entities_by_type).sort();
   const typeSummary = types.map((t) => ({
@@ -3149,9 +3725,18 @@ function EntityExtractionViewer({ artifact, companySlug, runId, onSelectSources 
               className={`border rounded-md p-2 text-center transition-colors ${highlightFailCount > 0 ? "border-red-300 dark:border-red-700" : ""} ${filterHighlightFail ? "ring-2 ring-red-400" : ""}`}
             >
               <div className={`text-lg font-bold ${!highlightChecked ? "text-muted-foreground" : highlightFailCount > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                {highlightChecked ? highlightFailCount : "…"}
+                {highlightComputing ? <Loader2 className="h-4 w-4 animate-spin inline" /> : highlightChecked ? highlightFailCount : "…"}
               </div>
               <div className="text-[10px] text-muted-foreground">No Highlight</div>
+            </button>
+            <button
+              onClick={() => computeHighlights(true)}
+              disabled={highlightComputing}
+              className="border rounded-md p-2 text-center transition-colors hover:bg-accent/50 disabled:opacity-50"
+              title="Recompute highlight check from scratch"
+            >
+              <div className="text-lg font-bold text-muted-foreground"><RefreshCw className={`h-4 w-4 inline ${highlightComputing ? "animate-spin" : ""}`} /></div>
+              <div className="text-[10px] text-muted-foreground">Recheck</div>
             </button>
           </div>
 
@@ -3380,10 +3965,12 @@ function getDocFlags(doc: SnapshotDoc): { level: "error" | "warning"; message: s
 function InputSnapshotViewer({
   companySlug,
   runId,
+  executionId,
   artifact,
 }: {
   companySlug: string;
   runId: string;
+  executionId?: string;
   artifact: Record<string, unknown>;
 }) {
   const [snapshot, setSnapshot] = useState<{ parsed_documents: SnapshotDoc[]; raw_stats?: Record<string, { chars: number; format: string }>; stats?: Record<string, number> } | null>(null);
@@ -3396,8 +3983,9 @@ function InputSnapshotViewer({
     const load = async () => {
       setLoading(true);
       try {
+        const params = executionId ? `execution_id=${executionId}` : `run_id=${runId}`;
         const [snapRes, rawRes] = await Promise.all([
-          fetch(`/api/${companySlug}/kb2?type=inputs&run_id=${runId}`),
+          fetch(`/api/${companySlug}/kb2?type=inputs&${params}`),
           fetch(`/api/${companySlug}/kb2/input?full=true`),
         ]);
         const snapData = await snapRes.json();
@@ -3763,7 +4351,7 @@ function isExtractionValidation(step: RunStep, artifact: unknown): boolean {
   );
 }
 
-function ExtractionValidationViewer({ artifact }: {
+function ExtractionValidationViewer({ artifact, companySlug, runId, executionId, stepId, onSelectSources }: {
   artifact: {
     original_count: number;
     programmatic_candidates: number;
@@ -3774,55 +4362,385 @@ function ExtractionValidationViewer({ artifact }: {
     final_count: number;
     source_coverage?: { total_documents: number; documents_with_zero_entities: string[] };
     recovery_details: { display_name: string; type: string; recovery_source: string; reason: string }[];
+    attribute_validation?: {
+      total_checked: number;
+      backfilled: number;
+      flagged: number;
+      issues: Array<{
+        node_id: string;
+        display_name: string;
+        field: string;
+        action: "backfilled" | "flagged";
+        value?: string;
+        reason: string;
+      }>;
+    };
+    duplicate_clusters?: { count: number; pairs: [string, string][] };
+    decision_enrichment?: { decisions_enriched: number; scope_filled: number; decided_by_filled: number };
   };
+  companySlug?: string;
+  runId?: string;
+  executionId?: string;
+  stepId?: string;
+  onSelectSources?: (refs: EntityEntry["source_refs"]) => void;
 }) {
   const [showCoverage, setShowCoverage] = useState(false);
+  const [filterType, setFilterType] = useState<string>("all");
+  const [filterConfidence, setFilterConfidence] = useState<string>("all");
+  const [filterChangesOnly, setFilterChangesOnly] = useState(false);
+  const [expandedEntity, setExpandedEntity] = useState<string | null>(null);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [allNodes, setAllNodes] = useState<Array<{
+    node_id: string; display_name: string; type: string; confidence: string;
+    aliases: string[]; attributes: Record<string, any>; source_refs: EntityEntry["source_refs"];
+  }>>([]);
+
   const gap = artifact.final_count - artifact.original_count;
+  const av = artifact.attribute_validation;
+  const totalCandidates = artifact.programmatic_candidates + artifact.crossllm_candidates;
+
+  // --- Fetch graph nodes ---
+  useEffect(() => {
+    if (!companySlug || !runId) return;
+    setNodesLoaded(false);
+    const params = executionId ? `execution_id=${executionId}` : `run_id=${runId}`;
+    fetch(`/api/${companySlug}/kb2?type=graph_nodes&${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setAllNodes(data.nodes ?? []);
+        setNodesLoaded(true);
+      })
+      .catch(() => setNodesLoaded(true));
+  }, [companySlug, runId]);
+
+  // --- Highlight check ---
+  const HIGHLIGHT_ALGO_VERSION = 4;
+  const [highlightFailures, setHighlightFailures] = useState<Set<string>>(new Set());
+  const [highlightChecked, setHighlightChecked] = useState(false);
+  const [highlightComputing, setHighlightComputing] = useState(false);
+  const [filterHighlightFail, setFilterHighlightFail] = useState(false);
+  const highlightCancelRef = useRef(false);
+
+  const computeHighlights = useCallback(async (forceRecompute = false) => {
+    if (!companySlug || !runId || allNodes.length === 0) return;
+    highlightCancelRef.current = false;
+    setHighlightChecked(false);
+    setHighlightFailures(new Set());
+    setHighlightComputing(true);
+
+    const SPEAKER_HEADER_RE = /^\s*\w[\w\s.]*\[[\d\-\/]+\]:\s*$/m;
+    const excerptMatchesContent = (content: string, excerpt: string): boolean => {
+      if (!excerpt || !content) return false;
+      const clean = excerpt.slice(0, 300).trim();
+      if (content.toLowerCase().includes(clean.toLowerCase())) return true;
+      const normContent = normalizeForMatch(content);
+      if (normContent.includes(normalizeForMatch(clean))) return true;
+      const bodyOnly = clean.replace(/^\s*\w[\w\s.]*\[[\d\-\/]+\]:\s*\n?/, "").trim();
+      if (bodyOnly !== clean && bodyOnly.length > 20) {
+        if (normContent.includes(normalizeForMatch(bodyOnly))) return true;
+      }
+      const lines = clean.split("\n");
+      const chunks: string[] = [];
+      let cur: string[] = [];
+      for (const line of lines) {
+        if (SPEAKER_HEADER_RE.test(line)) {
+          if (cur.length > 0) chunks.push(cur.join("\n").trim());
+          cur = [];
+        } else { cur.push(line); }
+      }
+      if (cur.length > 0) chunks.push(cur.join("\n").trim());
+      const nonEmpty = chunks.filter((c) => c.length > 0);
+      if (nonEmpty.length >= 2 && nonEmpty.every((c) => { const nc = normalizeForMatch(c); return nc.length < 10 || normContent.includes(nc); })) return true;
+      const excerptWords = new Set(clean.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+      if (excerptWords.size >= 3) {
+        const sentences = content.split(/(?<=[.!?\n])\s+/);
+        for (const sent of sentences) {
+          const sentWords = sent.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+          const overlap = sentWords.filter((w) => excerptWords.has(w)).length;
+          if (excerptWords.size > 0 && overlap / excerptWords.size >= 0.5) return true;
+        }
+      }
+      return false;
+    };
+
+    try {
+      if (!forceRecompute && (executionId || stepId)) {
+        try {
+          const params = new URLSearchParams({ type: "highlight_check" });
+          if (executionId) params.set("execution_id", executionId);
+          else { params.set("run_id", runId!); params.set("step_id", stepId!); }
+          const res = await fetch(`/api/${companySlug}/kb2?${params}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.highlight_failures && data.highlight_failures.algorithm_version === HIGHLIGHT_ALGO_VERSION) {
+              if (highlightCancelRef.current) return;
+              setHighlightFailures(new Set(data.highlight_failures.failures));
+              setHighlightChecked(true);
+              return;
+            }
+          }
+        } catch { /* fall through */ }
+      }
+
+      const allRefs: { source_type: string; doc_id: string }[] = [];
+      for (const n of allNodes) {
+        for (const r of (n.source_refs ?? [])) {
+          allRefs.push({ source_type: r.source_type, doc_id: r.doc_id });
+        }
+      }
+      const uniqueKeys = new Map<string, { source_type: string; doc_id: string }>();
+      for (const r of allRefs) {
+        const k = `${r.source_type}:${r.doc_id}`;
+        if (!uniqueKeys.has(k)) uniqueKeys.set(k, r);
+      }
+
+      const docContents = new Map<string, string>();
+      const entries = [...uniqueKeys.entries()];
+      const BATCH = 6;
+      for (let bi = 0; bi < entries.length; bi += BATCH) {
+        const batch = entries.slice(bi, bi + BATCH);
+        const results = await Promise.all(batch.map(async ([key, ref]) => {
+          try {
+            const params = new URLSearchParams({ type: "parsed_doc", doc_id: ref.doc_id, run_id: runId! });
+            if (ref.source_type) params.set("source_type", ref.source_type);
+            const res = await fetch(`/api/${companySlug}/kb2?${params}`);
+            if (!res.ok) return [key, ""] as const;
+            const data = await res.json();
+            const doc = data.document;
+            let content = doc?.content ?? "";
+            if (!content && doc?.sections?.length) {
+              content = doc.sections.map((s: any) => `## ${s.heading}\n${s.content}`).join("\n\n");
+            }
+            return [key, content] as const;
+          } catch { return [key, ""] as const; }
+        }));
+        for (const [key, content] of results) docContents.set(key, content);
+      }
+      if (highlightCancelRef.current) return;
+
+      const failures = new Set<string>();
+      const failureDetails: Array<{ entity_key: string; source_ref: { source_type: string; doc_id: string; title: string; excerpt_preview: string }; reason: string }> = [];
+      let totalChecked = 0;
+
+      for (const n of allNodes) {
+        totalChecked++;
+        const entityKey = `${n.type}:${n.display_name}`;
+        for (const ref of (n.source_refs ?? [])) {
+          const cacheKey = `${ref.source_type}:${ref.doc_id}`;
+          const content = docContents.get(cacheKey) ?? "";
+          if (!content) {
+            failures.add(entityKey);
+            failureDetails.push({ entity_key: entityKey, source_ref: { source_type: ref.source_type, doc_id: ref.doc_id, title: ref.title, excerpt_preview: (ref.excerpt ?? "").slice(0, 120) }, reason: "no_content" });
+            break;
+          }
+          if (ref.excerpt && !excerptMatchesContent(content, ref.excerpt)) {
+            failures.add(entityKey);
+            failureDetails.push({ entity_key: entityKey, source_ref: { source_type: ref.source_type, doc_id: ref.doc_id, title: ref.title, excerpt_preview: (ref.excerpt ?? "").slice(0, 120) }, reason: "no_match" });
+            break;
+          }
+        }
+      }
+
+      setHighlightFailures(failures);
+      setHighlightChecked(true);
+
+      if (executionId || stepId) {
+        try {
+          await fetch(`/api/${companySlug}/kb2`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "save_highlight_check",
+              run_id: runId,
+              step_id: stepId,
+              execution_id: executionId,
+              highlight_failures: {
+                checked_at: new Date().toISOString(),
+                algorithm_version: HIGHLIGHT_ALGO_VERSION,
+                failures: [...failures],
+                total_checked: totalChecked,
+                failure_details: failureDetails,
+              },
+            }),
+          });
+        } catch { /* best-effort */ }
+      }
+    } finally {
+      setHighlightComputing(false);
+    }
+  }, [companySlug, runId, executionId, stepId, allNodes]);
+
+  useEffect(() => {
+    if (nodesLoaded && allNodes.length > 0) computeHighlights();
+    return () => { highlightCancelRef.current = true; };
+  }, [nodesLoaded, computeHighlights]);
+
+  const highlightFailCount = allNodes.filter((n) => highlightFailures.has(`${n.type}:${n.display_name}`)).length;
+
+  // --- Build change-tracking lookup maps ---
+  const { issuesByName, recoveredNames } = useMemo(() => {
+    const issuesByName = new Map<string, typeof av extends undefined ? never : NonNullable<typeof av>["issues"]>();
+    if (av?.issues) {
+      for (const issue of av.issues) {
+        const key = issue.display_name.toLowerCase().trim();
+        const existing = issuesByName.get(key) ?? [];
+        existing.push(issue);
+        issuesByName.set(key, existing);
+      }
+    }
+    const recoveredNames = new Set<string>(
+      artifact.recovery_details.map((r) => r.display_name.toLowerCase().trim()),
+    );
+    return { issuesByName, recoveredNames };
+  }, [av?.issues, artifact.recovery_details]);
+
+  // --- Build type counts and filtered list ---
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const n of allNodes) {
+      counts[n.type] = (counts[n.type] ?? 0) + 1;
+    }
+    return counts;
+  }, [allNodes]);
+
+  const [filterProcessStatus, setFilterProcessStatus] = useState<string>("all");
+  const [filterDocLevel, setFilterDocLevel] = useState<string>("all");
+
+  const filtered = useMemo(() => {
+    const result = allNodes.filter((n) => {
+      if (filterType !== "all" && n.type !== filterType) return false;
+      if (filterConfidence !== "all" && n.confidence !== filterConfidence) return false;
+      if (filterProcessStatus !== "all" && (n.attributes?.status ?? "") !== filterProcessStatus) return false;
+      if (filterDocLevel !== "all" && (n.attributes?.documentation_level ?? "") !== filterDocLevel) return false;
+      if (filterHighlightFail && !highlightFailures.has(`${n.type}:${n.display_name}`)) return false;
+      if (filterChangesOnly) {
+        const nameKey = n.display_name.toLowerCase().trim();
+        const hasIssues = issuesByName.has(nameKey);
+        const isRecovered = recoveredNames.has(nameKey) || !!(n.attributes as any)?._recovery_source;
+        if (!hasIssues && !isRecovered) return false;
+      }
+      return true;
+    });
+    result.sort((a, b) => {
+      const aIsProject = a.type === "project" ? 0 : 1;
+      const bIsProject = b.type === "project" ? 0 : 1;
+      if (aIsProject !== bIsProject) return aIsProject - bIsProject;
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.display_name.localeCompare(b.display_name);
+    });
+    return result;
+  }, [allNodes, filterType, filterConfidence, filterProcessStatus, filterDocLevel, filterHighlightFail, highlightFailures, filterChangesOnly, issuesByName, recoveredNames]);
+
+  const types = useMemo(() => Object.keys(typeCounts).sort(), [typeCounts]);
+
+  // --- Count changed entities ---
+  const changedCount = useMemo(() => {
+    let count = 0;
+    for (const n of allNodes) {
+      const nameKey = n.display_name.toLowerCase().trim();
+      if (issuesByName.has(nameKey) || recoveredNames.has(nameKey) || (n.attributes as any)?._recovery_source) count++;
+    }
+    return count;
+  }, [allNodes, issuesByName, recoveredNames]);
 
   return (
     <div className="space-y-3">
       <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
         Extraction Validation
       </h4>
-      <div className="flex flex-wrap gap-3 text-xs">
-        <span className="bg-muted/50 rounded px-2 py-1">Before: <strong>{artifact.original_count}</strong></span>
-        <span className="text-emerald-600 font-medium">+{gap} recovered</span>
-        <span className="bg-muted/50 rounded px-2 py-1">After: <strong>{artifact.final_count}</strong></span>
+
+      {/* Summary grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.original_count}</div>
+          <div className="text-[10px] text-muted-foreground">Entities Before</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className={`text-lg font-bold ${gap > 0 ? "text-emerald-600" : ""}`}>{artifact.final_count}</div>
+          <div className="text-[10px] text-muted-foreground">Entities After {gap > 0 && <span className="text-emerald-600">(+{gap})</span>}</div>
+        </div>
+        {av && (
+          <>
+            <div className="border rounded-md p-2 text-center">
+              <div className="text-lg font-bold text-blue-600">{av.backfilled}</div>
+              <div className="text-[10px] text-muted-foreground">Attrs Backfilled</div>
+            </div>
+            <div className="border rounded-md p-2 text-center">
+              <div className={`text-lg font-bold ${av.flagged > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{av.flagged}</div>
+              <div className="text-[10px] text-muted-foreground">Attrs Flagged</div>
+            </div>
+          </>
+        )}
+        {!av && (
+          <>
+            <div className="border rounded-md p-2 text-center">
+              <div className="text-lg font-bold">{totalCandidates}</div>
+              <div className="text-[10px] text-muted-foreground">Candidates</div>
+            </div>
+            <div className="border rounded-md p-2 text-center">
+              <div className="text-lg font-bold text-emerald-600">{artifact.opus_confirmed}</div>
+              <div className="text-[10px] text-muted-foreground">Confirmed</div>
+            </div>
+          </>
+        )}
+        <button
+          onClick={() => setFilterHighlightFail(!filterHighlightFail)}
+          className={`border rounded-md p-2 text-center transition-colors ${highlightFailCount > 0 ? "border-red-300 dark:border-red-700" : ""} ${filterHighlightFail ? "ring-2 ring-red-400" : ""}`}
+        >
+          <div className={`text-lg font-bold ${!highlightChecked ? "text-muted-foreground" : highlightFailCount > 0 ? "text-red-600" : "text-emerald-600"}`}>
+            {highlightComputing ? <Loader2 className="h-4 w-4 animate-spin inline" /> : highlightChecked ? highlightFailCount : "…"}
+          </div>
+          <div className="text-[10px] text-muted-foreground">No Highlight</div>
+        </button>
+        <button
+          onClick={() => computeHighlights(true)}
+          disabled={highlightComputing}
+          className="border rounded-md p-2 text-center transition-colors hover:bg-accent/50 disabled:opacity-50"
+          title="Recompute highlight check from scratch"
+        >
+          <div className="text-lg font-bold text-muted-foreground"><RefreshCw className={`h-4 w-4 inline ${highlightComputing ? "animate-spin" : ""}`} /></div>
+          <div className="text-[10px] text-muted-foreground">Recheck</div>
+        </button>
+        {nodesLoaded && (() => {
+          const brokenSourceCount = allNodes.filter((n) => {
+            if (!n.source_refs || n.source_refs.length === 0) return true;
+            return n.source_refs.every((r: any) => !r.doc_id && !r.title);
+          }).length;
+          return (
+            <div className={`border rounded-md p-2 text-center ${brokenSourceCount > 0 ? "border-orange-300 dark:border-orange-700" : ""}`}>
+              <div className={`text-lg font-bold ${brokenSourceCount > 0 ? "text-orange-600" : "text-emerald-600"}`}>{brokenSourceCount}</div>
+              <div className="text-[10px] text-muted-foreground">Broken Sources</div>
+            </div>
+          );
+        })()}
       </div>
+
+      {/* Recovery pipeline stats */}
       <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-        <span>Programmatic: {artifact.programmatic_candidates} candidates</span>
+        <span>Programmatic: {artifact.programmatic_candidates}</span>
         <span>|</span>
-        <span>GPT cross-check: {artifact.crossllm_candidates} candidates</span>
+        <span>GPT cross-check: {artifact.crossllm_candidates}</span>
         <span>|</span>
-        <span className="text-emerald-600">Opus confirmed: {artifact.opus_confirmed}</span>
+        <span className="text-emerald-600">Confirmed: {artifact.opus_confirmed}</span>
         <span className="text-red-500">Rejected: {artifact.opus_rejected}</span>
         {artifact.opus_retyped != null && artifact.opus_retyped > 0 && (
           <span className="text-amber-600">Retyped: {artifact.opus_retyped}</span>
         )}
+        {artifact.duplicate_clusters && artifact.duplicate_clusters.count > 0 && (
+          <>
+            <span>|</span>
+            <span className="text-orange-600">{artifact.duplicate_clusters.count} Duplicate Pairs</span>
+          </>
+        )}
+        {artifact.decision_enrichment && artifact.decision_enrichment.decisions_enriched > 0 && (
+          <>
+            <span>|</span>
+            <span className="text-purple-600">{artifact.decision_enrichment.decisions_enriched} Decisions Linked</span>
+          </>
+        )}
       </div>
 
-      {artifact.recovery_details.length > 0 && (
-        <div>
-          <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-            Recovered Entities (+{artifact.recovery_details.length})
-          </h4>
-          <div className="space-y-1">
-            {artifact.recovery_details.map((r, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs bg-emerald-50 dark:bg-emerald-950/30 rounded px-2 py-1 border border-emerald-200 dark:border-emerald-800">
-                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300">
-                  +ADD
-                </span>
-                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TYPE_COLORS[r.type] ?? "bg-gray-100 text-gray-800"}`}>
-                  {r.type.replace(/_/g, " ")}
-                </span>
-                <span className="font-medium">{r.display_name}</span>
-                <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[40%]">{r.reason}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
+      {/* Source Coverage */}
       {artifact.source_coverage && (
         <div>
           <button
@@ -3843,6 +4761,299 @@ function ExtractionValidationViewer({ artifact }: {
           )}
         </div>
       )}
+
+      {/* --- Entity Table --- */}
+      {nodesLoaded && allNodes.length > 0 && (
+        <Card>
+          <CardHeader className="py-2 px-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                All Entities ({filtered.length}{filtered.length !== allNodes.length ? ` / ${allNodes.length}` : ""})
+                {changedCount > 0 && <span className="ml-2 text-blue-600">{changedCount} changed by Step 4</span>}
+              </h4>
+              <div className="flex items-center gap-2">
+                <Select value={filterType} onValueChange={setFilterType}>
+                  <SelectTrigger className="h-7 text-[11px] w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {types.map((t) => (
+                      <SelectItem key={t} value={t}>{(ENTITY_TYPE_META[t]?.label ?? t.replace(/_/g, " "))} ({typeCounts[t]})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterConfidence} onValueChange={setFilterConfidence}>
+                  <SelectTrigger className="h-7 text-[11px] w-[110px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Confidence</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterProcessStatus} onValueChange={setFilterProcessStatus}>
+                  <SelectTrigger className="h-7 text-[11px] w-[120px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="proposed">Proposed</SelectItem>
+                    <SelectItem value="planned">Planned</SelectItem>
+                    <SelectItem value="deprecated">Deprecated</SelectItem>
+                    <SelectItem value="informal">Informal</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterDocLevel} onValueChange={setFilterDocLevel}>
+                  <SelectTrigger className="h-7 text-[11px] w-[130px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Doc Level</SelectItem>
+                    <SelectItem value="documented">Documented</SelectItem>
+                    <SelectItem value="undocumented">Undocumented</SelectItem>
+                  </SelectContent>
+                </Select>
+                <button
+                  onClick={() => setFilterChangesOnly(!filterChangesOnly)}
+                  className={`text-[10px] px-2 py-1 rounded border transition-colors ${filterChangesOnly ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700" : "text-muted-foreground border-border hover:bg-muted/50"}`}
+                >
+                  Step 4 changes only
+                </button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-auto max-h-[70vh]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-background z-10">
+                  <tr className="border-b text-muted-foreground">
+                    <th className="text-left px-3 py-1.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Type</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Confidence</th>
+                    <th className="text-right px-3 py-1.5 font-medium">Sources</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Step 4</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((node) => {
+                    const nameKey = node.display_name.toLowerCase().trim();
+                    const issues = issuesByName.get(nameKey);
+                    const isRecovered = recoveredNames.has(nameKey) || !!(node.attributes as any)?._recovery_source;
+                    const hasBackfill = issues?.some((i) => i.action === "backfilled");
+                    const hasFlagged = issues?.some((i) => i.action === "flagged");
+                    const key = `${node.type}:${node.display_name}`;
+                    const isExpanded = expandedEntity === key;
+                    const meta = ENTITY_TYPE_META[node.type] ?? { label: node.type, color: "bg-gray-100 text-gray-800" };
+                    const hasHighlightFail = highlightChecked && highlightFailures.has(key);
+
+                    return (
+                      <Fragment key={key}>
+                        <tr
+                          className={`border-t cursor-pointer hover:bg-muted/30 transition-colors ${isExpanded ? "bg-muted/20" : ""}`}
+                          onClick={() => {
+                            const newKey = isExpanded ? null : key;
+                            setExpandedEntity(newKey);
+                            if (newKey && onSelectSources) onSelectSources(node.source_refs);
+                            else if (!newKey && onSelectSources) onSelectSources([]);
+                          }}
+                        >
+                          <td className="px-3 py-1.5 font-medium">
+                            <div className="flex items-center gap-1">
+                              {isExpanded ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+                              <span className="truncate max-w-[250px]">{node.display_name}</span>
+                              {hasHighlightFail && (
+                                <span className="text-[9px] px-1 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 shrink-0">no highlight</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <Badge className={`text-[10px] ${meta.color}`}>{meta.label}</Badge>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[node.confidence] ?? ""}`}>{node.confidence}</span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">{node.source_refs?.length ?? 0}</td>
+                          <td className="px-3 py-1.5">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {isRecovered && (
+                                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">+NEW</span>
+                              )}
+                              {hasBackfill && (
+                                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">BACKFILLED</span>
+                              )}
+                              {hasFlagged && (
+                                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">FLAGGED</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${key}-detail`} className="border-t bg-muted/10">
+                            <td colSpan={5} className="px-4 py-3">
+                              <div className="space-y-3">
+                                {/* Attribute changes from Step 4 */}
+                                {issues && issues.length > 0 && (
+                                  <div className="border rounded-md overflow-hidden">
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-muted/30 border-b font-medium">
+                                      Step 4 Attribute Changes
+                                    </div>
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="border-b text-muted-foreground bg-muted/10">
+                                          <th className="text-left px-3 py-1 font-medium">Field</th>
+                                          <th className="text-left px-3 py-1 font-medium">Before</th>
+                                          <th className="text-left px-3 py-1 font-medium">After</th>
+                                          <th className="text-left px-3 py-1 font-medium">Reason</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {issues.map((issue, ii) => (
+                                          <tr key={ii} className={`border-t ${issue.action === "backfilled" ? "bg-blue-50/50 dark:bg-blue-950/20" : "bg-amber-50/50 dark:bg-amber-950/20"}`}>
+                                            <td className="px-3 py-1.5 font-mono">{issue.field}</td>
+                                            <td className="px-3 py-1.5 text-muted-foreground italic">
+                                              {issue.action === "backfilled" ? <span className="text-red-500/70">missing</span> : <span className="text-red-500/70">missing</span>}
+                                            </td>
+                                            <td className="px-3 py-1.5">
+                                              {issue.action === "backfilled" ? (
+                                                <span className="font-mono text-blue-700 dark:text-blue-300">&quot;{issue.value}&quot;</span>
+                                              ) : (
+                                                <span className="text-amber-600 dark:text-amber-400 italic">still missing</span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-1.5 text-[10px] text-muted-foreground max-w-[200px]">{issue.reason}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+
+                                {/* LLM reasoning for inferred attributes */}
+                                {(node.attributes as any)?._status_reasoning && (
+                                  <div className="flex items-start gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-3 py-2 border border-blue-200 dark:border-blue-800">
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 shrink-0">LLM</span>
+                                    <div className="text-[10px] text-muted-foreground">
+                                      {(node.attributes as any)._status_reasoning}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Recovery info for +NEW entities */}
+                                {isRecovered && (() => {
+                                  const recoverySource = (node.attributes as any)?._recovery_source;
+                                  const recoveryDetail = artifact.recovery_details.find((r) => r.display_name.toLowerCase().trim() === nameKey);
+                                  return (
+                                    <div className="flex items-start gap-2 text-xs bg-emerald-50 dark:bg-emerald-950/30 rounded px-3 py-2 border border-emerald-200 dark:border-emerald-800">
+                                      <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 shrink-0">+NEW</span>
+                                      <div className="min-w-0">
+                                        <div className="font-medium">Added by Step 4 via {(recoverySource ?? recoveryDetail?.recovery_source ?? "unknown").replace(/_/g, " ")}</div>
+                                        {recoveryDetail?.reason && (
+                                          <div className="text-[10px] text-muted-foreground mt-0.5">{recoveryDetail.reason}</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
+                                {/* Source coverage badges */}
+                                {(node.attributes as any)?._source_coverage && (() => {
+                                  const sc = (node.attributes as any)._source_coverage as Record<string, boolean>;
+                                  const pills: { key: string; label: string; active: boolean }[] = [
+                                    { key: "has_confluence", label: "Confluence", active: sc.has_confluence },
+                                    { key: "has_jira", label: "Jira", active: sc.has_jira },
+                                    { key: "has_github", label: "GitHub", active: sc.has_github },
+                                    { key: "has_slack", label: "Slack", active: sc.has_slack },
+                                    { key: "has_feedback", label: "Feedback", active: sc.has_feedback },
+                                  ];
+                                  return (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider mr-1">Sources:</span>
+                                      {pills.map((p) => (
+                                        <span key={p.key} className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${p.active ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300" : "bg-muted/40 text-muted-foreground/50 line-through"}`}>
+                                          {p.label}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+
+                                {/* Duplicate warning */}
+                                {(node.attributes as any)?._likely_duplicates && (node.attributes as any)._likely_duplicates.length > 0 && (
+                                  <div className="flex items-start gap-2 text-xs bg-orange-50 dark:bg-orange-950/30 rounded px-3 py-2 border border-orange-200 dark:border-orange-800">
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 shrink-0">DUPE?</span>
+                                    <div className="min-w-0">
+                                      <div className="font-medium">Possible duplicate of:</div>
+                                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                                        {((node.attributes as any)._likely_duplicates as string[]).join(", ")}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Related entities for decisions */}
+                                {(node.attributes as any)?._related_entities && (node.attributes as any)._related_entities.length > 0 && (
+                                  <div className="border rounded-md overflow-hidden">
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-muted/30 border-b font-medium">
+                                      Related Entities
+                                    </div>
+                                    <div className="px-3 py-2 flex flex-wrap gap-1.5">
+                                      {((node.attributes as any)._related_entities as Array<{ name: string; type: string }>).map((rel, ri) => {
+                                        const relMeta = ENTITY_TYPE_META[rel.type] ?? { label: rel.type, color: "bg-gray-100 text-gray-800" };
+                                        return (
+                                          <span key={ri} className="text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border">
+                                            <Badge className={`text-[8px] ${relMeta.color}`}>{relMeta.label}</Badge>
+                                            <span>{rel.name}</span>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Entity JSON */}
+                                <pre className="text-[11px] bg-background rounded p-3 overflow-auto whitespace-pre-wrap break-all border max-h-80 font-mono">
+                                  {JSON.stringify({
+                                    display_name: node.display_name,
+                                    type: node.type,
+                                    source_documents: node.source_refs?.map((ref) => ({
+                                      title: ref.title + (ref.section_heading ? ` (${ref.section_heading})` : ""),
+                                      evidence_excerpt: ref.excerpt,
+                                    })),
+                                    aliases: node.aliases,
+                                    attributes: Object.fromEntries(
+                                      Object.entries(node.attributes ?? {}).filter(([k]) => !k.startsWith("_"))
+                                    ),
+                                    confidence: node.confidence,
+                                  }, null, 2)}
+                                </pre>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!nodesLoaded && companySlug && runId && (
+        <div className="text-xs text-muted-foreground italic px-1">Loading entities...</div>
+      )}
+
+      {nodesLoaded && allNodes.length === 0 && artifact.final_count > 0 && (
+        <div className="text-xs text-amber-600 dark:text-amber-400 italic px-1">
+          No entity data found for this run (expected {artifact.final_count}). The graph nodes may have been cleared.
+        </div>
+      )}
     </div>
   );
 }
@@ -3859,7 +5070,7 @@ function isEntityResolution(step: RunStep, artifact: unknown): boolean {
   );
 }
 
-function EntityResolutionViewer({ artifact }: {
+function EntityResolutionViewer({ artifact, companySlug, runId, executionId, onSelectSources }: {
   artifact: {
     total_entities_before: number;
     total_entities_after: number;
@@ -3867,7 +5078,80 @@ function EntityResolutionViewer({ artifact }: {
     merges_performed: number;
     merges: { from: string; into: string; canonicalName: string; reason: string }[];
   };
+  companySlug?: string;
+  runId?: string;
+  executionId?: string;
+  onSelectSources?: (refs: EntityEntry["source_refs"]) => void;
 }) {
+  const [showMerges, setShowMerges] = useState(true);
+  const [filterType, setFilterType] = useState<string>("all");
+  const [filterConfidence, setFilterConfidence] = useState<string>("all");
+  const [filterMergedOnly, setFilterMergedOnly] = useState(false);
+  const [expandedEntity, setExpandedEntity] = useState<string | null>(null);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [allNodes, setAllNodes] = useState<Array<{
+    node_id: string; display_name: string; type: string; confidence: string;
+    aliases: string[]; attributes: Record<string, any>; source_refs: EntityEntry["source_refs"];
+  }>>([]);
+
+  useEffect(() => {
+    if (!companySlug || !runId) return;
+    setNodesLoaded(false);
+    const params = executionId ? `execution_id=${executionId}` : `run_id=${runId}`;
+    fetch(`/api/${companySlug}/kb2?type=graph_nodes&${params}`)
+      .then((r) => r.json())
+      .then((data) => { setAllNodes(data.nodes ?? []); setNodesLoaded(true); })
+      .catch(() => setNodesLoaded(true));
+  }, [companySlug, runId, executionId]);
+
+  const mergedNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of artifact.merges) {
+      s.add(m.from.toLowerCase().trim());
+      s.add(m.into.toLowerCase().trim());
+      s.add(m.canonicalName.toLowerCase().trim());
+    }
+    return s;
+  }, [artifact.merges]);
+
+  const mergeInfoMap = useMemo(() => {
+    const map = new Map<string, { from: string[]; reason: string }>();
+    for (const m of artifact.merges) {
+      const key = m.canonicalName.toLowerCase().trim();
+      const existing = map.get(key);
+      if (existing) { existing.from.push(m.from); }
+      else { map.set(key, { from: [m.from], reason: m.reason }); }
+    }
+    return map;
+  }, [artifact.merges]);
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const n of allNodes) counts[n.type] = (counts[n.type] ?? 0) + 1;
+    return counts;
+  }, [allNodes]);
+
+  const types = useMemo(() => Object.keys(typeCounts).sort(), [typeCounts]);
+
+  const filtered = useMemo(() => {
+    const result = allNodes.filter((n) => {
+      if (filterType !== "all" && n.type !== filterType) return false;
+      if (filterConfidence !== "all" && n.confidence !== filterConfidence) return false;
+      if (filterMergedOnly) {
+        if (!mergedNames.has(n.display_name.toLowerCase().trim())) return false;
+      }
+      return true;
+    });
+    result.sort((a, b) => {
+      const aIsProject = a.type === "project" ? 0 : 1;
+      const bIsProject = b.type === "project" ? 0 : 1;
+      if (aIsProject !== bIsProject) return aIsProject - bIsProject;
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.display_name.localeCompare(b.display_name);
+    });
+    return result;
+  }, [allNodes, filterType, filterConfidence, filterMergedOnly, mergedNames]);
+
   return (
     <div className="space-y-3">
       <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -3884,22 +5168,230 @@ function EntityResolutionViewer({ artifact }: {
 
       {artifact.merges.length > 0 && (
         <div>
-          <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+          <button
+            onClick={() => setShowMerges(!showMerges)}
+            className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1 hover:text-foreground"
+          >
+            {showMerges ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             Merges ({artifact.merges.length})
-          </h4>
-          <div className="space-y-1">
-            {artifact.merges.map((m, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-2 py-1 border border-blue-200 dark:border-blue-800">
-                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
-                  MERGE
-                </span>
-                <span className="text-red-500 line-through">{m.from}</span>
-                <span className="text-muted-foreground">&rarr;</span>
-                <span className="font-medium text-emerald-600">{m.canonicalName}</span>
-                <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[40%]">{m.reason}</span>
+          </button>
+          {showMerges && (
+            <div className="space-y-1 mt-1">
+              {artifact.merges.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-2 py-1 border border-blue-200 dark:border-blue-800">
+                  <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                    MERGE
+                  </span>
+                  <span className="text-red-500 line-through">{m.from}</span>
+                  <span className="text-muted-foreground">&rarr;</span>
+                  <span className="font-medium text-emerald-600">{m.canonicalName}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[40%]">{m.reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {nodesLoaded && allNodes.length > 0 && (
+        <Card>
+          <CardHeader className="py-2 px-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Post-Resolution Entities ({filtered.length}{filtered.length !== allNodes.length ? ` / ${allNodes.length}` : ""})
+              </h4>
+              <div className="flex items-center gap-2">
+                <Select value={filterType} onValueChange={setFilterType}>
+                  <SelectTrigger className="h-7 text-[11px] w-[140px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {types.map((t) => (
+                      <SelectItem key={t} value={t}>{(ENTITY_TYPE_META[t]?.label ?? t.replace(/_/g, " "))} ({typeCounts[t]})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filterConfidence} onValueChange={setFilterConfidence}>
+                  <SelectTrigger className="h-7 text-[11px] w-[110px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Confidence</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+                <button
+                  onClick={() => setFilterMergedOnly(!filterMergedOnly)}
+                  className={`text-[10px] px-2 py-1 rounded border transition-colors ${filterMergedOnly ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700" : "text-muted-foreground border-border hover:bg-muted/50"}`}
+                >
+                  Merged only
+                </button>
               </div>
-            ))}
-          </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-auto max-h-[70vh]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-background z-10">
+                  <tr className="border-b text-muted-foreground">
+                    <th className="text-left px-3 py-1.5 font-medium">Name</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Type</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Confidence</th>
+                    <th className="text-right px-3 py-1.5 font-medium">Sources</th>
+                    <th className="text-left px-3 py-1.5 font-medium">Step 5</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((node) => {
+                    const nameKey = node.display_name.toLowerCase().trim();
+                    const isMerged = mergedNames.has(nameKey);
+                    const mergeInfo = mergeInfoMap.get(nameKey);
+                    const key = `${node.type}:${node.display_name}`;
+                    const isExpanded = expandedEntity === key;
+                    const meta = ENTITY_TYPE_META[node.type] ?? { label: node.type, color: "bg-gray-100 text-gray-800" };
+
+                    return (
+                      <Fragment key={key}>
+                        <tr
+                          className={`border-t cursor-pointer hover:bg-muted/30 transition-colors ${isExpanded ? "bg-muted/20" : ""}`}
+                          onClick={() => {
+                            const newKey = isExpanded ? null : key;
+                            setExpandedEntity(newKey);
+                            if (newKey && onSelectSources) onSelectSources(node.source_refs);
+                            else if (!newKey && onSelectSources) onSelectSources([]);
+                          }}
+                        >
+                          <td className="px-3 py-1.5 font-medium">
+                            <div className="flex items-center gap-1">
+                              {isExpanded ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+                              <span className="truncate max-w-[250px]">{node.display_name}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <Badge className={`text-[10px] ${meta.color}`}>{meta.label}</Badge>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[node.confidence] ?? ""}`}>{node.confidence}</span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">{node.source_refs?.length ?? 0}</td>
+                          <td className="px-3 py-1.5">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {isMerged && (
+                                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">MERGED</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${key}-detail`} className="border-t bg-muted/10">
+                            <td colSpan={5} className="px-4 py-3">
+                              <div className="space-y-3">
+                                {mergeInfo && (
+                                  <div className="flex items-start gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-3 py-2 border border-blue-200 dark:border-blue-800">
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 shrink-0">MERGED</span>
+                                    <div className="min-w-0">
+                                      <div className="font-medium">Absorbed: <span className="text-red-500 line-through">{mergeInfo.from.join(", ")}</span></div>
+                                      <div className="text-[10px] text-muted-foreground mt-0.5">{mergeInfo.reason}</div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {(node.attributes as any)?._status_reasoning && (
+                                  <div className="flex items-start gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-3 py-2 border border-blue-200 dark:border-blue-800">
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 shrink-0">LLM</span>
+                                    <div className="text-[10px] text-muted-foreground">
+                                      {(node.attributes as any)._status_reasoning}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {(node.attributes as any)?._source_coverage && (() => {
+                                  const sc = (node.attributes as any)._source_coverage as Record<string, boolean>;
+                                  const pills: { key: string; label: string; active: boolean }[] = [
+                                    { key: "has_confluence", label: "Confluence", active: sc.has_confluence },
+                                    { key: "has_jira", label: "Jira", active: sc.has_jira },
+                                    { key: "has_github", label: "GitHub", active: sc.has_github },
+                                    { key: "has_slack", label: "Slack", active: sc.has_slack },
+                                    { key: "has_feedback", label: "Feedback", active: sc.has_feedback },
+                                  ];
+                                  return (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider mr-1">Sources:</span>
+                                      {pills.map((p) => (
+                                        <span key={p.key} className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${p.active ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300" : "bg-muted/40 text-muted-foreground/50 line-through"}`}>
+                                          {p.label}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+
+                                {(node.attributes as any)?._likely_duplicates && (node.attributes as any)._likely_duplicates.length > 0 && (
+                                  <div className="flex items-start gap-2 text-xs bg-orange-50 dark:bg-orange-950/30 rounded px-3 py-2 border border-orange-200 dark:border-orange-800">
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 shrink-0">DUPE?</span>
+                                    <div className="min-w-0">
+                                      <div className="font-medium">Possible duplicate of:</div>
+                                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                                        {((node.attributes as any)._likely_duplicates as string[]).join(", ")}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {(node.attributes as any)?._related_entities && (node.attributes as any)._related_entities.length > 0 && (
+                                  <div className="border rounded-md overflow-hidden">
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1.5 bg-muted/30 border-b font-medium">
+                                      Related Entities
+                                    </div>
+                                    <div className="px-3 py-2 flex flex-wrap gap-1.5">
+                                      {((node.attributes as any)._related_entities as Array<{ name: string; type: string }>).map((rel, ri) => {
+                                        const relMeta = ENTITY_TYPE_META[rel.type] ?? { label: rel.type, color: "bg-gray-100 text-gray-800" };
+                                        return (
+                                          <span key={ri} className="text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border">
+                                            <Badge className={`text-[8px] ${relMeta.color}`}>{relMeta.label}</Badge>
+                                            <span>{rel.name}</span>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <pre className="text-[11px] bg-background rounded p-3 overflow-auto whitespace-pre-wrap break-all border max-h-80 font-mono">
+                                  {JSON.stringify({
+                                    display_name: node.display_name,
+                                    type: node.type,
+                                    source_documents: node.source_refs?.map((ref) => ({
+                                      title: ref.title + (ref.section_heading ? ` (${ref.section_heading})` : ""),
+                                      evidence_excerpt: ref.excerpt,
+                                    })),
+                                    aliases: node.aliases,
+                                    attributes: Object.fromEntries(
+                                      Object.entries(node.attributes ?? {}).filter(([k]) => !k.startsWith("_"))
+                                    ),
+                                    confidence: node.confidence,
+                                  }, null, 2)}
+                                </pre>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!nodesLoaded && companySlug && runId && (
+        <div className="text-xs text-muted-foreground italic px-1">Loading entities...</div>
+      )}
+
+      {nodesLoaded && allNodes.length === 0 && artifact.total_entities_after > 0 && (
+        <div className="text-xs text-amber-600 dark:text-amber-400 italic px-1">
+          No entity data found for this run (expected {artifact.total_entities_after}). The graph nodes may have been cleared.
         </div>
       )}
     </div>
@@ -3922,53 +5414,110 @@ function GraphEnrichmentViewer({ artifact }: {
   artifact: {
     new_edges: number;
     total_nodes: number;
+    llm_calls?: number;
     added_edges?: { source: string; target: string; type: string; evidence: string }[];
   };
 }) {
-  const [showEdges, setShowEdges] = useState(true);
+  const [filterType, setFilterType] = useState<string | null>(null);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   const EDGE_TYPE_COLORS: Record<string, string> = {
-    OWNED_BY: "text-blue-600", DEPENDS_ON: "text-red-500", USES: "text-purple-600",
-    STORES_IN: "text-amber-600", DEPLOYED_TO: "text-teal-600", MEMBER_OF: "text-indigo-600",
-    WORKS_ON: "text-cyan-600", LEADS: "text-emerald-600", CONTAINS: "text-orange-600",
-    RUNS_ON: "text-sky-600", BUILT_BY: "text-violet-600", RESOLVES: "text-green-600",
-    RELATED_TO: "text-gray-500", BLOCKED_BY: "text-red-700", COMMUNICATES_VIA: "text-pink-600",
-    FEEDBACK_FROM: "text-rose-600",
+    OWNED_BY: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    DEPENDS_ON: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+    USES: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+    STORES_IN: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+    DEPLOYED_TO: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300",
+    MEMBER_OF: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
+    WORKS_ON: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300",
+    LEADS: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    CONTAINS: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+    RUNS_ON: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
+    BUILT_BY: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
+    RESOLVES: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+    RELATED_TO: "bg-gray-100 text-gray-700 dark:bg-gray-800/40 dark:text-gray-300",
+    BLOCKED_BY: "bg-red-200 text-red-900 dark:bg-red-900/50 dark:text-red-200",
+    COMMUNICATES_VIA: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300",
+    FEEDBACK_FROM: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
   };
+
+  const typeCounts = useMemo(() => {
+    if (!artifact.added_edges) return {};
+    const map: Record<string, number> = {};
+    for (const e of artifact.added_edges) map[e.type] = (map[e.type] || 0) + 1;
+    return Object.fromEntries(Object.entries(map).sort((a, b) => b[1] - a[1]));
+  }, [artifact.added_edges]);
+
+  const displayedEdges = useMemo(() => {
+    if (!artifact.added_edges) return [];
+    return filterType ? artifact.added_edges.filter(e => e.type === filterType) : artifact.added_edges;
+  }, [artifact.added_edges, filterType]);
 
   return (
     <div className="space-y-3">
-      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        Graph Enrichment
-      </h4>
-      <div className="flex flex-wrap gap-3 text-xs">
-        <span className="bg-muted/50 rounded px-2 py-1">Nodes: <strong>{artifact.total_nodes}</strong></span>
-        <span className="text-blue-600 font-medium">+{artifact.new_edges} relationships discovered</span>
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Graph Enrichment</h4>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.total_nodes}</div>
+          <div className="text-[10px] text-muted-foreground">Nodes</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">+{artifact.new_edges}</div>
+          <div className="text-[10px] text-muted-foreground">New Relationships</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{Object.keys(typeCounts).length}</div>
+          <div className="text-[10px] text-muted-foreground">Edge Types</div>
+        </div>
+        {artifact.llm_calls != null && (
+          <div className="border rounded-md p-2 text-center">
+            <div className="text-lg font-bold">{artifact.llm_calls}</div>
+            <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+          </div>
+        )}
       </div>
 
-      {artifact.added_edges && artifact.added_edges.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowEdges(!showEdges)}
-            className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1 hover:text-foreground"
-          >
-            {showEdges ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            New Relationships ({artifact.added_edges.length})
+      {Object.keys(typeCounts).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button onClick={() => { setFilterType(null); setExpandedIdx(null); }}
+            className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${!filterType ? "bg-foreground text-background border-foreground" : "bg-muted/50 border-transparent hover:border-muted-foreground/30"}`}>
+            All ({artifact.new_edges})
           </button>
-          {showEdges && (
-            <div className="mt-1 space-y-1">
-              {artifact.added_edges.map((e, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-2 py-1 border border-blue-200 dark:border-blue-800">
+          {Object.entries(typeCounts).map(([type, count]) => (
+            <button key={type}
+              onClick={() => { setFilterType(filterType === type ? null : type); setExpandedIdx(null); }}
+              className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${filterType === type ? "bg-foreground text-background border-foreground" : "bg-muted/50 border-transparent hover:border-muted-foreground/30"}`}>
+              {type} ({count})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {displayedEdges.length > 0 && (
+        <div className="max-h-[500px] overflow-y-auto space-y-1 mt-1">
+          {displayedEdges.map((e, i) => {
+            const isOpen = expandedIdx === i;
+            const typeColor = EDGE_TYPE_COLORS[e.type] ?? "bg-gray-100 text-gray-700";
+            return (
+              <div key={i} className="border rounded-md overflow-hidden">
+                <button
+                  onClick={() => setExpandedIdx(isOpen ? null : i)}
+                  className={`w-full text-left px-3 py-1.5 flex items-center gap-2 text-xs hover:bg-muted/30 transition-colors ${isOpen ? "bg-muted/20" : ""}`}
+                >
+                  {isOpen ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />}
                   <span className="font-medium">{e.source}</span>
-                  <span className={`text-[10px] font-mono font-bold ${EDGE_TYPE_COLORS[e.type] ?? "text-gray-600"}`}>
-                    {e.type}
-                  </span>
+                  <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${typeColor}`}>{e.type}</span>
                   <span className="font-medium">{e.target}</span>
-                  <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[35%]">{e.evidence}</span>
-                </div>
-              ))}
-            </div>
-          )}
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-3 pt-1 border-t bg-muted/10">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Why are they related?</div>
+                    <p className="text-xs leading-relaxed">{e.evidence}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -4099,55 +5648,760 @@ function isDiscovery(step: RunStep, artifact: unknown): boolean {
   );
 }
 
-function DiscoveryViewer({ artifact }: {
+interface DiscoveryItem {
+  display_name: string;
+  type: string;
+  category: string;
+  confidence: string;
+  description?: string;
+  evidence?: string;
+  evidence_preview?: string;
+  source_document?: string;
+  related_entities?: string[];
+}
+
+function DiscoveryViewer({ artifact, onSelectSources }: {
   artifact: {
     total_discoveries: number;
     llm_calls?: number;
     by_category: Record<string, number>;
-    discoveries?: { display_name: string; type: string; category: string; confidence: string; evidence_preview: string }[];
+    discoveries?: DiscoveryItem[];
   };
+  onSelectSources?: (refs: { source_type: string; doc_id: string; title: string; excerpt: string }[]) => void;
 }) {
-  const CATEGORY_COLORS: Record<string, string> = {
-    past_undocumented: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    ongoing_undocumented: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-    proposed_project: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    proposed_ticket: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-    proposed_from_feedback: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300",
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<string | null>(null);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const CATEGORY_META: Record<string, { label: string; color: string; description: string }> = {
+    past_undocumented: { label: "Past Undocumented", color: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300", description: "Work that happened in the past but was never formally documented" },
+    ongoing_undocumented: { label: "Ongoing Undocumented", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300", description: "Active work patterns with no formal project tracking" },
+    proposed_project: { label: "Proposed Project", color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300", description: "New project suggested from feedback or conversations" },
+    proposed_ticket: { label: "Proposed Ticket", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300", description: "Bug, task, or improvement mentioned but not tracked" },
+    proposed_from_feedback: { label: "From Feedback", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300", description: "Recurring customer request or complaint that deserves tracking" },
+  };
+
+  const CONFIDENCE_STYLE: Record<string, string> = {
+    high: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+    medium: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+    low: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  };
+
+  const discoveries = artifact.discoveries ?? [];
+
+  const typeCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of discoveries) map[d.type] = (map[d.type] || 0) + 1;
+    return Object.fromEntries(Object.entries(map).sort((a, b) => b[1] - a[1]));
+  }, [discoveries]);
+
+  const filtered = useMemo(() => {
+    let result = discoveries;
+    if (filterCategory) result = result.filter(d => d.category === filterCategory);
+    if (filterType) result = result.filter(d => d.type === filterType);
+    return result;
+  }, [discoveries, filterCategory, filterType]);
+
+  const handleExpand = (idx: number, disc: DiscoveryItem) => {
+    if (expandedIdx === idx) {
+      setExpandedIdx(null);
+      onSelectSources?.([]);
+    } else {
+      setExpandedIdx(idx);
+      if (disc.source_document) {
+        onSelectSources?.([{
+          source_type: "slack",
+          doc_id: disc.source_document,
+          title: disc.source_document,
+          excerpt: (disc.evidence ?? disc.evidence_preview ?? "").slice(0, 300),
+        }]);
+      }
+    }
   };
 
   return (
     <div className="space-y-3">
-      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        Project & Ticket Discovery
-      </h4>
-      <div className="flex flex-wrap gap-3 text-xs">
-        <span className="bg-muted/50 rounded px-2 py-1">Discovered: <strong>{artifact.total_discoveries}</strong> items</span>
-        {artifact.llm_calls != null && <span className="text-muted-foreground">{artifact.llm_calls} LLM calls</span>}
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Project & Ticket Discovery</h4>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.total_discoveries}</div>
+          <div className="text-[10px] text-muted-foreground">Discovered Items</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{Object.keys(artifact.by_category).length}</div>
+          <div className="text-[10px] text-muted-foreground">Categories</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{Object.keys(typeCounts).length}</div>
+          <div className="text-[10px] text-muted-foreground">Entity Types</div>
+        </div>
+        {artifact.llm_calls != null && (
+          <div className="border rounded-md p-2 text-center">
+            <div className="text-lg font-bold">{artifact.llm_calls}</div>
+            <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+          </div>
+        )}
       </div>
-      {Object.entries(artifact.by_category).length > 0 && (
-        <div className="flex flex-wrap gap-2 text-[10px]">
-          {Object.entries(artifact.by_category).map(([cat, count]) => (
-            <span key={cat} className={`px-1.5 py-0.5 rounded ${CATEGORY_COLORS[cat] ?? "bg-gray-100 text-gray-800"}`}>
-              {cat.replace(/_/g, " ")}: {count}
-            </span>
-          ))}
+
+      {/* Category filter pills */}
+      {Object.keys(artifact.by_category).length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Category</div>
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => { setFilterCategory(null); setExpandedIdx(null); }}
+              className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${!filterCategory ? "bg-foreground text-background border-foreground" : "bg-muted/50 border-transparent hover:border-muted-foreground/30"}`}>
+              All ({artifact.total_discoveries})
+            </button>
+            {Object.entries(artifact.by_category).map(([cat, count]) => {
+              const meta = CATEGORY_META[cat];
+              return (
+                <button key={cat}
+                  onClick={() => { setFilterCategory(filterCategory === cat ? null : cat); setExpandedIdx(null); }}
+                  title={meta?.description}
+                  className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${filterCategory === cat ? "bg-foreground text-background border-foreground" : `${meta?.color ?? "bg-gray-100 text-gray-800"} border-transparent hover:border-muted-foreground/30`}`}>
+                  {meta?.label ?? cat.replace(/_/g, " ")} ({count})
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
-      {artifact.discoveries && artifact.discoveries.length > 0 && (
-        <div className="space-y-1">
-          {artifact.discoveries.map((d, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs bg-muted/30 rounded px-2 py-1 border border-border/30">
-              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CATEGORY_COLORS[d.category] ?? "bg-gray-100 text-gray-800"}`}>
-                {d.category.replace(/_/g, " ")}
+
+      {/* Type filter pills */}
+      {Object.keys(typeCounts).length > 1 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Type</div>
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => { setFilterType(null); setExpandedIdx(null); }}
+              className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${!filterType ? "bg-foreground text-background border-foreground" : "bg-muted/50 border-transparent hover:border-muted-foreground/30"}`}>
+              All
+            </button>
+            {Object.entries(typeCounts).map(([type, count]) => (
+              <button key={type}
+                onClick={() => { setFilterType(filterType === type ? null : type); setExpandedIdx(null); }}
+                className={`text-[10px] rounded px-2 py-0.5 border transition-colors ${filterType === type ? "bg-foreground text-background border-foreground" : `${TYPE_COLORS[type] ?? "bg-gray-100 text-gray-800"} border-transparent hover:border-muted-foreground/30`}`}>
+                {type} ({count})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Discovery cards */}
+      {filtered.length > 0 && (
+        <div className="max-h-[500px] overflow-y-auto space-y-1">
+          {filtered.map((d, i) => {
+            const isOpen = expandedIdx === i;
+            const catMeta = CATEGORY_META[d.category];
+            return (
+              <div key={i} className="border rounded-md overflow-hidden">
+                <button
+                  onClick={() => handleExpand(i, d)}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2 text-xs hover:bg-muted/30 transition-colors ${isOpen ? "bg-muted/20" : ""}`}
+                >
+                  {isOpen ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />}
+                  <span className="font-medium truncate">{d.display_name}</span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${TYPE_COLORS[d.type] ?? "bg-gray-100 text-gray-800"}`}>{d.type}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${catMeta?.color ?? "bg-gray-100 text-gray-800"}`}>{catMeta?.label ?? d.category.replace(/_/g, " ")}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ml-auto ${CONFIDENCE_STYLE[d.confidence] ?? ""}`}>{d.confidence}</span>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-3 pt-1 border-t bg-muted/10 space-y-2">
+                    {d.description && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Description</div>
+                        <p className="text-xs leading-relaxed">{d.description}</p>
+                      </div>
+                    )}
+                    {(d.evidence || d.evidence_preview) && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Evidence</div>
+                        <p className="text-xs leading-relaxed bg-muted/30 rounded p-2 italic">{d.evidence ?? d.evidence_preview}</p>
+                      </div>
+                    )}
+                    {d.source_document && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Source Document</div>
+                        <span className="text-xs font-medium bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">{d.source_document}</span>
+                      </div>
+                    )}
+                    {d.related_entities && d.related_entities.length > 0 && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Related Entities</div>
+                        <div className="flex flex-wrap gap-1">
+                          {d.related_entities.map((re, ri) => (
+                            <span key={ri} className="text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/50">{re}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {filtered.length === 0 && discoveries.length > 0 && (
+        <p className="text-xs text-muted-foreground italic">No discoveries match the current filters.</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Attribute Completion Viewer (Step 9)
+// ---------------------------------------------------------------------------
+
+function isAttributeCompletion(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("attribute completion") === true &&
+    "descriptions_promoted" in (artifact as Record<string, unknown>)
+  );
+}
+
+function AttributeCompletionViewer({ artifact }: {
+  artifact: {
+    total_entities_processed: number;
+    descriptions_promoted: number;
+    statuses_filled: number;
+    doc_levels_filled: number;
+    decided_by_fixed: number;
+    rationales_filled: number;
+    uniform_fills?: number;
+    llm_calls: number;
+  };
+}) {
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Attribute Completion</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.total_entities_processed}</div>
+          <div className="text-[10px] text-muted-foreground">Entities Processed</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.descriptions_promoted}</div>
+          <div className="text-[10px] text-muted-foreground">Descriptions Promoted</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-emerald-600">{artifact.statuses_filled}</div>
+          <div className="text-[10px] text-muted-foreground">Statuses Filled</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.doc_levels_filled}</div>
+          <div className="text-[10px] text-muted-foreground">Doc Levels Filled</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-amber-600">{artifact.decided_by_fixed}</div>
+          <div className="text-[10px] text-muted-foreground">Decided-By Fixed</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-teal-600">{artifact.rationales_filled}</div>
+          <div className="text-[10px] text-muted-foreground">Rationales Filled</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+        {artifact.uniform_fills != null && (
+          <div className="border rounded-md p-2 text-center">
+            <div className="text-lg font-bold text-muted-foreground">{artifact.uniform_fills}</div>
+            <div className="text-[10px] text-muted-foreground">Uniform Fills</div>
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Promoted internal _description to public description on {artifact.descriptions_promoted} entities.
+        Filled missing status on {artifact.statuses_filled} entities and documentation_level on {artifact.doc_levels_filled} entities.
+        Fixed decided_by on {artifact.decided_by_fixed} decisions and filled {artifact.rationales_filled} rationales via LLM.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pattern Synthesis Viewer (Step 10)
+// ---------------------------------------------------------------------------
+
+function isPatternSynthesis(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("pattern synthesis") === true &&
+    "conventions_found" in (artifact as Record<string, unknown>)
+  );
+}
+
+function PatternSynthesisViewer({ artifact }: {
+  artifact: {
+    conventions_found: number;
+    total_decisions_analyzed: number;
+    llm_calls: number;
+    conventions: Array<{
+      convention_name: string;
+      established_by: string;
+      constituent_decisions: string[];
+      confidence: string;
+    }>;
+  };
+}) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  const CONFIDENCE_STYLE: Record<string, string> = {
+    high: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+    medium: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+    low: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  };
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Pattern Synthesis — Cross-Cutting Conventions</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.conventions_found}</div>
+          <div className="text-[10px] text-muted-foreground">Conventions Found</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.total_decisions_analyzed}</div>
+          <div className="text-[10px] text-muted-foreground">Decisions Analyzed</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+
+      {artifact.conventions.length > 0 && (
+        <div className="space-y-2">
+          {artifact.conventions.map((conv, i) => {
+            const isOpen = expandedIdx === i;
+            return (
+              <div key={i} className="border rounded-md overflow-hidden">
+                <button
+                  onClick={() => setExpandedIdx(isOpen ? null : i)}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2 text-xs hover:bg-muted/30 transition-colors ${isOpen ? "bg-muted/20" : ""}`}
+                >
+                  {isOpen ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />}
+                  <span className="font-medium truncate">{conv.convention_name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${CONFIDENCE_STYLE[conv.confidence] ?? ""}`}>{conv.confidence}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto shrink-0">by {conv.established_by}</span>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-3 pt-1 border-t bg-muted/10 space-y-2">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Established By</div>
+                      <span className="text-xs font-medium bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">{conv.established_by}</span>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Constituent Decisions ({conv.constituent_decisions.length})</div>
+                      <div className="flex flex-wrap gap-1">
+                        {conv.constituent_decisions.map((d, di) => (
+                          <span key={di} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">{d}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {artifact.conventions.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">No cross-cutting conventions were identified from the analyzed decisions.</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Graph Re-enrichment Viewer (Step 11)
+// ---------------------------------------------------------------------------
+
+function isGraphReEnrichment(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("re-enrichment") === true &&
+    "total_new_edges" in (artifact as Record<string, unknown>)
+  );
+}
+
+function GraphReEnrichmentViewer({ artifact }: {
+  artifact: {
+    discovery_edges_added: number;
+    convention_edges_added: number;
+    applies_to_edges_added: number;
+    total_new_edges: number;
+    llm_calls: number;
+  };
+}) {
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Graph Re-enrichment</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-emerald-600">{artifact.total_new_edges}</div>
+          <div className="text-[10px] text-muted-foreground">Total New Edges</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.discovery_edges_added}</div>
+          <div className="text-[10px] text-muted-foreground">Discovery Edges</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.convention_edges_added}</div>
+          <div className="text-[10px] text-muted-foreground">Convention Edges</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-amber-600">{artifact.applies_to_edges_added}</div>
+          <div className="text-[10px] text-muted-foreground">APPLIES_TO Edges</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Connected {artifact.discovery_edges_added} discovery nodes to existing entities via RELATED_TO edges.
+        Created {artifact.convention_edges_added} CONTAINS and PROPOSED_BY edges for convention entities.
+        {artifact.applies_to_edges_added > 0 && ` Linked ${artifact.applies_to_edges_added} conventions to proposed features via APPLIES_TO.`}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GraphRAG Retrieval Viewer (Step 13)
+// ---------------------------------------------------------------------------
+
+function isGraphRAGRetrieval(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("graphrag") === true &&
+    "retrieval_packs" in (artifact as Record<string, unknown>)
+  );
+}
+
+function GraphRAGRetrievalViewer({ artifact }: {
+  artifact: {
+    total_packs: number;
+    entity_packs: number;
+    human_packs: number;
+    retrieval_packs: { page_id: string; page_type: string; title: string; graph_context: string[]; doc_snippets: string[]; vector_snippets: string[] }[];
+  };
+}) {
+  const [expandedPack, setExpandedPack] = useState<string | null>(null);
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">GraphRAG Retrieval</h4>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.total_packs}</div>
+          <div className="text-[10px] text-muted-foreground">Total Packs</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-emerald-600">{artifact.entity_packs}</div>
+          <div className="text-[10px] text-muted-foreground">Entity Packs</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.human_packs}</div>
+          <div className="text-[10px] text-muted-foreground">Human Packs</div>
+        </div>
+      </div>
+      <div className="space-y-1 max-h-80 overflow-y-auto">
+        {artifact.retrieval_packs.map((pack) => (
+          <div key={pack.page_id} className="border rounded-md">
+            <button
+              className="w-full text-left px-3 py-1.5 flex items-center gap-2 text-[11px] hover:bg-muted/30"
+              onClick={() => setExpandedPack(expandedPack === pack.page_id ? null : pack.page_id)}
+            >
+              <ChevronRight className={`h-3 w-3 transition-transform ${expandedPack === pack.page_id ? "rotate-90" : ""}`} />
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${pack.page_type === "entity" ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" : "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"}`}>
+                {pack.page_type}
               </span>
-              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TYPE_COLORS[d.type] ?? "bg-gray-100 text-gray-800"}`}>
-                {d.type}
-              </span>
-              <span className="font-medium">{d.display_name}</span>
-              <Badge variant="secondary" className="text-[9px]">{d.confidence}</Badge>
-              {d.evidence_preview && <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[30%]">{d.evidence_preview}</span>}
-            </div>
-          ))}
+              <span className="font-medium truncate">{pack.title}</span>
+              <span className="text-muted-foreground ml-auto shrink-0">{pack.graph_context.length} ctx, {pack.doc_snippets.length} docs, {pack.vector_snippets.length} vec</span>
+            </button>
+            {expandedPack === pack.page_id && (
+              <div className="px-3 pb-2 space-y-2 text-[11px]">
+                {pack.graph_context.length > 0 && (
+                  <div>
+                    <div className="font-medium text-muted-foreground mb-0.5">Graph Context</div>
+                    <div className="bg-muted/30 rounded p-1.5 max-h-24 overflow-y-auto font-mono text-[10px] whitespace-pre-wrap">{pack.graph_context.join("\n")}</div>
+                  </div>
+                )}
+                {pack.doc_snippets.length > 0 && (
+                  <div>
+                    <div className="font-medium text-muted-foreground mb-0.5">Doc Snippets ({pack.doc_snippets.length})</div>
+                    <div className="bg-muted/30 rounded p-1.5 max-h-24 overflow-y-auto font-mono text-[10px] whitespace-pre-wrap">{pack.doc_snippets.slice(0, 5).join("\n---\n")}{pack.doc_snippets.length > 5 ? `\n... +${pack.doc_snippets.length - 5} more` : ""}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generate Entity Pages Viewer (Step 14)
+// ---------------------------------------------------------------------------
+
+function isEntityPagesGenerated(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("entity pages") === true &&
+    "by_type" in (artifact as Record<string, unknown>) &&
+    "total_pages" in (artifact as Record<string, unknown>) &&
+    !("by_layer" in (artifact as Record<string, unknown>))
+  );
+}
+
+function EntityPagesGeneratedViewer({ artifact }: {
+  artifact: { total_pages: number; llm_calls: number; by_type: Record<string, number> };
+}) {
+  const typeEntries = Object.entries(artifact.by_type).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Generated Entity Pages</h4>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.total_pages}</div>
+          <div className="text-[10px] text-muted-foreground">Entity Pages</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      {typeEntries.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pages by Entity Type</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            {typeEntries.map(([type, count]) => (
+              <div key={type} className="border rounded-md px-2 py-1.5 flex items-center justify-between text-[11px]">
+                <span className="font-medium">{type.replace(/_/g, " ")}</span>
+                <span className="font-mono text-muted-foreground">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generate Human Pages Viewer (Step 15)
+// ---------------------------------------------------------------------------
+
+function isHumanPagesGenerated(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("human pages") === true &&
+    "by_layer" in (artifact as Record<string, unknown>)
+  );
+}
+
+function HumanPagesGeneratedViewer({ artifact }: {
+  artifact: { total_pages: number; llm_calls: number; by_layer: Record<string, number> };
+}) {
+  const layerEntries = Object.entries(artifact.by_layer).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Generated Human Pages</h4>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.total_pages}</div>
+          <div className="text-[10px] text-muted-foreground">Human Pages</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      {layerEntries.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pages by Layer</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {layerEntries.map(([layer, count]) => (
+              <div key={layer} className="border rounded-md px-2 py-1.5 flex items-center justify-between text-[11px]">
+                <span className="font-medium capitalize">{layer}</span>
+                <span className="font-mono text-muted-foreground">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generate How-To Guides Viewer (Step 16)
+// ---------------------------------------------------------------------------
+
+function isHowtoGenerated(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("how-to") === true &&
+    "total_howtos" in (artifact as Record<string, unknown>)
+  );
+}
+
+function HowtoGeneratedViewer({ artifact }: {
+  artifact: { total_howtos: number; llm_calls: number };
+}) {
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Generated How-To Guides</h4>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-amber-600">{artifact.total_howtos}</div>
+          <div className="text-[10px] text-muted-foreground">How-To Guides</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {artifact.total_howtos === 0
+          ? "No proposed tickets found — no how-to guides generated."
+          : `Generated ${artifact.total_howtos} implementation guide${artifact.total_howtos !== 1 ? "s" : ""} for proposed tickets discovered in Step 8.`}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extract Claims Viewer (Step 17)
+// ---------------------------------------------------------------------------
+
+function isClaimsExtracted(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("claim") === true &&
+    "total_claims" in (artifact as Record<string, unknown>)
+  );
+}
+
+function ClaimsExtractedViewer({ artifact }: {
+  artifact: { total_claims: number; entity_page_claims: number; human_page_claims: number; llm_calls: number };
+}) {
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Extracted Claims</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.total_claims}</div>
+          <div className="text-[10px] text-muted-foreground">Total Claims</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-emerald-600">{artifact.entity_page_claims}</div>
+          <div className="text-[10px] text-muted-foreground">From Entity Pages</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-purple-600">{artifact.human_page_claims}</div>
+          <div className="text-[10px] text-muted-foreground">From Human Pages</div>
+        </div>
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Entity page claims are extracted structurally (1 claim per bullet item). Human page claims are extracted via LLM from narrative paragraphs.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Create Verify Cards Viewer (Step 18)
+// ---------------------------------------------------------------------------
+
+function isVerifyCards(step: RunStep, artifact: unknown): boolean {
+  if (!artifact || typeof artifact !== "object") return false;
+  return (
+    step.name?.toLowerCase().includes("verify") === true &&
+    "by_severity" in (artifact as Record<string, unknown>) &&
+    "by_type" in (artifact as Record<string, unknown>)
+  );
+}
+
+function VerifyCardsViewer({ artifact }: {
+  artifact: {
+    total_cards: number;
+    candidates_gathered?: number;
+    filtered_out?: number;
+    by_type: Record<string, number>;
+    by_severity: Record<string, number>;
+    llm_calls: number;
+  };
+}) {
+  const typeEntries = Object.entries(artifact.by_type).sort((a, b) => b[1] - a[1]);
+  const severityEntries = Object.entries(artifact.by_severity).sort((a, b) => {
+    const order: Record<string, number> = { S1: 0, S2: 1, S3: 2, S4: 3 };
+    return (order[a[0]] ?? 4) - (order[b[0]] ?? 4);
+  });
+  const severityColors: Record<string, string> = {
+    S1: "text-red-600", S2: "text-orange-600", S3: "text-amber-600", S4: "text-muted-foreground",
+  };
+  return (
+    <div className="space-y-3">
+      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground">Verification Cards</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold text-blue-600">{artifact.total_cards}</div>
+          <div className="text-[10px] text-muted-foreground">Total Cards</div>
+        </div>
+        {artifact.candidates_gathered != null && (
+          <div className="border rounded-md p-2 text-center">
+            <div className="text-lg font-bold text-muted-foreground">{artifact.candidates_gathered}</div>
+            <div className="text-[10px] text-muted-foreground">Candidates</div>
+          </div>
+        )}
+        {artifact.filtered_out != null && (
+          <div className="border rounded-md p-2 text-center">
+            <div className="text-lg font-bold text-emerald-600">{artifact.filtered_out}</div>
+            <div className="text-[10px] text-muted-foreground">Filtered Out</div>
+          </div>
+        )}
+        <div className="border rounded-md p-2 text-center">
+          <div className="text-lg font-bold">{artifact.llm_calls}</div>
+          <div className="text-[10px] text-muted-foreground">LLM Calls</div>
+        </div>
+      </div>
+      {severityEntries.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">By Severity</div>
+          <div className="flex gap-2">
+            {severityEntries.map(([sev, count]) => (
+              <div key={sev} className="border rounded-md px-3 py-1.5 text-center">
+                <div className={`text-base font-bold ${severityColors[sev] ?? ""}`}>{count}</div>
+                <div className="text-[10px] text-muted-foreground font-mono">{sev}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {typeEntries.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">By Card Type</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {typeEntries.map(([type, count]) => (
+              <div key={type} className="border rounded-md px-2 py-1.5 flex items-center justify-between text-[11px]">
+                <span className="font-medium">{type.replace(/_/g, " ")}</span>
+                <span className="font-mono text-muted-foreground">{count}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -4204,8 +6458,9 @@ function StepCard({
     if (parsedDocs !== null) return;
     setParsedDocsLoading(true);
     try {
+      const inputParams = step.execution_id ? `execution_id=${step.execution_id}` : `run_id=${step.run_id}`;
       const res = await fetch(
-        `/api/${companySlug}/kb2?type=inputs&run_id=${step.run_id}`,
+        `/api/${companySlug}/kb2?type=inputs&${inputParams}`,
       );
       const data = await res.json();
       const docs = data.snapshot?.parsed_documents ?? [];
@@ -4373,17 +6628,17 @@ function StepCard({
 
           {/* Entity extraction results */}
           {!isInputSnapshot && isEntityExtraction(step, step.artifact) && (
-            <EntityExtractionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+            <EntityExtractionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
           )}
 
           {/* Extraction validation results */}
           {!isInputSnapshot && isExtractionValidation(step, step.artifact) && (
-            <ExtractionValidationViewer artifact={step.artifact as any} />
+            <ExtractionValidationViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
           )}
 
           {/* Entity resolution results */}
           {!isInputSnapshot && isEntityResolution(step, step.artifact) && (
-            <EntityResolutionViewer artifact={step.artifact as any} />
+            <EntityResolutionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
           )}
 
           {/* Graph enrichment results */}
@@ -4398,11 +6653,56 @@ function StepCard({
 
           {/* Discovery results */}
           {!isInputSnapshot && isDiscovery(step, step.artifact) && (
-            <DiscoveryViewer artifact={step.artifact as any} />
+            <DiscoveryViewer artifact={step.artifact as any} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+          )}
+
+          {/* Attribute Completion results */}
+          {!isInputSnapshot && isAttributeCompletion(step, step.artifact) && (
+            <AttributeCompletionViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Pattern Synthesis results */}
+          {!isInputSnapshot && isPatternSynthesis(step, step.artifact) && (
+            <PatternSynthesisViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Graph Re-enrichment results */}
+          {!isInputSnapshot && isGraphReEnrichment(step, step.artifact) && (
+            <GraphReEnrichmentViewer artifact={step.artifact as any} />
+          )}
+
+          {/* GraphRAG Retrieval results */}
+          {!isInputSnapshot && isGraphRAGRetrieval(step, step.artifact) && (
+            <GraphRAGRetrievalViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Entity Pages Generated results */}
+          {!isInputSnapshot && isEntityPagesGenerated(step, step.artifact) && (
+            <EntityPagesGeneratedViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Human Pages Generated results */}
+          {!isInputSnapshot && isHumanPagesGenerated(step, step.artifact) && (
+            <HumanPagesGeneratedViewer artifact={step.artifact as any} />
+          )}
+
+          {/* How-To Guides results */}
+          {!isInputSnapshot && isHowtoGenerated(step, step.artifact) && (
+            <HowtoGeneratedViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Claims Extracted results */}
+          {!isInputSnapshot && isClaimsExtracted(step, step.artifact) && (
+            <ClaimsExtractedViewer artifact={step.artifact as any} />
+          )}
+
+          {/* Verify Cards results */}
+          {!isInputSnapshot && isVerifyCards(step, step.artifact) && (
+            <VerifyCardsViewer artifact={step.artifact as any} />
           )}
 
           {/* Artifact preview (other steps) */}
-          {!isInputSnapshot && !isEntityExtraction(step, step.artifact) && !isExtractionValidation(step, step.artifact) && !isEntityResolution(step, step.artifact) && !isGraphEnrichment(step, step.artifact) && !isPagePlan(step, step.artifact) && !isDiscovery(step, step.artifact) && artifactPreview && (
+          {!isInputSnapshot && !isEntityExtraction(step, step.artifact) && !isExtractionValidation(step, step.artifact) && !isEntityResolution(step, step.artifact) && !isGraphEnrichment(step, step.artifact) && !isPagePlan(step, step.artifact) && !isDiscovery(step, step.artifact) && !isAttributeCompletion(step, step.artifact) && !isPatternSynthesis(step, step.artifact) && !isGraphReEnrichment(step, step.artifact) && !isGraphRAGRetrieval(step, step.artifact) && !isEntityPagesGenerated(step, step.artifact) && !isHumanPagesGenerated(step, step.artifact) && !isHowtoGenerated(step, step.artifact) && !isClaimsExtracted(step, step.artifact) && !isVerifyCards(step, step.artifact) && artifactPreview && (
             <div>
               <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
                 <Braces className="h-3 w-3" /> Artifact Preview

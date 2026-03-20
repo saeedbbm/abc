@@ -9,7 +9,7 @@ import type { KB2RunType, KB2RunStepType } from "@/src/entities/models/kb2-types
 import type { CompanyConfigData } from "@/src/entities/models/kb2-company-config";
 import { getCompanyConfig, getActiveConfigVersion } from "@/src/application/lib/kb2/company-config";
 
-export type ProgressCallback = (detail: string, percent: number) => void | Promise<void>;
+export type ProgressCallback = (detail: string, percent: number, stepPercent?: number, stepId?: string) => void | Promise<void>;
 
 export type LogLLMCallFn = (
   stepId: string,
@@ -25,12 +25,15 @@ export type LogLLMCallFn = (
 
 export interface StepContext {
   runId: string;
+  executionId: string;
   companySlug: string;
   configVersion: number | null;
   config: CompanyConfigData | null;
   onProgress: ProgressCallback;
   logLLMCall: LogLLMCallFn;
   getStepArtifact: (pass: "pass1" | "pass2", stepNumber: number) => Promise<any>;
+  getStepExecutionId: (pass: "pass1" | "pass2", stepNumber: number) => Promise<string | null>;
+  persistJudgeResult: (judgeResult: Record<string, unknown>) => Promise<void>;
   signal: AbortSignal;
 }
 
@@ -72,6 +75,8 @@ export function getPass2Steps(): { name: string; index: number }[] {
   return pass2Steps.map((s, i) => ({ name: s.name, index: i + 1 }));
 }
 
+export type StepLifecycleCallback = (type: string, data: Record<string, unknown>) => void | Promise<void>;
+
 export interface RunOptions {
   companySlug: string;
   pass?: "pass1" | "pass2" | "all";
@@ -80,6 +85,7 @@ export interface RunOptions {
   reuseRunId?: string;
   title?: string;
   onProgress?: ProgressCallback;
+  onStepLifecycle?: StepLifecycleCallback;
 }
 
 function generateStepSummary(stepName: string, artifact: unknown): string {
@@ -183,6 +189,22 @@ function generateStepSummary(stepName: string, artifact: unknown): string {
     return parts.join(" ");
   }
 
+  if (a.total_entities_processed !== undefined && a.descriptions_promoted !== undefined) {
+    parts.push(`Completed attributes for ${a.total_entities_processed} entities`);
+    parts.push(`(${a.descriptions_promoted} descriptions, ${a.statuses_filled} statuses, ${a.decided_by_fixed} decided_by)`);
+    return parts.join(" ");
+  }
+
+  if (a.conventions_found !== undefined && a.total_decisions_analyzed !== undefined) {
+    parts.push(`Found ${a.conventions_found} cross-cutting conventions from ${a.total_decisions_analyzed} decisions`);
+    return parts.join(" ");
+  }
+
+  if (a.total_new_edges !== undefined && a.discovery_edges_added !== undefined) {
+    parts.push(`Added ${a.total_new_edges} edges (${a.discovery_edges_added} discovery, ${a.convention_edges_added} convention, ${a.applies_to_edges_added} applies-to)`);
+    return parts.join(" ");
+  }
+
   const keys = Object.keys(a);
   const summary = keys.slice(0, 5).map((k) => {
     const v = a[k];
@@ -220,14 +242,23 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
     const tc = getTenantCollections(opts.companySlug);
     const runId = opts.reuseRunId ?? randomUUID();
     const onProgress = opts.onProgress ?? (() => {});
+    const onStepLifecycle = opts.onStepLifecycle ?? (() => {});
     const title = generateRunTitle(opts, pass1Steps, pass2Steps);
 
     const getStepArtifact = async (pass: "pass1" | "pass2", stepNumber: number): Promise<any> => {
       const stepDoc = await tc.run_steps.findOne(
-        { run_id: runId, pass, step_number: stepNumber },
+        { run_id: runId, pass, step_number: stepNumber, status: "completed" },
         { sort: { execution_number: -1 } },
       );
       return stepDoc?.artifact;
+    };
+
+    const getStepExecutionId = async (pass: "pass1" | "pass2", stepNumber: number): Promise<string | null> => {
+      const stepDoc = await tc.run_steps.findOne(
+        { run_id: runId, pass, step_number: stepNumber, status: "completed" },
+        { sort: { execution_number: -1 } },
+      );
+      return stepDoc?.execution_id ?? null;
     };
 
     const config = await getCompanyConfig(opts.companySlug);
@@ -253,7 +284,37 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
       });
     };
 
-    const ctx: StepContext = { runId, companySlug: opts.companySlug, configVersion, config, onProgress, logLLMCall, getStepArtifact, signal: abortCtrl.signal };
+    const persistingOnProgress: ProgressCallback = async (detail, percent, stepPercent?, stepId?) => {
+      await onProgress(detail, percent, stepPercent, stepId);
+      if (currentExecutionId) {
+        await tc.run_steps.updateOne(
+          { execution_id: currentExecutionId },
+          { $push: { progress_log: { detail, percent, step_percent: stepPercent ?? percent, ts: new Date().toISOString() } } as any },
+        );
+      }
+    };
+
+    const persistJudgeResult = async (judgeResult: Record<string, unknown>) => {
+      if (!currentExecutionId) return;
+      await tc.run_steps.updateOne(
+        { execution_id: currentExecutionId },
+        { $set: { judge_result: judgeResult } },
+      );
+    };
+
+    const ctx: StepContext = {
+      runId,
+      executionId: currentExecutionId,
+      companySlug: opts.companySlug,
+      configVersion,
+      config,
+      onProgress: persistingOnProgress,
+      logLLMCall,
+      getStepArtifact,
+      getStepExecutionId,
+      persistJudgeResult,
+      signal: abortCtrl.signal,
+    };
 
     await tc.runs.updateOne(
       { run_id: runId },
@@ -313,6 +374,7 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
 
           const executionId = randomUUID();
           currentExecutionId = executionId;
+          (ctx as any).executionId = executionId;
           const executionNumber = (await tc.run_steps.countDocuments({ run_id: runId, step_id: stepId })) + 1;
 
           let parentExecutionId: string | null = null;
@@ -338,7 +400,25 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
             started_at: new Date().toISOString(),
           });
 
-          await onProgress(`[${passKey} Step ${stepNumber}/${totalSteps}] Starting: ${stepDef.name}`, 0);
+          const stepsToRun = endIdx - startIdx;
+          const stepIdx = i - startIdx;
+          const stepStartPct = Math.round((stepIdx / stepsToRun) * 100);
+          const stepEndPct = Math.round(((stepIdx + 1) / stepsToRun) * 100);
+
+          const stepOnProgress: ProgressCallback = async (detail, stepPercent) => {
+            const globalPercent = stepStartPct + Math.round((stepPercent / 100) * (stepEndPct - stepStartPct));
+            await persistingOnProgress(detail, globalPercent, stepPercent, stepId);
+          };
+
+          const prevOnProgress = ctx.onProgress;
+          ctx.onProgress = stepOnProgress;
+
+          await onProgress(`[${passKey} Step ${stepNumber}/${totalSteps}] Starting: ${stepDef.name}`, stepStartPct, undefined, stepId);
+          await onStepLifecycle("step_started", {
+            step_id: stepId, step_number: stepNumber, total_steps: totalSteps,
+            step_name: stepDef.name, pass: passKey, started_at: new Date().toISOString(),
+            steps_remaining: endIdx - (i + 1),
+          });
 
           const stepStart = Date.now();
           try {
@@ -356,6 +436,7 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
             ]).toArray();
             const agg = llmAgg[0] || { tokens_in: 0, tokens_out: 0, cost: 0 };
 
+            const summary = generateStepSummary(stepDef.name, artifact);
             await tc.run_steps.updateOne(
               { execution_id: executionId },
               {
@@ -363,7 +444,7 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
                   status: "completed",
                   completed_at: new Date().toISOString(),
                   duration_ms: durationMs,
-                  summary: generateStepSummary(stepDef.name, artifact),
+                  summary,
                   artifact,
                   metrics: {
                     llm_calls: llmCalls,
@@ -377,15 +458,32 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
 
             await onProgress(
               `[${passKey} Step ${stepNumber}/${totalSteps}] Completed: ${stepDef.name} (${(durationMs / 1000).toFixed(1)}s)`,
-              Math.round((stepNumber / totalSteps) * 100),
+              stepEndPct,
+              undefined,
+              stepId,
             );
+            await onStepLifecycle("step_completed", {
+              step_id: stepId, step_number: stepNumber, total_steps: totalSteps,
+              step_name: stepDef.name, pass: passKey, duration_ms: durationMs,
+              summary, steps_remaining: endIdx - (i + 1),
+              metrics: { llm_calls: llmCalls, input_tokens: agg.tokens_in, output_tokens: agg.tokens_out, cost_usd: agg.cost },
+            });
           } catch (err: any) {
             const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");
+            const durationMs = Date.now() - stepStart;
             await tc.run_steps.updateOne(
               { execution_id: executionId },
-              { $set: { status: isCancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), duration_ms: Date.now() - stepStart, summary: isCancelled ? "Cancelled by user" : err.message } },
+              { $set: { status: isCancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), duration_ms: durationMs, summary: isCancelled ? "Cancelled by user" : err.message } },
             );
+            await onStepLifecycle("step_failed", {
+              step_id: stepId, step_number: stepNumber, total_steps: totalSteps,
+              step_name: stepDef.name, pass: passKey, duration_ms: durationMs,
+              error: isCancelled ? "Cancelled by user" : err.message,
+              steps_remaining: endIdx - (i + 1),
+            });
             throw err;
+          } finally {
+            ctx.onProgress = prevOnProgress;
           }
         }
       }

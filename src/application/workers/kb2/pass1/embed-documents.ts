@@ -33,7 +33,10 @@ export const embedDocumentsStep: StepFunction = async (ctx) => {
   const EMBED_BATCH = ctx.config?.pipeline_settings?.embed?.embed_batch_size ?? 96;
 
   const tc = getTenantCollections(ctx.companySlug);
-  const snapshot = await tc.input_snapshots.findOne({ run_id: ctx.runId });
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
@@ -71,6 +74,7 @@ export const embedDocumentsStep: StepFunction = async (ctx) => {
       vector: embeddings[idx],
       payload: {
         run_id: ctx.runId,
+        execution_id: ctx.executionId,
         doc_id: chunk.docId,
         doc_index: chunk.docIndex,
         provider: chunk.provider,
