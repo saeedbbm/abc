@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,9 +60,12 @@ interface Ticket {
   priority: string;
   workflow_state: string;
   source: string;
+  status?: string;
+  linked_entity_ids?: string[];
   linked_entity_names: string[];
   labels: string[];
   created_at: string;
+  source_refs?: SourceRef[];
 }
 
 interface ProjectNode {
@@ -98,6 +101,194 @@ interface PersonNode {
 
 type SidebarTab = "tickets" | "projects" | "howtos";
 
+type TicketStatusKey = "past" | "ongoing" | "proposed";
+type ProjectStatusKey =
+  | "past_documented"
+  | "past_undocumented"
+  | "ongoing_documented"
+  | "ongoing_undocumented"
+  | "proposed";
+type HowtoCategoryKey =
+  | "past_tickets"
+  | "ongoing_tickets"
+  | "proposed_tickets"
+  | "past_documented_projects"
+  | "past_undocumented_projects"
+  | "ongoing_documented_projects"
+  | "ongoing_undocumented_projects"
+  | "proposed_projects"
+  | "standalone";
+
+const PRIORITY_COLORS: Record<string, string> = {
+  critical: "bg-red-500 text-white",
+  high: "bg-orange-500 text-white",
+  medium: "bg-yellow-500 text-black",
+  low: "bg-blue-500 text-white",
+};
+
+const TICKET_STATUS_LABELS: Record<TicketStatusKey, string> = {
+  past: "Past Tickets",
+  ongoing: "Ongoing Tickets",
+  proposed: "Proposed Tickets",
+};
+
+const PROJECT_STATUS_LABELS: Record<ProjectStatusKey, string> = {
+  past_documented: "Past Documented",
+  past_undocumented: "Past Undocumented",
+  ongoing_documented: "Ongoing Documented",
+  ongoing_undocumented: "Ongoing Undocumented",
+  proposed: "Proposed",
+};
+
+const HOWTO_CATEGORY_LABELS: Record<HowtoCategoryKey, string> = {
+  past_tickets: "From Past Tickets",
+  ongoing_tickets: "From Ongoing Tickets",
+  proposed_tickets: "From Proposed Tickets",
+  past_documented_projects: "From Past Documented Projects",
+  past_undocumented_projects: "From Past Undocumented Projects",
+  ongoing_documented_projects: "From Ongoing Documented Projects",
+  ongoing_undocumented_projects: "From Ongoing Undocumented Projects",
+  proposed_projects: "From Proposed Projects",
+  standalone: "Standalone Guides",
+};
+
+function normalizePriorityLevel(priority?: string): "critical" | "high" | "medium" | "low" | null {
+  const value = (priority ?? "").trim().toLowerCase();
+  if (value === "p0" || value === "critical") return "critical";
+  if (value === "p1" || value === "high") return "high";
+  if (value === "p2" || value === "medium") return "medium";
+  if (value === "p3" || value === "low") return "low";
+  return null;
+}
+
+function formatPriorityLabel(priority?: string): string {
+  const normalized = normalizePriorityLevel(priority);
+  if (normalized === "critical") return "Critical";
+  if (normalized === "high") return "High";
+  if (normalized === "medium") return "Medium";
+  if (normalized === "low") return "Low";
+  return priority?.trim() || "Unspecified";
+}
+
+function getPriorityBadgeClass(priority?: string): string {
+  const normalized = normalizePriorityLevel(priority);
+  return normalized ? PRIORITY_COLORS[normalized] : "bg-muted text-muted-foreground";
+}
+
+function dedupeSourceRefs(sourceRefs: SourceRef[]): SourceRef[] {
+  const seen = new Set<string>();
+  const out: SourceRef[] = [];
+  for (const ref of sourceRefs) {
+    const key = `${ref.source_type}::${ref.doc_id}::${ref.title}::${ref.excerpt ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
+
+function getTicketKey(ticket: Ticket): string | null {
+  const directMatch = ticket.ticket_id?.match(/^[A-Z]+-\d+/);
+  if (directMatch) return directMatch[0];
+  const titleMatch = ticket.title?.match(/^([A-Z]+-\d+)/);
+  return titleMatch ? titleMatch[1] : null;
+}
+
+function getTicketDisplayTitle(ticket: Ticket): string {
+  const rawTitle = ticket.title.trim();
+  const jiraSourceTitle = ticket.source_refs?.find((ref) =>
+    ref.source_type === "jira" &&
+    typeof ref.title === "string" &&
+    ref.title.trim().length > 0,
+  )?.title?.trim();
+  const key = getTicketKey(ticket);
+  if (jiraSourceTitle && key && rawTitle.toUpperCase() === key.toUpperCase()) {
+    return jiraSourceTitle;
+  }
+  if (key) {
+    const remainder = rawTitle.replace(/^[A-Z]+-\d+[:\s-]*/, "").trim();
+    return remainder ? `${key}: ${remainder}` : key;
+  }
+  return rawTitle;
+}
+
+function classifyTicketStatus(ticket: Ticket): TicketStatusKey {
+  const workflow = (ticket.workflow_state ?? "").toLowerCase();
+  const status = (ticket.status ?? "").toLowerCase();
+  if (workflow === "done" || status === "closed") return "past";
+  if (ticket.source === "conversation" || ticket.source === "feedback") return "proposed";
+  return "ongoing";
+}
+
+function classifyProjectStatus(project: ProjectNode): ProjectStatusKey {
+  const disc = typeof project.attributes?.discovery_category === "string"
+    ? project.attributes.discovery_category
+    : "";
+  const status = typeof project.attributes?.status === "string"
+    ? project.attributes.status.toLowerCase()
+    : "";
+  const docLevel = typeof project.attributes?.documentation_level === "string"
+    ? project.attributes.documentation_level.toLowerCase()
+    : "";
+  const hasConfluenceSource = (project.source_refs ?? []).some((ref) => ref.source_type === "confluence");
+  const isDone = ["done", "completed", "closed", "past"].some((token) => status.includes(token));
+  const isProposed = status === "proposed" || status === "planned";
+  const effectiveDocLevel = docLevel || (hasConfluenceSource ? "documented" : "");
+  const isDocumented = effectiveDocLevel === "documented";
+  const isUndocumented = effectiveDocLevel === "undocumented";
+
+  if (disc === "proposed_project" || disc === "proposed_from_feedback" || isProposed) {
+    return "proposed";
+  }
+  if (disc === "past_undocumented") return "past_undocumented";
+  if (disc === "ongoing_undocumented") return "ongoing_undocumented";
+  if (disc === "past_documented") return "past_documented";
+  if (disc === "ongoing_documented") return "ongoing_documented";
+
+  if (isDone) return isDocumented ? "past_documented" : "past_undocumented";
+  if (isUndocumented) return "ongoing_undocumented";
+  if (isDocumented || project.attributes?.truth_status === "direct") return "ongoing_documented";
+  return "ongoing_undocumented";
+}
+
+function getTicketSources(ticket: Ticket): SourceRef[] {
+  if (ticket.source_refs && ticket.source_refs.length > 0) {
+    return dedupeSourceRefs(ticket.source_refs);
+  }
+  return dedupeSourceRefs([
+    {
+      source_type: ticket.source || "unknown",
+      doc_id: ticket.ticket_id,
+      title: getTicketDisplayTitle(ticket),
+      excerpt: ticket.description || undefined,
+    },
+  ]);
+}
+
+function SidebarSection({
+  label,
+  count,
+  children,
+}: {
+  label: string;
+  count: number;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="px-2 pb-1 flex items-center gap-2">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex-1">
+          {label}
+        </p>
+        <Badge variant="secondary" className="text-[8px] h-4 px-1.5">
+          {count}
+        </Badge>
+      </div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
 export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
   const [howtos, setHowtos] = useState<Howto[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -125,7 +316,7 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
   const fetchData = useCallback(async () => {
     const [hRes, tRes, nRes, epRes] = await Promise.all([
       fetch(`/api/${companySlug}/kb2?type=howto`),
-      fetch(`/api/${companySlug}/kb2?type=tickets`),
+      fetch(`/api/${companySlug}/kb2/tickets`),
       fetch(`/api/${companySlug}/kb2?type=graph_nodes`),
       fetch(`/api/${companySlug}/kb2?type=entity_pages`),
     ]);
@@ -208,26 +399,9 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
   const projectById = new Map(projects.map((p) => [p.node_id, p]));
   const entityPageByNodeId = new Map(entityPages.map((ep) => [ep.node_id, ep]));
 
-  const classifyTicketStatus = (t: Ticket): string => {
-    if (t.workflow_state === "done") return "past";
-    if (t.source === "conversation" || t.source === "feedback") return "proposed";
-    return "ongoing";
-  };
-
-  const classifyProjectStatus = (p: ProjectNode): string => {
-    const disc = p.attributes?.discovery_category ?? "";
-    const status = (p.attributes?.status ?? "").toLowerCase();
-    const isDone = ["done", "completed", "closed", "past"].some((s) => status.includes(s));
-    if (disc === "proposed_project") return "proposed";
-    if (disc === "past_undocumented") return "past_undocumented";
-    if (disc === "ongoing_undocumented") return "ongoing_undocumented";
-    if (p.attributes?.truth_status === "inferred") return isDone ? "past_undocumented" : "ongoing_undocumented";
-    return isDone ? "past_documented" : "ongoing_documented";
-  };
-
   const filteredTickets = tickets.filter((t) => {
     if (personFilter !== "all" && !t.assignees.includes(personFilter)) return false;
-    if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (searchQuery && !getTicketDisplayTitle(t).toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (ticketStatusFilter !== "all" && classifyTicketStatus(t) !== ticketStatusFilter) return false;
     return true;
   });
@@ -242,20 +416,82 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
     if (searchQuery && !h.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
-
-  const PRIORITY_COLORS: Record<string, string> = { P0: "bg-red-500", P1: "bg-orange-500", P2: "bg-yellow-500", P3: "bg-blue-500" };
   const agentSections = ["Prompt Section", "Implementation Steps", "Requirements", "Testing Plan"];
+
+  const ticketGroups = (["past", "ongoing", "proposed"] as TicketStatusKey[])
+    .map((status) => ({
+      status,
+      label: TICKET_STATUS_LABELS[status],
+      items: filteredTickets.filter((ticket) => classifyTicketStatus(ticket) === status),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  const projectGroups = ([
+    "past_documented",
+    "past_undocumented",
+    "ongoing_documented",
+    "ongoing_undocumented",
+    "proposed",
+  ] as ProjectStatusKey[])
+    .map((status) => ({
+      status,
+      label: PROJECT_STATUS_LABELS[status],
+      items: filteredProjects.filter((project) => classifyProjectStatus(project) === status),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  const classifyHowtoCategory = (howto: Howto): HowtoCategoryKey => {
+    const linkedTicket = howto.ticket_id ? ticketById.get(howto.ticket_id) : null;
+    if (linkedTicket) return `${classifyTicketStatus(linkedTicket)}_tickets` as HowtoCategoryKey;
+    const linkedProject = howto.project_node_id ? projectById.get(howto.project_node_id) : null;
+    if (linkedProject) return `${classifyProjectStatus(linkedProject)}_projects` as HowtoCategoryKey;
+    return "standalone";
+  };
+
+  const howtoGroups = ([
+    "past_tickets",
+    "ongoing_tickets",
+    "proposed_tickets",
+    "past_documented_projects",
+    "past_undocumented_projects",
+    "ongoing_documented_projects",
+    "ongoing_undocumented_projects",
+    "proposed_projects",
+    "standalone",
+  ] as HowtoCategoryKey[])
+    .map((status) => ({
+      status,
+      label: HOWTO_CATEGORY_LABELS[status],
+      items: filteredHowtos.filter((howto) => classifyHowtoCategory(howto) === status),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const selectedProject = selected?.project_node_id
     ? projects.find((p) => p.node_id === selected.project_node_id)
     : null;
-  const rightPanelSources: SourceRef[] = (selectedProject?.source_refs ?? []).map((ref) => ({
+  const selectedTicket = selected?.ticket_id ? ticketById.get(selected.ticket_id) ?? null : null;
+  const projectSourceRefs: SourceRef[] = (selectedProject?.source_refs ?? []).map((ref) => ({
     source_type: ref.source_type,
     doc_id: ref.doc_id,
     title: ref.title,
     excerpt: ref.excerpt,
     section_heading: ref.section_heading,
   }));
+  const rightPanelSources: SourceRef[] = dedupeSourceRefs(
+    selected
+      ? [...(selectedTicket ? getTicketSources(selectedTicket) : []), ...projectSourceRefs]
+      : pendingTicketId && ticketById.get(pendingTicketId)
+        ? getTicketSources(ticketById.get(pendingTicketId)!)
+        : pendingProjectId && projectById.get(pendingProjectId)
+          ? ((projectById.get(pendingProjectId)?.source_refs ?? []).map((ref) => ({
+              source_type: ref.source_type,
+              doc_id: ref.doc_id,
+              title: ref.title,
+              excerpt: ref.excerpt,
+              section_heading: ref.section_heading,
+            })))
+          : [],
+  );
 
   // For the "no howto yet" middle view
   const pendingTicket = pendingTicketId ? ticketById.get(pendingTicketId) : null;
@@ -281,10 +517,10 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
           {linkedTicket && (
             <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/50 text-sm">
               <TicketCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <Badge className={`text-[8px] px-1 shrink-0 ${PRIORITY_COLORS[linkedTicket.priority] ?? ""}`}>
-                {linkedTicket.priority}
+              <Badge className={`text-[8px] px-1 shrink-0 ${getPriorityBadgeClass(linkedTicket.priority)}`}>
+                {formatPriorityLabel(linkedTicket.priority)}
               </Badge>
-              <span className="truncate flex-1">{linkedTicket.title}</span>
+              <span className="truncate flex-1">{getTicketDisplayTitle(linkedTicket)}</span>
               <button
                 onClick={() => { setSidebarTab("tickets"); setPendingTicketId(linkedTicket.ticket_id); setSelectedId(null); }}
                 className="text-primary hover:underline text-xs shrink-0"
@@ -317,114 +553,127 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
   const sidebarList = (() => {
     switch (sidebarTab) {
       case "tickets":
-        return filteredTickets.length === 0 ? (
+        return ticketGroups.length === 0 ? (
           <p className="text-xs text-muted-foreground p-2">No tickets found.</p>
         ) : (
-          filteredTickets.map((t) => {
-            const howto = howtoByTicket.get(t.ticket_id);
-            return (
-              <button
-                key={t.ticket_id}
-                onClick={() => {
-                  if (howto) {
-                    setSelectedId(howto.howto_id);
-                    setPendingTicketId(null);
-                    setPendingProjectId(null);
-                  } else {
-                    setSelectedId(null);
-                    setPendingTicketId(t.ticket_id);
-                    setPendingProjectId(null);
-                  }
-                }}
-                className={`w-full text-left px-2 py-1.5 rounded-md mb-1 text-xs transition-colors ${
-                  (howto && selectedId === howto.howto_id) || pendingTicketId === t.ticket_id
-                    ? "bg-accent"
-                    : "hover:bg-accent/50"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Badge className={`text-[8px] px-1 ${PRIORITY_COLORS[t.priority] ?? ""}`}>
-                    {t.priority}
-                  </Badge>
-                  <span className="truncate flex-1">{t.title}</span>
-                  {howto && <Badge variant="secondary" className="text-[8px] shrink-0">📄</Badge>}
-                </div>
-                {t.assignees.length > 0 && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5 pl-7">
-                    {t.assignees.join(", ")}
-                  </div>
-                )}
-              </button>
-            );
-          })
+          ticketGroups.map((group) => (
+            <SidebarSection key={group.status} label={group.label} count={group.items.length}>
+              {group.items.map((t) => {
+                const howto = howtoByTicket.get(t.ticket_id);
+                return (
+                  <button
+                    key={t.ticket_id}
+                    onClick={() => {
+                      if (howto) {
+                        setSelectedId(howto.howto_id);
+                        setPendingTicketId(null);
+                        setPendingProjectId(null);
+                      } else {
+                        setSelectedId(null);
+                        setPendingTicketId(t.ticket_id);
+                        setPendingProjectId(null);
+                      }
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                      (howto && selectedId === howto.howto_id) || pendingTicketId === t.ticket_id
+                        ? "bg-accent"
+                        : "hover:bg-accent/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Badge className={`text-[8px] px-1 ${getPriorityBadgeClass(t.priority)}`}>
+                        {formatPriorityLabel(t.priority)}
+                      </Badge>
+                      <span className="truncate flex-1">{getTicketDisplayTitle(t)}</span>
+                      {howto && <Badge variant="secondary" className="text-[8px] shrink-0">📄</Badge>}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5 pl-7 flex items-center gap-1.5 flex-wrap">
+                      <span>{t.assignees.length > 0 ? t.assignees.join(", ") : "Unassigned"}</span>
+                      <span>•</span>
+                      <span>{t.source}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </SidebarSection>
+          ))
         );
 
       case "projects":
-        return filteredProjects.length === 0 ? (
+        return projectGroups.length === 0 ? (
           <p className="text-xs text-muted-foreground p-2">No projects found.</p>
         ) : (
-          filteredProjects.map((p) => {
-            const howto = howtoByProject.get(p.node_id);
-            return (
-              <button
-                key={p.node_id}
-                onClick={() => {
-                  if (howto) {
-                    setSelectedId(howto.howto_id);
-                    setPendingTicketId(null);
-                    setPendingProjectId(null);
-                  } else {
-                    setSelectedId(null);
-                    setPendingTicketId(null);
-                    setPendingProjectId(p.node_id);
-                  }
-                }}
-                className={`w-full text-left px-2 py-1.5 rounded-md mb-1 text-xs transition-colors ${
-                  (howto && selectedId === howto.howto_id) || pendingProjectId === p.node_id
-                    ? "bg-accent"
-                    : "hover:bg-accent/50"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="outline" className="text-[8px]">project</Badge>
-                  <span className="truncate flex-1">{p.display_name}</span>
-                  {howto && <Badge variant="secondary" className="text-[8px] shrink-0">📄</Badge>}
-                </div>
-              </button>
-            );
-          })
+          projectGroups.map((group) => (
+            <SidebarSection key={group.status} label={group.label} count={group.items.length}>
+              {group.items.map((p) => {
+                const howto = howtoByProject.get(p.node_id);
+                return (
+                  <button
+                    key={p.node_id}
+                    onClick={() => {
+                      if (howto) {
+                        setSelectedId(howto.howto_id);
+                        setPendingTicketId(null);
+                        setPendingProjectId(null);
+                      } else {
+                        setSelectedId(null);
+                        setPendingTicketId(null);
+                        setPendingProjectId(p.node_id);
+                      }
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                      (howto && selectedId === howto.howto_id) || pendingProjectId === p.node_id
+                        ? "bg-accent"
+                        : "hover:bg-accent/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="outline" className="text-[8px]">project</Badge>
+                      <span className="truncate flex-1">{p.display_name}</span>
+                      {howto && <Badge variant="secondary" className="text-[8px] shrink-0">📄</Badge>}
+                    </div>
+                  </button>
+                );
+              })}
+            </SidebarSection>
+          ))
         );
 
       case "howtos":
-        return filteredHowtos.length === 0 ? (
+        return howtoGroups.length === 0 ? (
           <p className="text-xs text-muted-foreground p-2">No how-to guides yet.</p>
         ) : (
-          filteredHowtos.map((h) => {
-            const linkedTicket = h.ticket_id ? ticketById.get(h.ticket_id) : null;
-            return (
-              <button
-                key={h.howto_id}
-                onClick={() => {
-                  setSelectedId(h.howto_id);
-                  setPendingTicketId(null);
-                  setPendingProjectId(null);
-                }}
-                className={`w-full text-left px-2 py-1.5 rounded-md mb-1 text-xs transition-colors ${
-                  selectedId === h.howto_id ? "bg-accent" : "hover:bg-accent/50"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="truncate flex-1">{h.title}</span>
-                </div>
-                {linkedTicket && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5 pl-5 truncate">
-                    {linkedTicket.title}
-                  </div>
-                )}
-              </button>
-            );
-          })
+          howtoGroups.map((group) => (
+            <SidebarSection key={group.status} label={group.label} count={group.items.length}>
+              {group.items.map((h) => {
+                const linkedTicket = h.ticket_id ? ticketById.get(h.ticket_id) : null;
+                const linkedProject = h.project_node_id ? projectById.get(h.project_node_id) : null;
+                return (
+                  <button
+                    key={h.howto_id}
+                    onClick={() => {
+                      setSelectedId(h.howto_id);
+                      setPendingTicketId(null);
+                      setPendingProjectId(null);
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                      selectedId === h.howto_id ? "bg-accent" : "hover:bg-accent/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1">{h.title}</span>
+                    </div>
+                    {(linkedTicket || linkedProject) && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5 pl-5 truncate">
+                        {linkedTicket ? getTicketDisplayTitle(linkedTicket) : linkedProject?.display_name}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </SidebarSection>
+          ))
         );
     }
   })();
@@ -560,20 +809,48 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
         return null;
       }
       const WORKFLOW_LABELS: Record<string, string> = { backlog: "Backlog", todo: "To Do", in_progress: "In Progress", review: "Review", done: "Done" };
+      const ticketSources = getTicketSources(pendingTicket);
+      const linkedEntityLabels =
+        pendingTicket.linked_entity_names?.length > 0
+          ? pendingTicket.linked_entity_names
+          : pendingTicket.linked_entity_ids ?? [];
       return (
         <ScrollArea className="h-full">
           <div className="p-6 max-w-2xl">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <Badge className={`text-xs ${PRIORITY_COLORS[pendingTicket.priority] ?? ""}`}>{pendingTicket.priority}</Badge>
+              <Badge className={`text-xs ${getPriorityBadgeClass(pendingTicket.priority)}`}>{formatPriorityLabel(pendingTicket.priority)}</Badge>
               <Badge variant="outline" className="text-[10px]">{WORKFLOW_LABELS[pendingTicket.workflow_state] ?? pendingTicket.workflow_state}</Badge>
               {pendingTicket.source && <Badge variant="secondary" className="text-[10px]">{pendingTicket.source}</Badge>}
             </div>
-            <h1 className="text-xl font-semibold mt-3 mb-4">{pendingTicket.title}</h1>
+            <h1 className="text-xl font-semibold mt-3 mb-4">{getTicketDisplayTitle(pendingTicket)}</h1>
 
             {pendingTicket.description && (
               <div className="mb-5">
-                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Description</h3>
+                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  {ticketSources.some((source) => source.excerpt?.trim()) ? "Summary" : "Description"}
+                </h3>
                 <p className="text-sm whitespace-pre-wrap leading-relaxed">{pendingTicket.description}</p>
+              </div>
+            )}
+
+            {ticketSources.length > 0 && (
+              <div className="mb-5">
+                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Sources</h3>
+                <div className="space-y-2">
+                  {ticketSources.map((source, index) => (
+                    <div key={`${source.doc_id}-${index}`} className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <Badge variant="outline" className="text-[9px]">
+                          {source.source_type}
+                        </Badge>
+                        <span className="font-medium">{source.title}</span>
+                      </div>
+                      {source.excerpt?.trim() && (
+                        <p className="text-muted-foreground whitespace-pre-wrap">{source.excerpt}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -586,11 +863,11 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
               </div>
             )}
 
-            {pendingTicket.linked_entity_names?.length > 0 && (
+            {linkedEntityLabels.length > 0 && (
               <div className="mb-4">
                 <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Linked Entities</h3>
                 <div className="flex gap-1.5 flex-wrap">
-                  {pendingTicket.linked_entity_names.map((name, i) => <Badge key={i} variant="outline" className="text-xs">{name}</Badge>)}
+                  {linkedEntityLabels.map((name, i) => <Badge key={i} variant="outline" className="text-xs">{name}</Badge>)}
                 </div>
               </div>
             )}
@@ -625,13 +902,13 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
         return null;
       }
       const entityPage = entityPageByNodeId.get(pendingProject.node_id);
-      const disc = pendingProject.attributes?.discovery_category ?? "";
+      const projectStatus = classifyProjectStatus(pendingProject);
       return (
         <ScrollArea className="h-full">
           <div className="p-6 max-w-2xl">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <Badge variant="outline" className="text-[10px]">project</Badge>
-              {disc && <Badge variant="secondary" className="text-[10px]">{disc.replace(/_/g, " ")}</Badge>}
+              <Badge variant="secondary" className="text-[10px]">{PROJECT_STATUS_LABELS[projectStatus]}</Badge>
             </div>
             <h1 className="text-xl font-semibold mt-3 mb-4">{pendingProject.display_name}</h1>
 
@@ -786,7 +1063,13 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
         rightPanel={
           <KB2RightPanel
             companySlug={companySlug}
-            autoContext={selected ? { type: "howto" as const, id: selected.howto_id, title: selected.title } : null}
+            autoContext={
+              selected
+                ? { type: "howto" as const, id: selected.howto_id, title: selected.title }
+                : pendingTicket
+                  ? { type: "ticket" as const, id: pendingTicket.ticket_id, title: getTicketDisplayTitle(pendingTicket) }
+                  : null
+            }
             sourceRefs={rightPanelSources}
             relatedEntityPages={[]}
             defaultTab="sources"

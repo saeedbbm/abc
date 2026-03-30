@@ -62,6 +62,13 @@ interface Ticket {
   subtask_ids: string[];
   labels: string[];
   comments: TicketComment[];
+  source_refs?: SourceRef[];
+}
+
+interface TicketGraphNodeSummary {
+  display_name: string;
+  type: string;
+  source_refs: SourceRef[];
 }
 
 interface GeneratedTicket {
@@ -83,10 +90,10 @@ const COLUMN_LABELS: Record<string, string> = {
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
-  P0: "bg-red-500",
-  P1: "bg-orange-500",
-  P2: "bg-yellow-500",
-  P3: "bg-blue-500",
+  critical: "bg-red-500 text-white",
+  high: "bg-orange-500 text-white",
+  medium: "bg-yellow-500 text-black",
+  low: "bg-blue-500 text-white",
 };
 
 const SOURCE_LABELS: Record<
@@ -99,6 +106,49 @@ const SOURCE_LABELS: Record<
   manual: { label: "Manual", variant: "outline" },
 };
 
+function normalizePriorityLevel(priority?: string): "critical" | "high" | "medium" | "low" | null {
+  const value = (priority ?? "").trim().toLowerCase();
+  if (value === "p0" || value === "critical") return "critical";
+  if (value === "p1" || value === "high") return "high";
+  if (value === "p2" || value === "medium") return "medium";
+  if (value === "p3" || value === "low") return "low";
+  return null;
+}
+
+function formatPriorityLabel(priority?: string): string {
+  const normalized = normalizePriorityLevel(priority);
+  if (normalized === "critical") return "Critical";
+  if (normalized === "high") return "High";
+  if (normalized === "medium") return "Medium";
+  if (normalized === "low") return "Low";
+  return priority?.trim() || "Unspecified";
+}
+
+function getPriorityBadgeClass(priority?: string): string {
+  const normalized = normalizePriorityLevel(priority);
+  return normalized ? PRIORITY_COLORS[normalized] : "bg-muted text-muted-foreground";
+}
+
+function classifyTicketBucket(ticket: Ticket): "past" | "ongoing" | "proposed" {
+  const workflow = (ticket.workflow_state ?? "").toLowerCase();
+  const status = (ticket.status ?? "").toLowerCase();
+  if (workflow === "done" || status === "closed") return "past";
+  if (ticket.source === "conversation" || ticket.source === "feedback") return "proposed";
+  return "ongoing";
+}
+
+function dedupeSourceRefs(sourceRefs: SourceRef[]): SourceRef[] {
+  const seen = new Set<string>();
+  const out: SourceRef[] = [];
+  for (const ref of sourceRefs) {
+    const key = `${ref.source_type}::${ref.doc_id}::${ref.title}::${ref.excerpt ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
+
 type ViewMode = "board" | "detail" | "create";
 
 // ---------------------------------------------------------------------------
@@ -107,11 +157,13 @@ type ViewMode = "board" | "detail" | "create";
 
 function TicketDetailView({
   ticket,
+  graphNodes,
   companySlug,
   onBack,
   onUpdated,
 }: {
   ticket: Ticket;
+  graphNodes: Record<string, TicketGraphNodeSummary>;
   companySlug: string;
   onBack: () => void;
   onUpdated: () => void;
@@ -149,6 +201,37 @@ function TicketDetailView({
     fetchSubtasks();
   }, [fetchSubtasks]);
 
+  const displayTitle = getDisplayTicketTitle(localTicket);
+  const linkedEntityLabels = useMemo(() => {
+    const names = new Set<string>();
+    for (const name of localTicket.linked_entity_names ?? []) {
+      const trimmed = name.trim();
+      if (trimmed) names.add(trimmed);
+    }
+    if (names.size === 0) {
+      for (const id of localTicket.linked_entity_ids ?? []) {
+        const displayName = graphNodes[id]?.display_name?.trim();
+        if (displayName) names.add(displayName);
+      }
+    }
+    if (names.size > 0) return [...names];
+    return (localTicket.linked_entity_ids ?? []).map((id) => `${id.slice(0, 12)}...`);
+  }, [graphNodes, localTicket.linked_entity_ids, localTicket.linked_entity_names]);
+
+  const sourceRefs = useMemo(() => {
+    if (Array.isArray(localTicket.source_refs) && localTicket.source_refs.length > 0) {
+      return dedupeSourceRefs(localTicket.source_refs);
+    }
+    const refs: SourceRef[] = [];
+    for (const entityId of localTicket.linked_entity_ids ?? []) {
+      const node = graphNodes[entityId];
+      if (node?.source_refs) refs.push(...node.source_refs);
+    }
+    return dedupeSourceRefs(refs);
+  }, [graphNodes, localTicket.linked_entity_ids, localTicket.source_refs]);
+
+  const sourceExcerpts = sourceRefs.filter((ref) => ref.excerpt?.trim());
+
   const patchField = async (fields: Record<string, unknown>) => {
     await fetch(`/api/${companySlug}/kb2/tickets`, {
       method: "PATCH",
@@ -166,10 +249,10 @@ function TicketDetailView({
         action: "create",
         card: {
           card_type: "edit_proposal",
-          title: verifyTitle || `Review: ${ticket.title}`,
-          description: verifyDesc || `Ticket: "${ticket.title}" — ${ticket.description?.slice(0, 200)}`,
+          title: verifyTitle || `Review: ${displayTitle}`,
+          description: verifyDesc || `Ticket: "${displayTitle}" — ${ticket.description?.slice(0, 200)}`,
           severity: "S3",
-          page_occurrences: [{ page_id: ticket.ticket_id, page_type: "ticket", page_title: ticket.title }],
+          page_occurrences: [{ page_id: ticket.ticket_id, page_type: "ticket", page_title: displayTitle }],
           source_refs: [],
         },
       }),
@@ -224,8 +307,8 @@ function TicketDetailView({
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge className={PRIORITY_COLORS[localTicket.priority]}>
-            {localTicket.priority}
+          <Badge className={getPriorityBadgeClass(localTicket.priority)}>
+            {formatPriorityLabel(localTicket.priority)}
           </Badge>
           <span className="font-mono">{localTicket.ticket_id.slice(0, 8)}</span>
         </div>
@@ -234,15 +317,36 @@ function TicketDetailView({
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-6 space-y-6">
             {/* Title */}
-            <h1 className="text-lg font-semibold">{localTicket.title}</h1>
+            <h1 className="text-lg font-semibold">{displayTitle}</h1>
 
             {/* Description */}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                Description
+                {sourceExcerpts.length > 0 ? "Summary" : "Description"}
               </label>
               <p className="text-sm whitespace-pre-wrap">{localTicket.description || "No description."}</p>
             </div>
+
+            {sourceExcerpts.length > 0 && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">
+                  Original Source Details
+                </label>
+                <div className="space-y-2">
+                  {sourceExcerpts.slice(0, 3).map((ref, index) => (
+                    <div key={`${ref.doc_id}-${index}`} className="rounded-md border p-3 bg-muted/20">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <Badge variant="outline" className="text-[10px]">
+                          {SOURCE_LABELS[ref.source_type]?.label ?? ref.source_type}
+                        </Badge>
+                        <span className="text-xs font-medium">{ref.title || ref.doc_id}</span>
+                      </div>
+                      <p className="text-xs whitespace-pre-wrap">{ref.excerpt}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Edit in Verify */}
             <div>
@@ -344,21 +448,15 @@ function TicketDetailView({
               {localTicket.linked_entity_names?.length > 0 ||
               localTicket.linked_entity_ids?.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
-                  {localTicket.linked_entity_names?.length > 0
-                    ? localTicket.linked_entity_names.map((name, i) => (
-                        <Badge key={i} variant="secondary" className="text-xs">
-                          {name}
-                        </Badge>
-                      ))
-                    : localTicket.linked_entity_ids.map((id, i) => (
-                        <Badge
-                          key={i}
-                          variant="outline"
-                          className="text-[10px] font-mono"
-                        >
-                          {id.slice(0, 12)}...
-                        </Badge>
-                      ))}
+                  {linkedEntityLabels.map((label, i) => (
+                    <Badge
+                      key={i}
+                      variant={label.endsWith("...") ? "outline" : "secondary"}
+                      className={label.endsWith("...") ? "text-[10px] font-mono" : "text-xs"}
+                    >
+                      {label}
+                    </Badge>
+                  ))}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -655,10 +753,24 @@ const getTicketKey = (t: Ticket) => {
 };
 
 const formatTicketLabel = (t: Ticket) => {
+  const rawTitle = t.title.trim();
+  const jiraSourceTitle = t.source_refs?.find((ref) =>
+    ref.source_type === "jira" &&
+    typeof ref.title === "string" &&
+    ref.title.trim().length > 0,
+  )?.title?.trim();
   const key = getTicketKey(t);
-  if (key) return `${key}: ${t.title.replace(/^[A-Z]+-\d+[:\s]*/, "")}`;
-  return t.title;
+  if (jiraSourceTitle && key && rawTitle.toUpperCase() === key.toUpperCase()) {
+    return jiraSourceTitle;
+  }
+  if (key) {
+    const remainder = rawTitle.replace(/^[A-Z]+-\d+[:\s-]*/, "").trim();
+    return remainder ? `${key}: ${remainder}` : key;
+  }
+  return rawTitle;
 };
+
+const getDisplayTicketTitle = (t: Ticket) => formatTicketLabel(t);
 
 function TicketGroup({
   label,
@@ -709,10 +821,10 @@ function TicketGroup({
                   }`}
                 >
                   <span
-                    className={`h-1.5 w-1.5 rounded-full shrink-0 ${PRIORITY_COLORS[t.priority] ?? "bg-muted-foreground/40"}`}
+                    className={`h-1.5 w-1.5 rounded-full shrink-0 ${getPriorityBadgeClass(t.priority)}`}
                   />
                   <span className="flex-1 truncate">
-                    {formatTicketLabel(t)}
+                    {getDisplayTicketTitle(t)}
                   </span>
                 </button>
               );
@@ -743,11 +855,11 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
     [],
   );
   const [addedIndices, setAddedIndices] = useState<Set<number>>(new Set());
-  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; source_refs: { source_type: string; doc_id: string; title: string; excerpt?: string }[] }>>({});
+  const [graphNodes, setGraphNodes] = useState<Record<string, TicketGraphNodeSummary>>({});
 
   const fetchTickets = useCallback(async () => {
     const [tRes, nRes] = await Promise.all([
-      fetch(`/api/${companySlug}/kb2?type=tickets`),
+      fetch(`/api/${companySlug}/kb2/tickets`),
       fetch(`/api/${companySlug}/kb2?type=graph_nodes`),
     ]);
     const tData = await tRes.json();
@@ -765,18 +877,19 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   }, [fetchTickets]);
 
   const getTicketSources = (ticket: Ticket): SourceRef[] => {
+    if (Array.isArray(ticket.source_refs) && ticket.source_refs.length > 0) {
+      return dedupeSourceRefs(ticket.source_refs);
+    }
     const refs: SourceRef[] = [];
     for (const entityId of ticket.linked_entity_ids ?? []) {
       const node = graphNodes[entityId];
       if (node?.source_refs) {
         for (const r of node.source_refs) {
-          if (!refs.some((existing) => existing.doc_id === r.doc_id)) {
-            refs.push({ source_type: r.source_type, doc_id: r.doc_id, title: r.title, excerpt: r.excerpt });
-          }
+          refs.push({ source_type: r.source_type, doc_id: r.doc_id, title: r.title, excerpt: r.excerpt });
         }
       }
     }
-    return refs;
+    return dedupeSourceRefs(refs);
   };
 
   const filteredTickets =
@@ -901,30 +1014,15 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   }, [filteredTickets, sidebarSearch]);
 
   const pastTickets = useMemo(
-    () => sidebarFiltered.filter((t) => t.workflow_state === "done" || t.status === "closed"),
+    () => sidebarFiltered.filter((t) => classifyTicketBucket(t) === "past"),
     [sidebarFiltered],
   );
   const ongoingTickets = useMemo(
-    () => sidebarFiltered.filter((t) => ["in_progress", "review", "todo"].includes(t.workflow_state)),
+    () => sidebarFiltered.filter((t) => classifyTicketBucket(t) === "ongoing"),
     [sidebarFiltered],
   );
   const proposedTickets = useMemo(
-    () =>
-      sidebarFiltered.filter(
-        (t) =>
-          (t.source === "feedback" || t.source === "conversation") &&
-          t.workflow_state === "backlog",
-      ),
-    [sidebarFiltered],
-  );
-  const backlogTickets = useMemo(
-    () =>
-      sidebarFiltered.filter(
-        (t) =>
-          t.workflow_state === "backlog" &&
-          t.source !== "feedback" &&
-          t.source !== "conversation",
-      ),
+    () => sidebarFiltered.filter((t) => classifyTicketBucket(t) === "proposed"),
     [sidebarFiltered],
   );
 
@@ -1023,13 +1121,13 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
                             <GripVertical className="h-3 w-3 mt-0.5 text-muted-foreground shrink-0" />
                             <div className="min-w-0">
                               <p className="text-xs font-medium line-clamp-2">
-                                {ticket.title}
+                                {getDisplayTicketTitle(ticket)}
                               </p>
                               <div className="flex gap-1 mt-1 flex-wrap">
                                 <Badge
-                                  className={`text-[9px] ${PRIORITY_COLORS[ticket.priority] ?? ""}`}
+                                  className={`text-[9px] ${getPriorityBadgeClass(ticket.priority)}`}
                                 >
-                                  {ticket.priority}
+                                  {formatPriorityLabel(ticket.priority)}
                                 </Badge>
                                 <Badge
                                   variant={
@@ -1068,12 +1166,12 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
                 >
                   <CardContent className="p-0">
                     <div className="w-full text-left p-3 flex items-center gap-3">
-                      <Badge className={PRIORITY_COLORS[t.priority]}>
-                        {t.priority}
+                      <Badge className={getPriorityBadgeClass(t.priority)}>
+                        {formatPriorityLabel(t.priority)}
                       </Badge>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">
-                          {t.title}
+                          {getDisplayTicketTitle(t)}
                         </p>
                       </div>
                       <Badge variant="outline">
@@ -1153,9 +1251,9 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
                       <CardContent className="p-4">
                         <div className="flex items-start gap-3">
                           <Badge
-                            className={`shrink-0 ${PRIORITY_COLORS[gt.priority] ?? ""}`}
+                            className={`shrink-0 ${getPriorityBadgeClass(gt.priority)}`}
                           >
-                            {gt.priority}
+                            {formatPriorityLabel(gt.priority)}
                           </Badge>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold">{gt.title}</p>
@@ -1242,6 +1340,7 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
         return selectedTicket ? (
           <TicketDetailView
             ticket={selectedTicket}
+            graphNodes={graphNodes}
             companySlug={companySlug}
             onBack={goBackToBoard}
             onUpdated={handleTicketUpdated}
@@ -1285,6 +1384,12 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
             </div>
             <ScrollArea className="flex-1">
               <TicketGroup
+                label="Past"
+                tickets={pastTickets}
+                selectedTicketId={selectedTicket?.ticket_id ?? null}
+                onSelect={handleSidebarSelect}
+              />
+              <TicketGroup
                 label="Ongoing"
                 tickets={ongoingTickets}
                 selectedTicketId={selectedTicket?.ticket_id ?? null}
@@ -1293,18 +1398,6 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
               <TicketGroup
                 label="Proposed"
                 tickets={proposedTickets}
-                selectedTicketId={selectedTicket?.ticket_id ?? null}
-                onSelect={handleSidebarSelect}
-              />
-              <TicketGroup
-                label="Past"
-                tickets={pastTickets}
-                selectedTicketId={selectedTicket?.ticket_id ?? null}
-                onSelect={handleSidebarSelect}
-              />
-              <TicketGroup
-                label="Backlog"
-                tickets={backlogTickets}
                 selectedTicketId={selectedTicket?.ticket_id ?? null}
                 onSelect={handleSidebarSelect}
               />

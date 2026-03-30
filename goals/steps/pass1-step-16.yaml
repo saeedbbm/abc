@@ -1,0 +1,58 @@
+step_id: pass1-step-16
+step_number: 16
+step_name: Generate How-To Guides
+pass: pass1
+
+purpose: >
+  Generate implementation guides for proposed work so the KB can turn discovered
+  needs into concrete, graph-aware engineering guidance.
+
+inputs:
+  - step 14 entity pages
+  - step 9 and step 10 nodes
+  - step 6, 7, and 11 graph edges
+
+primary_outputs:
+  - how-to guides for proposed features or projects
+
+judge_should_look_at:
+  - sampled how-to guides
+  - whether guides cover the right proposed targets
+  - whether guides reference actual conventions, decisions, and related entities
+
+must_do:
+  - generate guides for the right proposed work items
+  - include convention guidance when APPLIES_TO edges or equivalent evidence exist
+  - provide concrete implementation guidance rather than generic product advice
+  - stay grounded in existing systems, patterns, and constraints from the KB
+
+must_not_do:
+  - exclude proposed projects or features just because they are not ticket-shaped
+  - invent conventions that are missing from the graph
+  - generate generic how-tos that ignore discovered team patterns
+
+success_signals:
+  - guides are specific enough to implement against
+  - proposed feature guides inherit the right conventions from the graph
+  - sampled guides mention relevant existing pages, systems, and risks
+
+failure_signals:
+  - guides are generated only for ticket-like discoveries
+  - important proposed features are skipped
+  - convention-aware guidance is missing despite graph evidence
+
+deterministic_checks:
+  - key: howto_count_positive_when_proposed_work_exists
+    description: Proposed work should yield how-to guides.
+    mode: gte
+    target: 1
+  - key: sampled_howtos_reference_real_entities
+    description: Sampled guides should cite actual KB entities, patterns, or systems.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - proposed-work guides are concrete and convention-aware
+  block_when:
+    - important proposed features are skipped or guides are generic

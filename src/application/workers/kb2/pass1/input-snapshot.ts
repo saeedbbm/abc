@@ -11,6 +11,10 @@ import {
   parseGithubHumanText,
   parseFeedbackHumanText,
 } from "@/src/application/lib/kb2/human-text-parsers";
+import {
+  buildStructuredDataFromInput,
+  parseStructuredDataToParsedDocuments,
+} from "@/src/application/lib/kb2/structured-source-input";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
 /**
@@ -76,24 +80,76 @@ export const inputSnapshotStep: StepFunction = async (ctx) => {
 
   const allDocs: KB2ParsedDocument[] = [];
   const stats: Record<string, number> = {};
-  const rawStats: Record<string, { chars: number; format: "human_text" | "json" }> = {};
+  const sourceUnitsBySource: Record<string, number> = {};
+  const rawStats: Record<string, {
+    chars: number;
+    format: "human_text" | "json";
+    structured_json?: boolean;
+  }> = {};
 
   for (const input of rawInputs) {
     const source = input.source as string;
     let docs: KB2ParsedDocument[];
+    let structuredData = input.structured_data;
+
+    if (!structuredData) {
+      structuredData = buildStructuredDataFromInput(source, input.data);
+      if (structuredData && input._id) {
+        await tc.raw_inputs.updateOne(
+          { _id: input._id },
+          {
+            $set: {
+              structured_data: structuredData,
+              structured_at: new Date().toISOString(),
+              input_format: isHumanText(input.data) ? "human_text" : "json",
+              ...(isHumanText(input.data) ? { raw_text: input.data } : {}),
+            },
+          },
+        );
+      }
+    }
 
     if (isHumanText(input.data)) {
-      rawStats[source] = { chars: input.data.length, format: "human_text" };
-      const humanParser = HUMAN_TEXT_PARSERS[source];
-      docs = humanParser ? humanParser(input.data) : parseGenericSource(source, input.data);
+      rawStats[source] = {
+        chars: input.data.length,
+        format: "human_text",
+        structured_json: Boolean(structuredData),
+      };
+
+      if (structuredData) {
+        docs = parseStructuredDataToParsedDocuments(source, structuredData);
+        if (docs.length === 0) {
+          const humanParser = HUMAN_TEXT_PARSERS[source];
+          docs = humanParser ? humanParser(input.data) : parseGenericSource(source, input.data);
+        }
+      } else {
+        const humanParser = HUMAN_TEXT_PARSERS[source];
+        docs = humanParser ? humanParser(input.data) : parseGenericSource(source, input.data);
+      }
     } else {
-      rawStats[source] = { chars: JSON.stringify(input.data).length, format: "json" };
-      const jsonParser = JSON_PARSERS[source];
-      docs = jsonParser ? jsonParser(input.data) : parseGenericSource(source, input.data);
+      rawStats[source] = {
+        chars: JSON.stringify(input.data).length,
+        format: "json",
+        structured_json: Boolean(structuredData),
+      };
+      if (structuredData) {
+        docs = parseStructuredDataToParsedDocuments(source, structuredData);
+        if (docs.length === 0) {
+          const jsonParser = JSON_PARSERS[source];
+          docs = jsonParser ? jsonParser(input.data) : parseGenericSource(source, input.data);
+        }
+      } else {
+        const jsonParser = JSON_PARSERS[source];
+        docs = jsonParser ? jsonParser(input.data) : parseGenericSource(source, input.data);
+      }
     }
 
     allDocs.push(...docs);
     stats[source] = docs.length;
+    sourceUnitsBySource[source] = docs.reduce((sum, doc) => {
+      const units = Array.isArray(doc.metadata?.source_units) ? doc.metadata.source_units.length : 0;
+      return sum + Math.max(units, 1);
+    }, 0);
   }
 
   await ctx.onProgress(`Parsed ${allDocs.length} documents. Saving snapshot...`, 70);
@@ -103,16 +159,42 @@ export const inputSnapshotStep: StepFunction = async (ctx) => {
     execution_id: ctx.executionId,
     company_slug: companySlug,
     parsed_documents: allDocs,
+    artifact_version: "pass1_v2",
     stats: { ...stats, total: allDocs.length },
+    source_units_by_source: sourceUnitsBySource,
     raw_stats: rawStats,
     created_at: new Date().toISOString(),
   });
 
   await ctx.onProgress(`Snapshot saved: ${allDocs.length} documents`, 100);
 
+  const sampledDocuments = allDocs.slice(0, 12).map((doc) => {
+    const sourceUnits = Array.isArray(doc.metadata?.source_units)
+      ? doc.metadata.source_units as Array<Record<string, unknown>>
+      : [];
+    return {
+      doc_id: doc.id,
+      source_id: doc.sourceId,
+      provider: doc.provider,
+      source_type: doc.sourceType,
+      title: doc.title,
+      metadata_keys: Object.keys((doc.metadata ?? {}) as Record<string, unknown>).slice(0, 8),
+      source_unit_count: sourceUnits.length,
+      source_units: sourceUnits.slice(0, 3).map((unit) => ({
+        unit_id: unit.unit_id,
+        kind: unit.kind,
+        anchor: unit.anchor,
+        title: unit.title,
+      })),
+    };
+  });
+
   return {
     total_documents: allDocs.length,
     by_source: stats,
+    source_units_by_source: sourceUnitsBySource,
     raw_stats: rawStats,
+    sampled_documents: sampledDocuments,
+    artifact_version: "pass1_v2",
   };
 };

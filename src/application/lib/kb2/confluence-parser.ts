@@ -72,7 +72,7 @@ function decodeEntities(html: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
 }
 
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   let text = html;
 
   // Remove CDATA wrappers

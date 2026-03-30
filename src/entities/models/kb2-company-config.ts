@@ -106,6 +106,7 @@ export interface PromptsConfig {
   extraction_validation: { system_gap: string; system_judge: string; system_attr_inference: string };
   discovery: { system: string };
   graph_enrichment: { system: string };
+  pattern_synthesis?: { system: string };
   generate_entity_pages: { system: string };
   generate_human_pages: { system: string };
   generate_howto: { system: string };

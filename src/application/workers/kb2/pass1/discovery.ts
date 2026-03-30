@@ -6,6 +6,7 @@ import { structuredGenerate } from "@/src/application/lib/llm/structured-generat
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import { PrefixLogger } from "@/lib/utils";
+import { tokenSimilarity } from "@/src/application/workers/kb2/utils/text-similarity";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
 const DiscoverySchema = z.object({
@@ -33,8 +34,7 @@ Look for:
 RULES:
 - Only propose discoveries that do NOT already exist as entities in the existing entity list
 - Each discovery must have clear evidence from the source documents
-- Set confidence to "medium" for inferred items, "high" only for clearly mentioned but untracked items
-- For proposed items, set confidence to "low" since they need human verification
+- Confidence is evidence-based: "high" = multiple corroborating sources or explicit mentions; "medium" = single clear source; "low" = inferred or proposed items needing human verification
 - Reference existing entity names in related_entities when applicable
 - Source document types: Confluence = documented technical content, Jira = project tracking/ticketing, Slack = team conversations, GitHub = code/PRs, Customer Feedback = external user reports
 - If evidence comes from Confluence AND Jira, the project is DOCUMENTED
@@ -42,6 +42,8 @@ RULES:
 - If evidence comes only from Slack/GitHub, it is fully DISCOVERED/UNDOCUMENTED
 - A "project" is a multi-ticket initiative or feature with a defined scope. One-off bug fixes, dependency updates, and maintenance tasks are NOT projects — they are tickets at most.
 - Do NOT create a discovery for work that is just a single Jira ticket — that is already tracked.
+- Recurring customer feedback themes should default to category "proposed_from_feedback" with type "project" (feature-level), NOT individual tickets.
+- Proposed tickets should only be created for clearly task-like sources: specific bugs, concrete dependency upgrades, or other well-scoped actionable items.
 - For customer feedback: only create a proposed project/ticket if the same theme appears in 2+ submissions OR if the request describes a feature with clear scope.`;
 
 export const discoveryStep: StepFunction = async (ctx) => {
@@ -84,7 +86,7 @@ export const discoveryStep: StepFunction = async (ctx) => {
   }
 
   const conversationDocs = docs.filter((d) =>
-    d.provider === "slack" || d.provider === "customerFeedback" || d.provider === "github",
+    d.provider === "slack" || d.provider === "customerFeedback" || d.provider === "github" || d.provider === "jira",
   );
 
   if (conversationDocs.length === 0) {
@@ -95,6 +97,80 @@ export const discoveryStep: StepFunction = async (ctx) => {
   const totalBatches = Math.ceil(conversationDocs.length / BATCH_SIZE);
 
   await ctx.onProgress(`Analyzing ${conversationDocs.length} documents for undocumented work...`, 5);
+
+  // --- Jira-based discovery: find In Progress / Done tickets with no matching project entity or Confluence docs ---
+  const jiraBasedDiscoveries: { ticket: string; project_name: string }[] = [];
+  const jiraDocs = docs.filter((d) => d.provider === "jira");
+  const confluenceTitles = new Set(
+    docs.filter((d) => d.provider === "confluence").map((d) => d.title.toLowerCase()),
+  );
+  const existingProjectNames = new Set(
+    existingNodes.filter((n) => n.type === "project").map((n) => n.display_name.toLowerCase()),
+  );
+
+  for (const jDoc of jiraDocs) {
+    const statusMatch = jDoc.content.match(/Status:\s*(In Progress|Done|Closed|Resolved|Complete|To Do|Backlog|Open|In Review|In Development)/i);
+    if (!statusMatch) continue;
+    const ticketName = jDoc.title;
+    const projectName = ticketName.replace(/\s*\[.*?\]\s*/g, "").replace(/\s*-\s*\d+$/, "").trim();
+    if (existingProjectNames.has(projectName.toLowerCase())) continue;
+    const hasConfluence = [...confluenceTitles].some(
+      (t) => t.includes(projectName.toLowerCase()) || tokenSimilarity(t, projectName) > 0.5,
+    );
+    if (hasConfluence) continue;
+    jiraBasedDiscoveries.push({ ticket: ticketName, project_name: projectName });
+    allDiscoveries.push({
+      display_name: projectName,
+      type: "project",
+      category: /^(done|closed|resolved|complete)$/i.test(statusMatch[1]) ? "past_undocumented" : "ongoing_undocumented",
+      description: `Project inferred from Jira ticket "${ticketName}" (${statusMatch[1]}) with no Confluence documentation.`,
+      evidence: `Jira ticket: ${ticketName}`,
+      source_document: jDoc.title,
+      related_entities: [],
+      confidence: "medium",
+    });
+  }
+
+  // --- Feedback clustering: group customerFeedback docs by token similarity ---
+  const feedbackClusters: { submissions: string[]; merged_name: string }[] = [];
+  const feedbackDocs = docs.filter((d) => d.provider === "customerFeedback");
+
+  if (feedbackDocs.length > 0) {
+    const FEEDBACK_SIM_THRESHOLD = 0.4;
+    const clustered = new Set<number>();
+    const clusters: { indices: number[]; representative: string }[] = [];
+
+    for (let i = 0; i < feedbackDocs.length; i++) {
+      if (clustered.has(i)) continue;
+      const cluster = [i];
+      clustered.add(i);
+      for (let j = i + 1; j < feedbackDocs.length; j++) {
+        if (clustered.has(j)) continue;
+        if (tokenSimilarity(feedbackDocs[i].title, feedbackDocs[j].title) >= FEEDBACK_SIM_THRESHOLD) {
+          cluster.push(j);
+          clustered.add(j);
+        }
+      }
+      if (cluster.length >= 2) {
+        clusters.push({ indices: cluster, representative: feedbackDocs[i].title });
+      }
+    }
+
+    for (const cluster of clusters) {
+      const submissions = cluster.indices.map((idx) => feedbackDocs[idx].title);
+      feedbackClusters.push({ submissions, merged_name: cluster.representative });
+      allDiscoveries.push({
+        display_name: cluster.representative,
+        type: "project",
+        category: "proposed_from_feedback",
+        description: `Recurring feedback theme across ${submissions.length} submissions.`,
+        evidence: submissions.map((s) => `- ${s}`).join("\n"),
+        source_document: feedbackDocs[cluster.indices[0]].title,
+        related_entities: [],
+        confidence: submissions.length >= 3 ? "medium" : "low",
+      });
+    }
+  }
 
   let runningEntityList = existingEntityList;
 
@@ -158,7 +234,24 @@ export const discoveryStep: StepFunction = async (ctx) => {
   const dedupedDiscoveries = [...seenDiscoveries.values()];
 
   const existingNames = new Set(existingNodes.map((n) => n.display_name.toLowerCase()));
-  const uniqueDiscoveries = dedupedDiscoveries.filter((d) => !existingNames.has(d.display_name.toLowerCase()));
+  const existingNamesList = [...existingNames];
+  const duplicateChecks: { name: string; blocked_by: string; similarity: number }[] = [];
+
+  const uniqueDiscoveries = dedupedDiscoveries.filter((d) => {
+    const lowerName = d.display_name.toLowerCase();
+    if (existingNames.has(lowerName)) {
+      duplicateChecks.push({ name: d.display_name, blocked_by: lowerName, similarity: 1.0 });
+      return false;
+    }
+    for (const existing of existingNamesList) {
+      const sim = tokenSimilarity(lowerName, existing);
+      if (sim > 0.7) {
+        duplicateChecks.push({ name: d.display_name, blocked_by: existing, similarity: sim });
+        return false;
+      }
+    }
+    return true;
+  });
 
   const newNodes: KB2GraphNodeType[] = [];
   for (const disc of uniqueDiscoveries) {
@@ -192,8 +285,35 @@ export const discoveryStep: StepFunction = async (ctx) => {
     });
   }
 
-  if (newNodes.length > 0) {
-    await tc.graph_nodes.insertMany(newNodes);
+  // --- Feedback discovery consolidation: merge feedback-based nodes referring to the same feature ---
+  const MERGE_SIM_THRESHOLD = 0.6;
+  const feedbackNodes = newNodes.filter((n) => n.attributes?.discovery_category === "proposed_from_feedback");
+  const mergedIndices = new Set<number>();
+
+  for (let i = 0; i < feedbackNodes.length; i++) {
+    if (mergedIndices.has(i)) continue;
+    for (let j = i + 1; j < feedbackNodes.length; j++) {
+      if (mergedIndices.has(j)) continue;
+      if (tokenSimilarity(feedbackNodes[i].display_name, feedbackNodes[j].display_name) > MERGE_SIM_THRESHOLD) {
+        feedbackNodes[i].source_refs = [
+          ...feedbackNodes[i].source_refs,
+          ...feedbackNodes[j].source_refs,
+        ];
+        feedbackNodes[i].aliases = [
+          ...new Set([...feedbackNodes[i].aliases, feedbackNodes[j].display_name]),
+        ];
+        mergedIndices.add(j);
+      }
+    }
+  }
+
+  const mergedOutNodeIds = new Set(
+    [...mergedIndices].map((idx) => feedbackNodes[idx].node_id),
+  );
+  const finalNodes = newNodes.filter((n) => !mergedOutNodeIds.has(n.node_id));
+
+  if (finalNodes.length > 0) {
+    await tc.graph_nodes.insertMany(finalNodes);
   }
 
   const byCategory: Record<string, number> = {};
@@ -201,11 +321,15 @@ export const discoveryStep: StepFunction = async (ctx) => {
     byCategory[d.category] = (byCategory[d.category] || 0) + 1;
   }
 
-  await ctx.onProgress(`Discovered ${uniqueDiscoveries.length} new items`, 100);
+  await ctx.onProgress(`Discovered ${finalNodes.length} new items`, 100);
   return {
-    total_discoveries: uniqueDiscoveries.length,
+    total_discoveries: finalNodes.length,
+    total_discoveries_by_category: byCategory,
     llm_calls: totalLLMCalls,
     by_category: byCategory,
+    jira_based_discoveries: jiraBasedDiscoveries,
+    feedback_clusters: feedbackClusters,
+    duplicate_checks: duplicateChecks,
     discoveries: uniqueDiscoveries.map((d) => ({
       display_name: d.display_name,
       type: d.type,

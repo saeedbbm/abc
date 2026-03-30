@@ -1,15 +1,17 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
-import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
+import { getReasoningModel, getReasoningModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 import type { KB2GraphNodeType, KB2GraphEdgeType, KB2EntityPageType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 
-const PROPOSED_TICKET_CATEGORIES = new Set([
-  "proposed_ticket",
+const HOWTO_DISCOVERY_CATEGORIES = new Set([
   "proposed_from_feedback",
+  "proposed_project",
+  "past_undocumented",
+  "ongoing_undocumented",
 ]);
 
 const DEFAULT_HOWTO_SECTIONS = [
@@ -22,7 +24,7 @@ const DEFAULT_HOWTO_SECTIONS = [
   "Prompt Section",
 ];
 
-const DEFAULT_GENERATE_HOWTO_SYSTEM = `You generate implementation guide documents for engineering tickets.
+const DEFAULT_GENERATE_HOWTO_SYSTEM = `You generate implementation guide documents for engineering work items.
 Each guide has sections that must be filled with specific, actionable content.
 
 \${company_context}
@@ -47,6 +49,23 @@ const HowtoResultSchema = z.object({
   })),
   linked_entity_ids: z.array(z.string()),
 });
+
+function summarizeHowtoSample(doc: {
+  title: string;
+  ticket_id: string;
+  linked_entity_ids: string[];
+  sections: { section_name: string; content: string }[];
+}) {
+  return {
+    title: doc.title,
+    ticket_id: doc.ticket_id,
+    linked_entity_ids: doc.linked_entity_ids,
+    sections: doc.sections.map((section) => ({
+      section_name: section.section_name,
+      content: section.content.slice(0, 1200),
+    })),
+  };
+}
 
 export const generateHowtoStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
@@ -75,12 +94,17 @@ export const generateHowtoStep: StepFunction = async (ctx) => {
     }
   }
 
-  const proposedTicketNodes = graphNodes.filter((n) =>
-    PROPOSED_TICKET_CATEGORIES.has(n.attributes?.discovery_category ?? ""),
+  const howtoTargetNodes = graphNodes.filter(
+    (n) =>
+      n.type === "project" &&
+      (
+        HOWTO_DISCOVERY_CATEGORIES.has(n.attributes?.discovery_category ?? "") ||
+        n.attributes?.status === "proposed"
+      ),
   );
 
-  if (proposedTicketNodes.length === 0) {
-    await ctx.onProgress("No proposed tickets to generate how-tos for", 100);
+  if (howtoTargetNodes.length === 0) {
+    await ctx.onProgress("No project targets available for how-to generation", 100);
     return { total_howtos: 0, llm_calls: 0 };
   }
 
@@ -99,16 +123,18 @@ export const generateHowtoStep: StepFunction = async (ctx) => {
   systemPrompt = systemPrompt.replace(/\$\{company_context\}/g, companyContext);
   systemPrompt = systemPrompt.replace(/\$\{howto_sections\}/g, howtoSectionsStr);
 
-  const model = getFastModel(ctx.config?.pipeline_settings?.models);
-  const modelName = getFastModelName(ctx.config?.pipeline_settings?.models);
+  const model = getReasoningModel(ctx.config?.pipeline_settings?.models);
+  const modelName = getReasoningModelName(ctx.config?.pipeline_settings?.models);
   let totalLLMCalls = 0;
   const howtoDocs: any[] = [];
+  const complianceResults: { node: string; convention: string; referenced: boolean }[] = [];
+  const howtoSamples: ReturnType<typeof summarizeHowtoSample>[] = [];
 
-  await ctx.onProgress(`Generating how-tos for ${proposedTicketNodes.length} proposed tickets...`, 5);
+  await ctx.onProgress(`Generating how-tos for ${howtoTargetNodes.length} project targets...`, 5);
 
-  for (let i = 0; i < proposedTicketNodes.length; i++) {
+  for (let i = 0; i < howtoTargetNodes.length; i++) {
     if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
-    const node = proposedTicketNodes[i];
+    const node = howtoTargetNodes[i];
 
     const ticketEntityPage = entityPageByNodeId.get(node.node_id);
     const ticketInfo = ticketEntityPage
@@ -145,12 +171,40 @@ export const generateHowtoStep: StepFunction = async (ctx) => {
       })
       .join("\n\n");
 
+    // Gather convention constraints via APPLIES_TO edges pointing at this feature
+    const conventionConstraints: { title: string; details: string }[] = [];
+    const appliesToEdges = graphEdges.filter(
+      (e) => e.type === "APPLIES_TO" && e.target_node_id === node.node_id,
+    );
+    for (const ae of appliesToEdges) {
+      const conventionNode = graphNodes.find(
+        (n) => n.node_id === ae.source_node_id && n.attributes?.is_convention === true,
+      );
+      if (!conventionNode) continue;
+      const conventionPage = entityPageByNodeId.get(conventionNode.node_id);
+      if (conventionPage) {
+        const details = conventionPage.sections
+          .map((s) => `### ${s.section_name}\n${s.items.map((it) => `- ${it.text}`).join("\n")}`)
+          .join("\n\n");
+        conventionConstraints.push({ title: conventionPage.title, details });
+      } else {
+        conventionConstraints.push({
+          title: conventionNode.display_name,
+          details: conventionNode.attributes?.pattern_rule ?? "(no detailed page available)",
+        });
+      }
+    }
+
+    const conventionSection = conventionConstraints.length > 0
+      ? `## Convention Constraints (HARD — the implementation MUST comply with these)\n${conventionConstraints.map((c) => `### ${c.title}\n${c.details}`).join("\n\n")}\n`
+      : "";
+
     const userPrompt = `Generate an implementation guide for this proposed ticket:
 
 ## Ticket
 ${ticketInfo}
 
-${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedContext}` : ""}`;
+${conventionSection}${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedContext}` : ""}`;
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
@@ -180,6 +234,20 @@ ${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedCo
       );
     }
 
+    if (conventionConstraints.length > 0) {
+      const generatedText = (result.sections ?? []).map((s) => s.content).join(" ").toLowerCase();
+      for (const cc of conventionConstraints) {
+        const conventionNameLower = cc.title.toLowerCase();
+        const referenced = generatedText.includes(conventionNameLower);
+        complianceResults.push({ node: node.display_name, convention: cc.title, referenced });
+        if (!referenced) {
+          logger.log(
+            `How-to for "${node.display_name}" does not reference linked convention "${cc.title}"`,
+          );
+        }
+      }
+    }
+
     const linkedEntityIds = [
       node.node_id,
       ...(result.linked_entity_ids ?? []).filter((id) => relatedNodeIds.has(id)),
@@ -197,10 +265,13 @@ ${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedCo
       created_at: new Date().toISOString(),
     };
     howtoDocs.push(doc);
+    if (howtoSamples.length < 5) {
+      howtoSamples.push(summarizeHowtoSample(doc));
+    }
 
-    if ((i + 1) % 3 === 0 || i === proposedTicketNodes.length - 1) {
-      const pct = Math.round(5 + ((i + 1) / proposedTicketNodes.length) * 90);
-      await ctx.onProgress(`Generated ${i + 1}/${proposedTicketNodes.length} how-tos`, pct);
+    if ((i + 1) % 3 === 0 || i === howtoTargetNodes.length - 1) {
+      const pct = Math.round(5 + ((i + 1) / howtoTargetNodes.length) * 90);
+      await ctx.onProgress(`Generated ${i + 1}/${howtoTargetNodes.length} how-tos`, pct);
     }
   }
 
@@ -209,5 +280,12 @@ ${relatedContext ? `## Related Entity Context (from knowledge base)\n${relatedCo
   }
 
   await ctx.onProgress(`Generated ${howtoDocs.length} how-to guides`, 100);
-  return { total_howtos: howtoDocs.length, llm_calls: totalLLMCalls };
+  return {
+    total_howtos: howtoDocs.length,
+    llm_calls: totalLLMCalls,
+    target_nodes: howtoTargetNodes.map((node) => node.display_name),
+    howto_titles: howtoDocs.map((doc) => doc.title),
+    howto_samples: howtoSamples,
+    compliance_results: complianceResults,
+  };
 };

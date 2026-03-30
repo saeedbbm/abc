@@ -1,182 +1,883 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
-import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
-import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
-import { CLASSIFICATION_RULES } from "@/src/entities/models/kb2-templates";
-import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
+import { calculateCostUsd, getFastModel, getFastModelName } from "@/lib/ai-model";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
-import { PrefixLogger, normalizeForMatch } from "@/lib/utils";
+import {
+  appendUniqueSourceRefs,
+  buildEvidenceRefFromDoc,
+  getDocSourceUnits,
+  normalizeEntityType,
+  projectCandidateReview,
+  type KB2CandidateEntity,
+  type KB2Observation,
+  type KB2SourceUnit,
+} from "@/src/application/lib/kb2/pass1-v2-artifacts";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
+import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
-const FALLBACK_DEFAULT_BATCH_SIZE = 3;
-const FALLBACK_DENSE_BATCH_SIZE = 2;
-
-const VALID_NODE_TYPES = new Set([
-  "team_member", "team", "client_company", "client_person", "repository", "integration", "infrastructure",
-  "cloud_resource", "library", "database", "environment", "project", "decision", "process",
-  "ticket", "pull_request", "pipeline", "customer_feedback",
-]);
-
-const TYPE_ALIASES: Record<string, string> = {
-  service: "repository", app: "repository", application: "repository",
-  repo: "repository", codebase: "repository", module: "repository",
-  system: "infrastructure", component: "infrastructure",
-  framework: "library", package: "library", dependency: "library",
-  tool: "integration", platform: "integration", saas: "integration",
-  aws: "cloud_resource", gcp: "cloud_resource", azure: "cloud_resource",
-  user: "team_member", member: "team_member", employee: "team_member",
-  person: "team_member", staff: "team_member", engineer: "team_member",
-  customer: "client_person", external_contact: "client_person",
-  segment: "client_person", user_segment: "client_person",
-  company: "client_company", organization: "client_company", partner: "client_company",
-  client: "client_company",
-  bug: "ticket", issue: "ticket", task: "ticket", story: "ticket",
-  feedback: "customer_feedback", support_ticket: "customer_feedback", zendesk: "customer_feedback",
-  cfb: "customer_feedback", customer_ticket: "customer_feedback",
-  pr: "pull_request", merge_request: "pull_request",
-  ci: "pipeline", cd: "pipeline",
-  deploy: "environment", staging: "environment",
-  decision_record: "decision", pending_decision: "decision",
-  adr: "decision", tradeoff: "decision", architecture_decision: "decision",
-  workflow: "process", procedure: "process", runbook: "process",
-};
-
-function normalizeEntityType(raw: string): string {
-  const lower = raw.toLowerCase().replace(/\s+/g, "_");
-  if (VALID_NODE_TYPES.has(lower)) return lower;
-  return TYPE_ALIASES[lower] ?? "infrastructure";
-}
-
-const ExtractedEntitySchema = z.object({
-  entities: z.array(z.object({
-    display_name: z.string(),
-    type: z.string().describe("One of: team_member, team, client_company, client_person, repository, integration, infrastructure, cloud_resource, library, database, environment, project, decision, process, ticket, pull_request, pipeline, customer_feedback"),
-    reasoning: z.string().describe("1-2 sentence explanation: why this type, why this name, which source evidence led to this classification"),
-    description: z.string().describe("1-2 sentence factual summary of what this entity is or does, written for someone unfamiliar with the source documents"),
-    source_documents: z.array(z.object({
-      doc_id: z.string().describe("The exact doc_id value from the Document header brackets, e.g. 'general' or 'PAW-8'"),
-      source_type: z.string().describe("The exact source_type value from the Document header brackets, e.g. 'slack' or 'jira'"),
-      title: z.string().describe("The document title after the brackets in the Document header"),
-      evidence_excerpt: z.string().describe("Exact quote from this specific document that mentions this entity"),
-    })).describe("ALL documents from the current batch that mention this entity — include every document, not just the first one"),
-    aliases: z.array(z.string()),
-    attributes: z.object({}).passthrough().describe("Key-value attributes like role, owner, tech_stack, version, _relationships"),
-    confidence: z.enum(["high", "medium", "low"]),
-  })),
+const ObservationSchema = z.object({
+  observations: z.array(
+    z.object({
+      unit_id: z.string(),
+      label: z.string(),
+      observation_kind: z.enum([
+        "candidate_entity",
+        "decision_signal",
+        "work_item_signal",
+        "process_signal",
+        "person_signal",
+        "feedback_signal",
+        "pattern_signal",
+      ]),
+      suggested_type: z.string(),
+      reasoning: z.string(),
+      evidence_excerpt: z.string(),
+      aliases: z.array(z.string()).default([]),
+      attributes: z.object({}).passthrough().default({}),
+      confidence: z.enum(["high", "medium", "low"]),
+    }),
+  ),
 });
 
-const SYSTEM_PROMPT = `You are an entity extraction engine for a software company knowledge base.
-Extract every distinct entity from the provided documents.
+const UNIT_BATCH_SIZE = 10;
+const UNIT_TEXT_CAP = 1200;
+const TASK_SHAPED_RE = /\b(fix|bug|cleanup|refactor|investigate|copy|planning|roadmap|maintenance|postmortem|onboarding|meeting|1:1|review|mockups?|touch target|handoff)\b/i;
+const PROJECT_SURFACE_RE = /\b(page|portal|browser|browse|tracking|calendar|chooser|navigation|profile|profiles|comparison|volunteer|feature|initiative|redesign|mvp|integration|rollout|launch|orders|responsiveness)\b/i;
+const DIRECT_PROJECT_SURFACE_RE = /\b(page|portal|browser|browse|tracking|calendar|chooser|navigation|comparison|feature|orders|responsiveness|redesign|integration|pipeline|standardization|search|profile|profiles|form)\b/i;
+const PROJECT_FRAGMENT_RE = /\b(button|buttons|card|cards|designs?|endpoint|tests?|e2e|mockups?|touch target)\b/i;
+const CONFLUENCE_UMBRELLA_RE = /\b(phase\s+\d+|website redesign|roadmap)\b/i;
+const CONFLUENCE_SECTION_PROJECT_RE = /\b(browse|profiles?|responsiveness)\b/i;
+const INITIATIVE_RE = /\b(phase|initiative|priority|biggest new feature|goal of|ongoing effort|feature work|started this effort|distinct feature|living document)\b/i;
+const DECISION_TRIGGER_RE = /\b(decided|decision|prefer|better than|instead of|tradeoff|going with|makes more sense|standardize|suggested|opted)\b/i;
+const PROCESS_TRIGGER_RE = /\b(process|workflow|runbook|playbook|checklist|triage|handoff|manual process|review flow|deployment pipeline|daily|weekly|every \d+)\b/i;
+const COLOR_PATTERN_RE = /\b(pink|blue|green)\b/i;
+const COLOR_CONTEXT_RE = /\b(gender|male|female|button|cta|donate|donation|sponsor|money|accent|indicator|card)\b/i;
+const LAYOUT_PATTERN_RE = /\b(vertical|sidebar|left side|tabs across the top|grid|layout)\b/i;
+const LAYOUT_CONTEXT_RE = /\b(browse|chooser|category|categories|navigation|selection|compare|page)\b/i;
+const CLIENT_PATTERN_RE = /\b(client side|clientside|load all|load everything|single api call|on mount|filter locally|sort locally|pagination|prev next|one pet at a time|flip through)\b/i;
 
-## COMPANY CONTEXT
-Company: \${company_name}
-Description: \${company_description}
-Business model: \${business_model}
-Jira prefix: \${project_prefix}
-\${tech_stack_section}
-\${environments_section}
-\${se_notes_section}
+const EXTRACTION_PROMPT = `You are extracting evidence-backed observations and candidate entities from already-structured enterprise source units.
 
-## ENTITY TYPES
-- team_member: An internal team member — someone with a Slack handle, Jira assignment, @company email, or GitHub commits
-- team: A group of people working together (engineering, platform, mobile, etc.)
-- client_company: An external B2B customer/partner organization (company name, not a person)
-- client_person: An external individual customer, end-user, or B2C user segment (individual names from support tickets, user segments like "iOS users")
-- repository: A code repository / deployable codebase
-- integration: A third-party external SaaS/API you pay for and call over the internet (Stripe, Firebase, Sentry, Datadog)
-- infrastructure: A self-hosted/self-managed software component your team runs (Celery worker, Redis cache, Kafka, Nginx)
-- cloud_resource: A managed cloud service instance (AWS RDS instance, S3 bucket, CloudFront distribution)
-- library: A dependency/package/framework with version info (React 18, Django 4.2)
-- database: A data store with schema (PostgreSQL database, MongoDB, Redis-as-datastore)
-- environment: A deployment environment (dev, staging, production)
-- project: A feature initiative or body of work with timeline. MUST include attributes.status (one of: "active", "completed", "proposed") and attributes.documentation_level (one of: "documented" if it has Confluence/wiki docs, "undocumented" if only mentioned in Slack/PRs/code). When a larger project has named sub-features or phases, extract BOTH the parent project AND each sub-feature as separate project entities.
-- ticket: A Jira/issue tracker item — bug, story, task
-- pull_request: A GitHub/GitLab pull request or merge request
-- decision: An architecture decision, technology choice, or design tradeoff — explicit or implicit. Look for: "we decided to...", "we chose X over Y", "the tradeoff was...", "we went with...", alternatives discussed in PR reviews, Slack debates that concluded with a choice. MUST include attributes: attributes.decision_status (one of: "decided", "pending", "superseded", "reversed"), attributes.rationale (why this choice was made, 1-2 sentences), attributes.alternatives_considered (what was rejected, array of strings, can be empty), attributes.scope (what this decision affects, e.g. "authentication", "database", "deployment"). SHOULD include if present: attributes.decided_by (person or team who made the call), attributes.consequences (known tradeoffs or accepted downsides), attributes.superseded_by (name of the decision that replaced this one, if reversed/superseded).
-- process: A repeatable workflow, procedure, or practice the team follows — formal or informal. Look for: "our process for...", "how we do...", runbooks, on-call procedures, release checklists, code review norms, incident response steps, onboarding steps. MUST include attributes: attributes.status (one of: "active", "deprecated", "proposed", "informal"), attributes.documentation_level (one of: "documented", "undocumented" — same logic as project). SHOULD include if present: attributes.owner (person or team responsible), attributes.trigger (what initiates this process, e.g. "new PR", "incident alert", "new hire"), attributes.steps_summary (brief ordered list of key steps).
-- pipeline: A CI/CD pipeline or automation workflow (GitHub Actions ci.yml, deploy.yml). This is an AUTOMATED workflow, not a human process.
-- customer_feedback: A customer service ticket or feedback item from Zendesk/support systems (CFB-xxxx). NOT a Jira ticket.
+CRITICAL:
+- You are NOT creating final canonical truth.
+- Output observations and candidate entities only.
+- Prefer explicit source units and exact evidence over broad summarization.
 
-## SOURCE-BASED CLASSIFICATION
-${CLASSIFICATION_RULES.person_vs_customer}
-${CLASSIFICATION_RULES.b2c_vs_b2b}
-- If a name appears in \${known_team_members}, it is ALWAYS a team_member — never classify them as client_person
-- The company name "\${company_name}" should NEVER be extracted as a standalone entity
-\${known_repos_rule}
+ENTITY RULES:
+- Jira issues are tickets unless the evidence clearly describes a larger multi-ticket initiative.
+- GitHub PRs are pull_request entities, not projects.
+- Customer feedback items are customer_feedback unless multiple units clearly support a feature hypothesis.
+- A project must look like a feature initiative or body of work, not a one-off task, copy update, bug fix, roadmap note, or maintenance item.
+- Decisions are choices, standards, tradeoffs, or conventions.
+- Processes are repeatable human workflows. Pipelines are automated workflows.
 
-## CLIENT HANDLING
-- For B2B (\${business_model}): each client organization is a client_company entity. Individual contacts at that company are client_person entities with attributes._relationships linking to the company.
-- For B2C: group end-users by platform/behavior segment as client_person entities.
-\${known_clients_rule}
+OUTPUT RULES:
+- Return one observation per distinct evidence-backed thing you notice in the provided units.
+- Use the exact unit_id from the prompt.
+- evidence_excerpt must be copied from the unit text, not paraphrased.
+- suggested_type should be the best candidate type for later validation, even if uncertain.
+- If evidence is weak, still return the observation with lower confidence instead of overcommitting to a project.
+`;
 
-## CLASSIFICATION RULES
-- repository vs infrastructure: If it has its own repo/codebase that your team develops, it's a REPOSITORY. If it's a component that runs alongside your code but isn't your codebase (Celery, Redis cache, Kafka), it's INFRASTRUCTURE.
-- integration vs cloud_resource: If it's a third-party SaaS you don't manage (Stripe, Sentry, Firebase), it's INTEGRATION. If it's a cloud provider resource you provision and configure (AWS RDS instance, S3 bucket, ElastiCache), it's CLOUD_RESOURCE.
-- ticket vs pull_request vs customer_feedback: Jira issues/bugs/stories are TICKET. GitHub/GitLab PRs/MRs are PULL_REQUEST. Zendesk/support tickets (CFB-xxxx) are CUSTOMER_FEEDBACK. Never mix them.
-- cloud_resource: Use specific resource names like "AWS RDS (PostgreSQL)" not just "AWS". Each distinct cloud resource is a separate entity.
-- customer_feedback vs ticket: If a ticket comes from customerFeedback source data, it is CUSTOMER_FEEDBACK, not TICKET.
-- CRITICAL: Names appearing in customerFeedback documents (requester names, commenter handles) are END USERS, NOT internal team members. Do NOT create team_member entities for them. For B2C apps, group them by platform/behavior segment as client_person entities instead. Only create team_member entities for names that also appear in Jira assignments, Slack handles, GitHub commits, or @company emails.
-- decision vs project: A decision is a CHOICE (we chose Postgres over MongoDB). A project is a BODY OF WORK (migrate to Postgres). If a document describes both the work and the choice, extract BOTH — the project entity and the decision entity, linked via _relationships.
-- process vs team: A process is HOW something is done (code review process). A team is WHO does it (engineering team). The process entity should link to the team via _relationships.
-- process vs pipeline: A pipeline is an AUTOMATED CI/CD workflow (GitHub Actions). A process is a HUMAN workflow (incident response, release checklist). If it runs in CI, it's a pipeline. If humans follow steps, it's a process.
+interface DeterministicSeedBundle {
+  observations: KB2Observation[];
+  candidates: KB2CandidateEntity[];
+}
 
-## DO NOT EXTRACT
-- Individual UI components — these are part of their REPOSITORY
-- Individual API endpoints — these are part of their REPOSITORY
-- Individual code files — these are part of their REPOSITORY
-- Individual functions or background tasks — these are part of their REPOSITORY or INFRASTRUCTURE
-- Config values, constants, or environment variables — store these as ATTRIBUTES on the parent entity instead
+function buildDeterministicObservation(args: {
+  doc: KB2ParsedDocument;
+  unitId: string;
+  observation_kind: KB2Observation["observation_kind"];
+  label: string;
+  suggested_type: string;
+  reasoning: string;
+  confidence: KB2Observation["confidence"];
+  source_ref: KB2Observation["source_ref"];
+  aliases?: string[];
+  attributes?: Record<string, unknown>;
+}): KB2Observation {
+  return {
+    observation_id: randomUUID(),
+    provider: args.doc.provider,
+    doc_id: args.doc.sourceId,
+    parent_doc_id: args.doc.id,
+    unit_id: args.unitId,
+    observation_kind: args.observation_kind,
+    label: args.label,
+    suggested_type: normalizeEntityType(args.suggested_type),
+    reasoning: args.reasoning,
+    confidence: args.confidence,
+    evidence_excerpt: args.source_ref.excerpt,
+    source_ref: args.source_ref,
+    aliases: args.aliases ?? [],
+    attributes: args.attributes ?? {},
+  };
+}
 
-## MANDATORY EXTRACTION
-- Every GitHub/GitLab PR that appears in the input MUST become a separate pull_request entity
-- Every Jira ticket key MUST become a separate ticket entity
-- Every team member with a @company email, Slack handle, or Jira assignment MUST become a separate team_member entity
-- Every repository name MUST become a separate repository entity
-- NEVER skip an entity because "it was already covered" by another document — each distinct thing is its own entity
+function buildCandidateFromObservation(
+  observation: KB2Observation,
+  origin: string,
+): KB2CandidateEntity {
+  return {
+    candidate_id: randomUUID(),
+    display_name: observation.label,
+    type: normalizeEntityType(observation.suggested_type),
+    confidence: observation.confidence,
+    aliases: [...new Set(observation.aliases ?? [])],
+    attributes: {
+      ...(observation.attributes ?? {}),
+      _candidate_stage: "step3",
+      _candidate_origin: origin,
+      _observation_kind: observation.observation_kind,
+      _reasoning: observation.reasoning,
+    },
+    source_refs: [observation.source_ref],
+    observation_ids: [observation.observation_id],
+  };
+}
 
-## GRANULAR EXTRACTION BY SOURCE TYPE
-Extract every distinct named feature, initiative, phase, or body of work as its own separate project entity. Do NOT roll sub-features into a parent just because they appear in the same document. Deduplication across batches happens in a later pipeline step — your job is to be exhaustive.
+function normalizeOwnerHint(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s*\[[^\]]+\]\s*$/g, "").trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
 
-- Confluence / wiki pages: Documents often describe projects with multiple phases, milestones, or named sub-features. Extract EACH phase or named feature as its own project entity with its own source_documents and evidence. For example, a doc titled "Website Redesign" with sections on "Browse Page", "Shelter Pages", and "Mobile Responsiveness" should produce at least 4 project entities — the parent and each sub-initiative. Capture the detailed attributes (status, what was built, who worked on it) from each section.
+function deriveOwnerHint(doc: KB2ParsedDocument, unit: KB2SourceUnit): string | undefined {
+  const unitMeta = (unit.metadata ?? {}) as Record<string, unknown>;
+  const docMeta = (doc.metadata ?? {}) as Record<string, unknown>;
+  return normalizeOwnerHint(
+    unitMeta.comment_author ??
+    unitMeta.reviewer ??
+    unitMeta.speaker ??
+    unitMeta.author ??
+    docMeta.author,
+  );
+}
 
-- Slack messages: Conversations often casually reference multiple distinct features, projects, or work items in a single thread. Extract every named feature, initiative, or project mentioned — even if it is only a brief reference. A message like "priorities: 1) profiles 2) search 3) partner page" should produce 3 separate project entities, not one.
+function chooseSignalExcerpt(text: string, patterns: RegExp[]): string {
+  const snippets = text
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((snippet) => snippet.trim())
+    .filter((snippet) => snippet.length >= 18);
+  for (const snippet of snippets) {
+    if (patterns.some((pattern) => pattern.test(snippet))) {
+      return snippet;
+    }
+  }
+  return text.trim().slice(0, 280);
+}
 
-- GitHub PRs: PRs reference the feature/project they belong to, dependent work, and linked issues beyond the PR itself. Extract the parent feature or project as a separate entity if it is named. Extract related work items mentioned in PR descriptions or comments.
+function compactSignalLabel(text: string, fallback: string): string {
+  const cleaned = text
+    .replace(/^[-*>#\s]+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.:;,\-]+$/g, "");
+  if (!cleaned) return fallback;
+  return cleaned.split(" ").slice(0, 8).join(" ").trim() || fallback;
+}
 
-- Jira tickets: Tickets may reference parent epics, related projects, blocked features, or upstream/downstream dependencies. Extract each distinct referenced project, epic, or feature as its own entity. The ticket itself is one entity; the project it belongs to is another.
+function toTitleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
-- Customer feedback: Feedback items may reference specific product areas, features, or workflows by name. Extract each named feature or product area as its own entity.
+function formatStructuredLabel(value: string): string {
+  return toTitleCase(value)
+    .replace(/\bCi Cd\b/g, "CI/CD")
+    .replace(/\bApi\b/g, "API")
+    .replace(/\bPr\b/g, "PR");
+}
 
-## CONFIG & CONNECTION ATTRIBUTES
-- When you see config variables (DATABASE_URL, REDIS_URL, STRIPE_SECRET_KEY), store them as attributes on the parent entity
-- Example for a repository: attributes.connection_config: "SQLALCHEMY_DATABASE_URI via env DATABASE_URL"
-- Example for a database: attributes.connection_var: "DATABASE_URL", attributes.used_by: "brewgo-api via SQLAlchemy"
+function normalizeStructuredProjectSurface(text: string): string {
+  return text
+    .replace(/^set up\s+(.+)$/i, (_match, body: string) => `${body} setup`)
+    .replace(/^standardi[sz]e\s+(.+)$/i, (_match, body: string) => `${body} standardization`)
+    .replace(/^(?:[a-z]+\s+)?api response format standardization$/i, "api response standardization")
+    .replace(/^(?:[a-z]+\s+)?api response standardization$/i, "api response standardization")
+    .replace(/^improv(?:e|ing)\s+(.+)$/i, (_match, body: string) => `${body} improvements`)
+    .replace(/^(.+?)\s+to\s+(.+)$/i, (_match, left: string, right: string) => `${left} for ${right}`)
+    .replace(/\s+browser page$/i, " browser")
+    .replace(/\s+page designs?$/i, " page")
+    .replace(/\s+\b(frontend|backend)\s+api\b$/i, "")
+    .replace(/\s+[—-]\s+(backend|frontend|design|layout)\b.*$/i, "")
+    .replace(/\s+\b(frontend|backend|design|layout|feature)\b$/i, "")
+    .replace(/\s+(product spec|spec)$/i, "")
+    .replace(/\s*[—-]\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-## RULES
-- Each entity gets a canonical display_name and optional aliases
-- For each entity, provide a brief reasoning explaining your classification — why this type, why this name, which source evidence
-- For each entity, provide a description — a 1-2 sentence factual summary of what this entity is, what it does, or what it covers. This is NOT the same as reasoning (which explains your classification logic). The description should be useful to someone who has never seen the source documents. Example: for a project entity "Browse Page Redesign", the description might be "Redesign of the pet browse page with responsive grid layout, filter bar, and lazy loading. Completed in Q2 2023 as part of Phase 1 of the website redesign."
-- For source_documents: list ALL documents from the current batch where this entity appears. Each document header has the format: Document N [doc_id="ID" source_type="TYPE"] : TITLE. You MUST copy the exact doc_id and source_type values from the brackets into your response. Also include the title and an exact quote as evidence_excerpt.
-- Provide the entity type from the list above
-- Include key attributes as a JSON object (e.g. role, owner, tech_stack, version)
-- Store relationships in attributes._relationships as [{target, type, evidence}]
-- Use these relationship types: OWNED_BY, DEPENDS_ON, USES, STORES_IN, DEPLOYED_TO, MEMBER_OF, WORKS_ON, LEADS, CONTAINS, RUNS_ON, BUILT_BY, RESOLVES, BLOCKED_BY, COMMUNICATES_VIA, FEEDBACK_FROM, RELATED_TO
-- Pick the most specific type. Use RELATED_TO only when nothing else fits.
-- For decisions: use RELATED_TO to link to the project/repo/infra the decision affects. Example: {target: "pawfinder-api", type: "RELATED_TO", evidence: "Decision affects the API repo"}
-- Rate confidence: high = multiple sources confirm, medium = single clear mention, low = inferred
-- Each evidence_excerpt must be an EXACT QUOTE copied verbatim from the source document — do NOT paraphrase or summarize
-- The excerpt MUST contain the entity name or a direct reference to it — if your excerpt does not clearly mention the entity, extend the quote or pick a better passage
-- Include enough surrounding context for the excerpt to be meaningful on its own (at minimum the full sentence, not a fragment)
-- When a message or paragraph mentions the entity mid-sentence, include the FULL sentence — never truncate before the relevant part
-- If multiple sentences in a document reference the entity, pick the most specific and informative one
-- Extract liberally — do not skip entities. Deduplication happens in a later step.
-- For libraries: include version in attributes if mentioned
-- For tickets: include the ticket key as the display_name
-- For PRs: include the PR number and repo as the display_name`;
+function deriveRepositoryDisplayName(repo: unknown): string | null {
+  if (typeof repo !== "string" || !repo.trim()) return null;
+  const trimmed = repo.trim();
+  const shortName = trimmed.split("/").pop()?.trim() ?? trimmed;
+  return shortName.length > 0 ? shortName : null;
+}
+
+function deriveStructuredProjectLabelFromDoc(doc: KB2ParsedDocument): string | null {
+  let text = doc.title
+    .replace(/^[A-Z]+-\d+:\s*/i, "")
+    .replace(/^[^:]*PR\s*#\d+:\s*/i, "")
+    .replace(/^(build|add|implement|design|create)\s+/i, "")
+    .trim();
+  text = normalizeStructuredProjectSurface(text);
+  if (!text) return null;
+  if (TASK_SHAPED_RE.test(text)) return null;
+  if (!DIRECT_PROJECT_SURFACE_RE.test(text)) return null;
+  return formatStructuredLabel(text);
+}
+
+function deriveStructuredProjectSeedFromConfluenceUnit(
+  doc: KB2ParsedDocument,
+  unit: KB2SourceUnit,
+): { label: string; status?: "active" | "completed" | "proposed"; documentation_level: "documented" } | null {
+  if (doc.provider !== "confluence") return null;
+
+  const unitTitle = unit.title.trim();
+  if (!unitTitle) return null;
+
+  if (/^future considerations$/i.test(unitTitle)) {
+    return {
+      label: `${doc.title} — Future Considerations`,
+      status: "proposed",
+      documentation_level: "documented",
+    };
+  }
+
+  const phaseMatch = unitTitle.match(/^Phase\s+\d+.*?[—-]\s*(.+)$/i);
+  if (!phaseMatch?.[1]) return null;
+
+  let label = normalizeStructuredProjectSurface(phaseMatch[1]);
+  if (!label) return null;
+  if (/\bmobile and polish\b/i.test(label) && /\bmobile responsiveness\b/i.test(unit.text)) {
+    label = "mobile responsiveness";
+  }
+  if (!CONFLUENCE_SECTION_PROJECT_RE.test(label)) return null;
+  if (TASK_SHAPED_RE.test(label)) return null;
+
+  const normalizedText = unit.text.toLowerCase();
+  const status =
+    /\bstatus:\s*complete\b/i.test(unit.text)
+      ? "completed"
+      : /\bstatus:\s*in progress\b/i.test(unit.text)
+        ? "active"
+        : normalizedText.includes("future considerations")
+          ? "proposed"
+          : undefined;
+
+  return {
+    label: formatStructuredLabel(label),
+    status,
+    documentation_level: "documented",
+  };
+}
+
+function buildStructuredProjectCandidateFromDoc(
+  doc: KB2ParsedDocument,
+): KB2CandidateEntity | null {
+  if (!["jira", "github", "confluence"].includes(doc.provider)) {
+    return null;
+  }
+  const label = deriveStructuredProjectLabelFromDoc(doc);
+  if (!label) return null;
+  const firstUnit = getDocSourceUnits(doc)[0] ?? null;
+  const sourceRef = buildEvidenceRefFromDoc(
+    doc,
+    (firstUnit?.text ?? doc.content).slice(0, 280),
+    firstUnit,
+  );
+  const attrs = (doc.metadata ?? {}) as Record<string, unknown>;
+  return {
+    candidate_id: randomUUID(),
+    display_name: label,
+    type: "project",
+    confidence: "medium",
+    aliases: [doc.title].filter((alias) => alias.trim().toLowerCase() !== label.toLowerCase()),
+    attributes: {
+      owner_hint:
+        normalizeOwnerHint(attrs.assignee) ??
+        normalizeOwnerHint(attrs.author) ??
+        normalizeOwnerHint(attrs.source_author),
+      linked_ticket: typeof attrs.key === "string" ? attrs.key : undefined,
+      linked_pr: attrs.prNumber,
+      repo: attrs.repo,
+      _candidate_stage: "step3",
+      _candidate_origin: `structured-${doc.provider}-project-surface`,
+      _observation_kind: "work_item_signal",
+      _reasoning: `Structured ${doc.provider} title describes a feature surface that should remain available as a project candidate before validation.`,
+    },
+    source_refs: [sourceRef],
+    observation_ids: [],
+  };
+}
+
+function buildDeterministicSignalSeedsForUnit(
+  doc: KB2ParsedDocument,
+  unit: KB2SourceUnit,
+): DeterministicSeedBundle {
+  const observations: KB2Observation[] = [];
+  const candidates: KB2CandidateEntity[] = [];
+
+  if (!["confluence", "slack", "github"].includes(doc.provider)) {
+    return { observations, candidates };
+  }
+
+  const text = unit.text.trim();
+  if (text.length < 40) {
+    return { observations, candidates };
+  }
+
+  const ownerHint = deriveOwnerHint(doc, unit);
+  const baseAttributes: Record<string, unknown> = ownerHint ? { owner_hint: ownerHint } : {};
+  const pushSignal = (args: {
+    observation_kind: KB2Observation["observation_kind"];
+    label: string;
+    suggested_type: string;
+    reasoning: string;
+    confidence: KB2Observation["confidence"];
+    excerpt: string;
+    origin: string;
+    promote_candidate?: boolean;
+    attributes?: Record<string, unknown>;
+  }) => {
+    const source_ref = buildEvidenceRefFromDoc(doc, args.excerpt, unit);
+    const observation = buildDeterministicObservation({
+      doc,
+      unitId: unit.unit_id,
+      observation_kind: args.observation_kind,
+      label: args.label,
+      suggested_type: args.suggested_type,
+      reasoning: args.reasoning,
+      confidence: args.confidence,
+      source_ref,
+      attributes: {
+        ...baseAttributes,
+        ...(args.attributes ?? {}),
+      },
+    });
+    observations.push(observation);
+    if (args.promote_candidate) {
+      candidates.push(buildCandidateFromObservation(observation, args.origin));
+    }
+  };
+
+  const confluenceProjectSeed = deriveStructuredProjectSeedFromConfluenceUnit(doc, unit);
+  if (confluenceProjectSeed) {
+    pushSignal({
+      observation_kind: "work_item_signal",
+      label: confluenceProjectSeed.label,
+      suggested_type: "project",
+      reasoning: "A structured Confluence section names a concrete body of work and records its lifecycle, so it should remain available as a documented project candidate.",
+      confidence: confluenceProjectSeed.status ? "high" : "medium",
+      excerpt: unit.text.slice(0, 320),
+      origin: "deterministic-confluence-section-project",
+      promote_candidate: true,
+      attributes: {
+        documentation_level: confluenceProjectSeed.documentation_level,
+        ...(confluenceProjectSeed.status ? { status: confluenceProjectSeed.status } : {}),
+      },
+    });
+  }
+
+  const hasColorPattern = COLOR_PATTERN_RE.test(text) && COLOR_CONTEXT_RE.test(text);
+  if (hasColorPattern) {
+    pushSignal({
+      observation_kind: "pattern_signal",
+      label: "Semantic UI color rule",
+      suggested_type: "decision",
+      reasoning: "This excerpt states a repeated UI color rule, so it should survive as a pattern signal for later convention synthesis.",
+      confidence: "high",
+      excerpt: chooseSignalExcerpt(text, [COLOR_PATTERN_RE, COLOR_CONTEXT_RE]),
+      origin: "deterministic-pattern",
+      promote_candidate: false,
+      attributes: { signal_family: "semantic_color_ui" },
+    });
+  }
+
+  const hasLayoutPattern = LAYOUT_PATTERN_RE.test(text) && LAYOUT_CONTEXT_RE.test(text);
+  if (hasLayoutPattern) {
+    pushSignal({
+      observation_kind: "pattern_signal",
+      label: "Selection layout rule",
+      suggested_type: "decision",
+      reasoning: "This excerpt captures a repeated layout choice for browse or pick-one flows, so it should remain available as a pattern signal.",
+      confidence: DECISION_TRIGGER_RE.test(text) ? "high" : "medium",
+      excerpt: chooseSignalExcerpt(text, [LAYOUT_PATTERN_RE, LAYOUT_CONTEXT_RE]),
+      origin: "deterministic-pattern",
+      promote_candidate: false,
+      attributes: { signal_family: "selection_layout_ui" },
+    });
+  }
+
+  const hasClientPattern = CLIENT_PATTERN_RE.test(text);
+  if (hasClientPattern) {
+    pushSignal({
+      observation_kind: "pattern_signal",
+      label: "Client-side browse loading rule",
+      suggested_type: "decision",
+      reasoning: "This excerpt describes a reusable implementation habit for loading and filtering browse data, so it should remain as a pattern signal.",
+      confidence: "high",
+      excerpt: chooseSignalExcerpt(text, [CLIENT_PATTERN_RE]),
+      origin: "deterministic-pattern",
+      promote_candidate: false,
+      attributes: { signal_family: "client_side_browse" },
+    });
+  }
+
+  if (DECISION_TRIGGER_RE.test(text)) {
+    const excerpt = chooseSignalExcerpt(text, [DECISION_TRIGGER_RE]);
+    pushSignal({
+      observation_kind: "decision_signal",
+      label: compactSignalLabel(excerpt, unit.title),
+      suggested_type: "decision",
+      reasoning: "This excerpt contains an explicit choice, tradeoff, or standard and should remain available as a decision signal before canonicalization.",
+      confidence: hasColorPattern || hasLayoutPattern || hasClientPattern ? "high" : "medium",
+      excerpt,
+      origin: "deterministic-decision",
+      promote_candidate:
+        doc.provider === "slack" ||
+        (doc.provider === "github" && unit.kind === "review_comment") ||
+        (!hasColorPattern && !hasLayoutPattern && !hasClientPattern),
+    });
+  }
+
+  const processText = `${unit.title}\n${text}`;
+  const strongProcessTitle = /\b(process|workflow|runbook|playbook|checklist|onboarding|deployment|sync)\b/i.test(unit.title);
+  if (PROCESS_TRIGGER_RE.test(processText)) {
+    const excerpt = chooseSignalExcerpt(`${unit.title}\n${text}`, [PROCESS_TRIGGER_RE]);
+    pushSignal({
+      observation_kind: "process_signal",
+      label: compactSignalLabel(excerpt, compactSignalLabel(unit.title, "Workflow")),
+      suggested_type: "process",
+      reasoning: "This excerpt describes a repeatable human or delivery workflow, so it should be preserved as a process signal.",
+      confidence: "medium",
+      excerpt,
+      origin: "deterministic-process",
+      promote_candidate: strongProcessTitle || doc.provider !== "confluence",
+    });
+  }
+
+  return { observations, candidates };
+}
+
+function buildDeterministicSeeds(
+  docs: KB2ParsedDocument[],
+): DeterministicSeedBundle {
+  const observations: KB2Observation[] = [];
+  const candidates: KB2CandidateEntity[] = [];
+
+  for (const doc of docs) {
+    const attrs = (doc.metadata ?? {}) as Record<string, any>;
+    const primaryUnit = getDocSourceUnits(doc)[0] ?? null;
+    const primaryRef = buildEvidenceRefFromDoc(
+      doc,
+      (primaryUnit?.text ?? doc.content).slice(0, 240),
+      primaryUnit,
+    );
+    const unitId = primaryUnit?.unit_id ?? `${doc.sourceId}:deterministic`;
+
+    if (doc.provider === "jira" && attrs.key) {
+      const ticketObservation = buildDeterministicObservation({
+        doc,
+        unitId,
+        observation_kind: "candidate_entity",
+        label: String(attrs.key),
+        suggested_type: "ticket",
+        reasoning: `Structured Jira issue ${attrs.key} is a tracked work item and should remain traceable as a ticket candidate.`,
+        confidence: "high",
+        source_ref: primaryRef,
+        aliases: [doc.title].filter((value) => value !== attrs.key),
+        attributes: {
+          summary: doc.title,
+          issue_type: attrs.issue_type ?? attrs.issueType ?? attrs.type,
+          status: attrs.status,
+          assignee: attrs.assignee,
+          reporter: attrs.reporter,
+        },
+      });
+      observations.push(ticketObservation);
+      candidates.push({
+        candidate_id: randomUUID(),
+        display_name: String(attrs.key),
+        type: "ticket",
+        confidence: "high",
+        aliases: [doc.title].filter((value) => value !== attrs.key),
+        attributes: {
+          summary: doc.title,
+          status: attrs.status,
+          priority: attrs.priority,
+          assignee: attrs.assignee,
+          reporter: attrs.reporter,
+          _candidate_stage: "step3",
+          _candidate_origin: "deterministic-jira",
+        },
+        source_refs: [primaryRef],
+        observation_ids: [ticketObservation.observation_id],
+      });
+
+      const projectLabel = deriveStructuredProjectLabelFromDoc(doc);
+      if (projectLabel) {
+        const projectObservation = buildDeterministicObservation({
+          doc,
+          unitId,
+          observation_kind: "work_item_signal",
+          label: projectLabel,
+          suggested_type: "project",
+          reasoning: `Structured Jira work item ${attrs.key} describes a clear feature surface, so it should remain available as a project candidate before later validation and discovery.`,
+          confidence: "medium",
+          source_ref: primaryRef,
+          aliases: [doc.title],
+          attributes: {
+            owner_hint: attrs.assignee,
+            linked_ticket: attrs.key,
+          },
+        });
+        observations.push(projectObservation);
+        candidates.push(buildCandidateFromObservation(projectObservation, "deterministic-feature-surface"));
+      }
+    }
+
+    if (doc.provider === "github" && attrs.prNumber) {
+      const repositoryName = deriveRepositoryDisplayName(attrs.repo);
+      if (repositoryName) {
+        const repoObservation = buildDeterministicObservation({
+          doc,
+          unitId,
+          observation_kind: "candidate_entity",
+          label: repositoryName,
+          suggested_type: "repository",
+          reasoning: `Structured GitHub metadata identifies ${repositoryName} as the repository for PR #${attrs.prNumber}, so it should remain available as a first-class repository entity.`,
+          confidence: "high",
+          source_ref: primaryRef,
+          aliases: typeof attrs.repo === "string" && attrs.repo.trim().toLowerCase() !== repositoryName.toLowerCase()
+            ? [attrs.repo]
+            : [],
+          attributes: {
+            repo: attrs.repo,
+            pr_number: attrs.prNumber,
+            _candidate_stage: "step3",
+            _candidate_origin: "deterministic-github-repository",
+          },
+        });
+        observations.push(repoObservation);
+        candidates.push({
+          candidate_id: randomUUID(),
+          display_name: repositoryName,
+          type: "repository",
+          confidence: "high",
+          aliases: typeof attrs.repo === "string" && attrs.repo.trim().toLowerCase() !== repositoryName.toLowerCase()
+            ? [attrs.repo]
+            : [],
+          attributes: {
+            repo: attrs.repo,
+            _candidate_stage: "step3",
+            _candidate_origin: "deterministic-github-repository",
+          },
+          source_refs: [primaryRef],
+          observation_ids: [repoObservation.observation_id],
+        });
+      }
+
+      const prObservation = buildDeterministicObservation({
+        doc,
+        unitId,
+        observation_kind: "candidate_entity",
+        label: doc.title,
+        suggested_type: "pull_request",
+        reasoning: `Structured GitHub pull request #${attrs.prNumber} should remain available as a first-class pull_request candidate with author and review provenance.`,
+        confidence: "high",
+        source_ref: primaryRef,
+        attributes: {
+          repo: attrs.repo,
+          pr_number: attrs.prNumber,
+          author: attrs.author,
+          reviewers: attrs.reviewers,
+          state: attrs.state,
+          branch: attrs.branch,
+        },
+      });
+      observations.push(prObservation);
+      candidates.push({
+        candidate_id: randomUUID(),
+        display_name: doc.title,
+        type: "pull_request",
+        confidence: "high",
+        aliases: [],
+        attributes: {
+          repo: attrs.repo,
+          pr_number: attrs.prNumber,
+          author: attrs.author,
+          state: attrs.state,
+          branch: attrs.branch,
+          _candidate_stage: "step3",
+          _candidate_origin: "deterministic-github",
+        },
+        source_refs: [primaryRef],
+        observation_ids: [prObservation.observation_id],
+      });
+
+      const projectLabel = deriveStructuredProjectLabelFromDoc(doc);
+      if (projectLabel) {
+        const projectObservation = buildDeterministicObservation({
+          doc,
+          unitId,
+          observation_kind: "work_item_signal",
+          label: projectLabel,
+          suggested_type: "project",
+          reasoning: `Structured pull request #${attrs.prNumber} references a clear feature surface, so it should remain available as a project candidate before validation.`,
+          confidence: "medium",
+          source_ref: primaryRef,
+          aliases: [doc.title],
+          attributes: {
+            owner_hint: attrs.author,
+            linked_pr: attrs.prNumber,
+            repo: attrs.repo,
+          },
+        });
+        observations.push(projectObservation);
+        candidates.push(buildCandidateFromObservation(projectObservation, "deterministic-feature-surface"));
+      }
+    }
+
+    if (doc.provider === "customerFeedback") {
+      const feedbackEntityObservation = buildDeterministicObservation({
+        doc,
+        unitId,
+        observation_kind: "candidate_entity",
+        label: doc.title,
+        suggested_type: "customer_feedback",
+        reasoning: "Structured customer feedback submission should remain traceable as a customer_feedback entity.",
+        confidence: "high",
+        source_ref: primaryRef,
+        attributes: {
+          requester: attrs.name,
+          subject: attrs.subject,
+          date: attrs.date,
+        },
+      });
+      const feedbackSignalObservation = buildDeterministicObservation({
+        doc,
+        unitId,
+        observation_kind: "feedback_signal",
+        label: String(attrs.subject ?? doc.title),
+        suggested_type: "customer_feedback",
+        reasoning: "Customer feedback describing a request, pain point, or desired capability that may contribute to feature discovery.",
+        confidence: "high",
+        source_ref: primaryRef,
+        attributes: {
+          requester: attrs.name,
+          subject: attrs.subject,
+          date: attrs.date,
+          requested_capability_hint: String(attrs.subject ?? doc.title),
+        },
+      });
+      observations.push(feedbackEntityObservation, feedbackSignalObservation);
+      candidates.push({
+        candidate_id: randomUUID(),
+        display_name: doc.title,
+        type: "customer_feedback",
+        confidence: "high",
+        aliases: [],
+        attributes: {
+          requester: attrs.name,
+          subject: attrs.subject,
+          date: attrs.date,
+          _candidate_stage: "step3",
+          _candidate_origin: "deterministic-feedback",
+        },
+        source_refs: [primaryRef],
+        observation_ids: [
+          feedbackEntityObservation.observation_id,
+          feedbackSignalObservation.observation_id,
+        ],
+      });
+    }
+
+    for (const unit of getDocSourceUnits(doc)) {
+      const signalSeeds = buildDeterministicSignalSeedsForUnit(doc, unit);
+      observations.push(...signalSeeds.observations);
+      candidates.push(...signalSeeds.candidates);
+    }
+  }
+
+  return { observations, candidates };
+}
+
+function candidateKey(displayName: string, type: string): string {
+  return `${type.toLowerCase()}::${displayName.toLowerCase().trim()}`;
+}
+
+function upsertCandidate(
+  map: Map<string, KB2CandidateEntity>,
+  candidate: KB2CandidateEntity,
+): void {
+  const key = candidateKey(candidate.display_name, candidate.type);
+  const existing = map.get(key);
+  if (!existing) {
+    map.set(key, candidate);
+    return;
+  }
+  existing.aliases = [...new Set([...existing.aliases, ...candidate.aliases])];
+  existing.observation_ids = [...new Set([...existing.observation_ids, ...candidate.observation_ids])];
+  appendUniqueSourceRefs(existing.source_refs, candidate.source_refs);
+  existing.attributes = {
+    ...existing.attributes,
+    ...candidate.attributes,
+    _candidate_stage: "step3",
+  };
+  if (existing.confidence !== "high" && candidate.confidence === "high") {
+    existing.confidence = "high";
+  }
+}
+
+function getCandidatePromotionDecision(
+  observation: KB2Observation,
+): { promote: boolean; reason: string } {
+  const normalizedType = normalizeEntityType(observation.suggested_type);
+  const sourceType = observation.source_ref.source_type;
+  const text = `${observation.label} ${observation.reasoning} ${observation.evidence_excerpt}`.toLowerCase();
+
+  if (observation.observation_kind === "feedback_signal") {
+    return {
+      promote: false,
+      reason: "Feedback signal kept as observation only; deterministic feedback entities already preserve the submission.",
+    };
+  }
+
+  if (observation.observation_kind === "pattern_signal") {
+    return {
+      promote: false,
+      reason: "Pattern signals stay at the observation layer for later convention synthesis.",
+    };
+  }
+
+  if (normalizedType === "project") {
+    if (
+      sourceType === "confluence" &&
+      CONFLUENCE_UMBRELLA_RE.test(observation.label.toLowerCase()) &&
+      !/\bfuture considerations\b/i.test(observation.label)
+    ) {
+      return {
+        promote: false,
+        reason: "Confluence umbrella phases and redesign headings stay as observation-only context instead of canonical project candidates.",
+      };
+    }
+    if (sourceType === "slack" && PROJECT_FRAGMENT_RE.test(text)) {
+      return {
+        promote: false,
+        reason: "Slack-only fragment like a card, button, endpoint, or test should stay observation-only until broader project evidence appears.",
+      };
+    }
+    if (!DIRECT_PROJECT_SURFACE_RE.test(text) && /\b(improvement|improvements|work)\b/i.test(text)) {
+      return {
+        promote: false,
+        reason: "Generic improvement/work phrasing without a concrete feature surface stays observation-only.",
+      };
+    }
+    if (TASK_SHAPED_RE.test(text)) {
+      return {
+        promote: false,
+        reason: "Weak task-shaped or planning-style project signal kept as observation only until validation.",
+      };
+    }
+    if (sourceType === "slack" || sourceType === "confluence") {
+      const review = projectCandidateReview({
+        node_id: observation.observation_id,
+        run_id: "preview",
+        execution_id: "preview",
+        type: "project",
+        display_name: observation.label,
+        aliases: observation.aliases ?? [],
+        attributes: observation.attributes ?? {},
+        source_refs: [observation.source_ref],
+        truth_status: "inferred",
+        confidence: observation.confidence,
+      });
+      if (!review.keep_as_project) {
+        return {
+          promote: false,
+          reason: `Observation kept below the project layer: ${review.reason}`,
+        };
+      }
+    }
+    if (observation.confidence === "low") {
+      if (DIRECT_PROJECT_SURFACE_RE.test(text)) {
+        return {
+          promote: true,
+          reason: "Low-confidence but clearly feature-shaped project signal promoted to preserve project recall.",
+        };
+      }
+      return {
+        promote: false,
+        reason: "Low-confidence project signal kept as observation only to reduce early ontology inflation.",
+      };
+    }
+    if (!PROJECT_SURFACE_RE.test(text) && !INITIATIVE_RE.test(text) && sourceType !== "confluence") {
+      return {
+        promote: false,
+        reason: "Project signal lacks clear feature or initiative shape, so it stays as observation-only evidence.",
+      };
+    }
+  }
+
+  if (normalizedType === "decision") {
+    if (
+      observation.observation_kind === "decision_signal" ||
+      DECISION_TRIGGER_RE.test(text) ||
+      (COLOR_PATTERN_RE.test(text) && COLOR_CONTEXT_RE.test(text)) ||
+      (LAYOUT_PATTERN_RE.test(text) && LAYOUT_CONTEXT_RE.test(text)) ||
+      CLIENT_PATTERN_RE.test(text)
+    ) {
+      return {
+        promote: true,
+        reason: "Decision-pattern signal is strong enough to become a candidate entity.",
+      };
+    }
+    if (observation.confidence === "low") {
+      return {
+        promote: false,
+        reason: "Weak decision-like signal kept as observation only.",
+      };
+    }
+  }
+
+  if (normalizedType === "process") {
+    if (observation.observation_kind === "process_signal" || PROCESS_TRIGGER_RE.test(text)) {
+      return {
+        promote: true,
+        reason: "Repeatable workflow signal is strong enough to become a process candidate.",
+      };
+    }
+    return {
+      promote: false,
+      reason: "Process-like signal lacked explicit workflow language and stayed observation-only.",
+    };
+  }
+
+  if (observation.observation_kind === "work_item_signal" && normalizedType !== "ticket" && observation.confidence === "low") {
+    return {
+      promote: false,
+      reason: "Low-confidence work-item signal stayed at the observation layer.",
+    };
+  }
+
+  return {
+    promote: true,
+    reason: "Observation has enough shape to be promoted as a candidate entity.",
+  };
+}
 
 export const entityExtractionStep: StepFunction = async (ctx) => {
-  const logger = new PrefixLogger("kb2-entity-extraction");
+  const logger = new PrefixLogger("kb2-entity-extraction-v2");
+  const stepId = "pass1-step-3";
   const tc = getTenantCollections(ctx.companySlug);
   const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
   const snapshot = await tc.input_snapshots.findOne(
@@ -185,87 +886,54 @@ export const entityExtractionStep: StepFunction = async (ctx) => {
   if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
 
   const docs = snapshot.parsed_documents as KB2ParsedDocument[];
+  const allUnits = docs.flatMap((doc) => getDocSourceUnits(doc).map((unit) => ({ doc, unit })));
   const model = getFastModel(ctx.config?.pipeline_settings?.models);
-  const stepId = "pass1-step-3";
+  const modelName = getFastModelName(ctx.config?.pipeline_settings?.models);
 
-  const extractionSettings = ctx.config?.pipeline_settings?.entity_extraction;
-  const DEFAULT_BATCH_SIZE = extractionSettings?.default_batch_size ?? FALLBACK_DEFAULT_BATCH_SIZE;
-  const DENSE_BATCH_SIZE = extractionSettings?.dense_batch_size ?? FALLBACK_DENSE_BATCH_SIZE;
-  const EXCERPT_MAX = extractionSettings?.evidence_excerpt_max_length ?? 300;
-
-  let systemPrompt = ctx.config?.prompts?.entity_extraction?.system || SYSTEM_PROMPT;
-  const p = ctx.config?.profile ?? {} as Record<string, any>;
-  const fillVar = (tpl: string, key: string, val: string) =>
-    val ? tpl.replace(new RegExp(`\\$\\{${key}\\}`, "g"), val) : tpl.replace(new RegExp(`\\$\\{${key}\\}\\n?`, "g"), "");
-  systemPrompt = fillVar(systemPrompt, "company_name", p.company_name ?? "");
-  systemPrompt = fillVar(systemPrompt, "company_description", p.company_context ?? "");
-  systemPrompt = fillVar(systemPrompt, "company_context", p.company_context ?? "");
-  systemPrompt = fillVar(systemPrompt, "business_model", p.business_model ?? "");
-  systemPrompt = fillVar(systemPrompt, "project_prefix", p.project_prefix ?? "");
-  const knownTeam: string[] = p.known_team_members ?? [];
-  systemPrompt = fillVar(systemPrompt, "known_team_members", knownTeam.length ? knownTeam.join(", ") : "none specified");
-  const knownRepos: string[] = p.known_repos ?? [];
-  systemPrompt = fillVar(systemPrompt, "known_repos_rule",
-    knownRepos.length ? `Known repos: ${knownRepos.join(", ")}. Prefer these canonical names over variants.` : "");
-  const knownClients: string[] = p.known_client_companies ?? [];
-  systemPrompt = fillVar(systemPrompt, "known_clients_rule",
-    knownClients.length ? `Known client companies: ${knownClients.join(", ")}. Classify these as client_company.` : "");
-  systemPrompt = fillVar(systemPrompt, "tech_stack_section",
-    p.tech_stack_notes ? `Tech stack notes: ${p.tech_stack_notes}` : "");
-  const envs: string[] = p.deployment_environments ?? [];
-  systemPrompt = fillVar(systemPrompt, "environments_section",
-    envs.length ? `Deployment environments: ${envs.join(", ")}` : "");
-  systemPrompt = fillVar(systemPrompt, "se_notes_section",
-    p.se_notes ? `Additional SE notes: ${p.se_notes}` : "");
-  systemPrompt = systemPrompt.replace(/\$\{classification_rules\}/g,
-    `${CLASSIFICATION_RULES.person_vs_customer}\n${CLASSIFICATION_RULES.b2c_vs_b2b}`);
-
-  const denseDocs = docs.filter((d) => d.provider === "github" || d.provider === "jira");
-  const normalDocs = docs.filter((d) => d.provider !== "github" && d.provider !== "jira");
-  const orderedDocs = [...normalDocs, ...denseDocs];
-
-  type EntityWithMeta = {
-    entity: z.infer<typeof ExtractedEntitySchema>["entities"][number];
-    batchDocs: KB2ParsedDocument[];
-    batchIndex: number;
-    llmCallId: string;
-  };
-  const allEntities: EntityWithMeta[] = [];
+  const observationMap = new Map<string, KB2Observation>();
+  const candidateMap = new Map<string, KB2CandidateEntity>();
+  const suppressedCandidateSamples: Array<{
+    label: string;
+    suggested_type: string;
+    observation_kind: KB2Observation["observation_kind"];
+    reason: string;
+    source_ref: KB2Observation["source_ref"];
+  }> = [];
+  const suppressedCountsByType: Record<string, number> = {};
   let totalLLMCalls = 0;
 
-  let totalBatches = 0;
-  {
-    let idx = 0;
-    while (idx < orderedDocs.length) {
-      const batchSize = orderedDocs[idx].provider === "github" || orderedDocs[idx].provider === "jira" ? DENSE_BATCH_SIZE : DEFAULT_BATCH_SIZE;
-      idx += batchSize;
-      totalBatches++;
+  const deterministicSeeds = buildDeterministicSeeds(docs);
+  for (const observation of deterministicSeeds.observations) {
+    observationMap.set(observation.observation_id, observation);
+  }
+  for (const candidate of deterministicSeeds.candidates) {
+    upsertCandidate(candidateMap, candidate);
+  }
+  for (const doc of docs) {
+    const structuredProjectCandidate = buildStructuredProjectCandidateFromDoc(doc);
+    if (structuredProjectCandidate) {
+      upsertCandidate(candidateMap, structuredProjectCandidate);
     }
   }
 
-  let batchCount = 0;
-  for (let i = 0; i < orderedDocs.length; ) {
-    const batchSize = orderedDocs[i].provider === "github" || orderedDocs[i].provider === "jira" ? DENSE_BATCH_SIZE : DEFAULT_BATCH_SIZE;
-    const batch = orderedDocs.slice(i, i + batchSize);
-    batchCount++;
-    const batchNum = batchCount;
-    const batchCallId = randomUUID();
-    const batchText = batch.map((d, idx) =>
-      `--- Document ${i + idx + 1} [doc_id="${d.sourceId}" source_type="${d.provider}"] : ${d.title} ---\n${d.content}`,
-    ).join("\n\n");
+  const totalBatches = Math.ceil(allUnits.length / UNIT_BATCH_SIZE);
+  await ctx.onProgress(`Extracting candidate observations from ${allUnits.length} source units...`, 5);
 
+  for (let i = 0; i < allUnits.length; i += UNIT_BATCH_SIZE) {
     if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
 
-    const docNames = batch.map((d) => d.title).join(", ");
-    await ctx.onProgress(`LLM call ${batchNum}/${totalBatches}: extracting from ${docNames}`, Math.round((i / orderedDocs.length) * 95));
+    const batch = allUnits.slice(i, i + UNIT_BATCH_SIZE);
+    const unitText = batch.map(({ doc, unit }, index) =>
+      `--- Unit ${index + 1} [unit_id="${unit.unit_id}" doc_id="${doc.sourceId}" provider="${doc.provider}" kind="${unit.kind}"] : ${unit.title} ---\n${unit.text.slice(0, UNIT_TEXT_CAP)}`,
+    ).join("\n\n");
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
       model,
-      system: systemPrompt,
-      prompt: batchText,
-      schema: ExtractedEntitySchema,
+      system: ctx.config?.prompts?.entity_extraction?.system ?? EXTRACTION_PROMPT,
+      prompt: unitText,
+      schema: ObservationSchema,
       logger,
       onUsage: (usage) => { usageData = usage; },
       signal: ctx.signal,
@@ -273,135 +941,216 @@ export const entityExtractionStep: StepFunction = async (ctx) => {
     totalLLMCalls++;
 
     if (usageData) {
-      const durationMs = Date.now() - startMs;
-      const responsePreview = JSON.stringify(result, null, 2);
-      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models), systemPrompt + "\n\n" + batchText, responsePreview, usageData.promptTokens, usageData.completionTokens, cost, durationMs, batchCallId);
+      const cost = calculateCostUsd(modelName, usageData.promptTokens, usageData.completionTokens);
+      await ctx.logLLMCall(
+        stepId,
+        modelName,
+        unitText.slice(0, 10000),
+        JSON.stringify(result, null, 2).slice(0, 10000),
+        usageData.promptTokens,
+        usageData.completionTokens,
+        cost,
+        Date.now() - startMs,
+      );
     }
 
-    const entities = Array.isArray(result?.entities) ? result.entities : [];
-    for (const entity of entities) {
-      if (!entity.display_name) continue;
-      allEntities.push({ entity, batchDocs: batch, batchIndex: batchNum, llmCallId: batchCallId });
-    }
+    const unitMap = new Map(batch.map(({ doc, unit }) => [unit.unit_id, { doc, unit }]));
+    for (const observation of result.observations ?? []) {
+      const matched = unitMap.get(observation.unit_id);
+      if (!matched) continue;
+      const normalizedType = normalizeEntityType(observation.suggested_type);
+      const sourceRef = buildEvidenceRefFromDoc(
+        matched.doc,
+        observation.evidence_excerpt || matched.unit.text,
+        matched.unit,
+      );
+      const observationId = randomUUID();
 
-    const pct = Math.round(((i + batch.length) / orderedDocs.length) * 95);
-    await ctx.onProgress(`Batch ${batchNum}/${totalBatches} done — ${entities.length} entities found (${allEntities.length} total so far) — ${Math.min(i + batchSize, orderedDocs.length)}/${orderedDocs.length} docs`, pct);
-    i += batchSize;
-  }
-
-  const nodeMap = new Map<string, KB2GraphNodeType>();
-  for (const { entity, batchDocs, batchIndex, llmCallId } of allEntities) {
-    const key = entity.display_name.toLowerCase().trim();
-    const normalizedType = normalizeEntityType(entity.type ?? "infrastructure") as any;
-    const aliases = Array.isArray(entity.aliases) ? entity.aliases : [];
-    const rawAttrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
-    const reasoning = (entity as any).reasoning ?? "";
-    const description = (entity as any).description ?? "";
-    const attributes = {
-      ...rawAttrs,
-      ...(reasoning ? { _reasoning: reasoning } : {}),
-      ...(description ? { _description: description } : {}),
-      _batch_index: batchIndex,
-      _llm_call_id: llmCallId,
-    };
-    const confidence = ["high", "medium", "low"].includes(entity.confidence) ? entity.confidence : "medium";
-
-    const sourceDocs = (entity as any).source_documents ?? [];
-    const refs: KB2GraphNodeType["source_refs"] = [];
-
-    const batchDocIndex = new Map<string, KB2ParsedDocument>();
-    for (const d of batchDocs) {
-      batchDocIndex.set(d.sourceId, d);
-      batchDocIndex.set(d.sourceId.toLowerCase(), d);
-    }
-
-    if (sourceDocs.length > 0) {
-      for (const sd of sourceDocs) {
-        const rawExcerpt = typeof sd.evidence_excerpt === "string" ? sd.evidence_excerpt.slice(0, EXCERPT_MAX) : "";
-        const llmDocId = (sd.doc_id ?? "").trim();
-        const llmSourceType = (sd.source_type ?? "").trim();
-        const llmTitle = sd.title ?? "";
-
-        const matchedDoc = batchDocIndex.get(llmDocId)
-          ?? batchDocIndex.get(llmDocId.toLowerCase())
-          ?? null;
-
-        if (matchedDoc) {
-          let section_heading: string | undefined;
-          if (rawExcerpt && matchedDoc.sections?.length) {
-            const el = normalizeForMatch(rawExcerpt);
-            for (const sec of matchedDoc.sections) {
-              if (normalizeForMatch(sec.content).includes(el)) { section_heading = sec.heading; break; }
-            }
-          }
-          refs.push({ source_type: matchedDoc.provider as any, doc_id: matchedDoc.sourceId, title: matchedDoc.title, excerpt: rawExcerpt, section_heading });
-        } else {
-          refs.push({ source_type: (llmSourceType || "unknown") as any, doc_id: llmDocId || llmTitle, title: llmTitle, excerpt: rawExcerpt });
-        }
-      }
-    }
-
-    if (refs.length === 0) {
-      const fallbackDoc = batchDocs[0];
-      if (fallbackDoc) refs.push({ source_type: fallbackDoc.provider as any, doc_id: fallbackDoc.sourceId, title: fallbackDoc.title, excerpt: "" });
-    }
-
-    if (nodeMap.has(key)) {
-      const existing = nodeMap.get(key)!;
-      existing.aliases = [...new Set([...existing.aliases, ...aliases])];
-      const existingDocIds = new Set(existing.source_refs.map((r) => `${r.doc_id}:${r.title}`));
-      for (const r of refs) {
-        if (!existingDocIds.has(`${r.doc_id}:${r.title}`)) existing.source_refs.push(r);
-      }
-      existing.attributes = { ...existing.attributes, ...attributes };
-      if (confidence === "high") existing.confidence = "high";
-    } else {
-      nodeMap.set(key, {
-        node_id: randomUUID(),
-        run_id: ctx.runId,
-        execution_id: ctx.executionId,
-        type: normalizedType,
-        display_name: entity.display_name,
-        aliases,
-        attributes,
-        source_refs: refs,
-        truth_status: "direct",
-        confidence,
+      observationMap.set(observationId, {
+        observation_id: observationId,
+        provider: matched.doc.provider,
+        doc_id: matched.doc.sourceId,
+        parent_doc_id: matched.doc.id,
+        unit_id: matched.unit.unit_id,
+        observation_kind: observation.observation_kind,
+        label: observation.label,
+        suggested_type: normalizedType,
+        reasoning: observation.reasoning,
+        confidence: observation.confidence,
+        evidence_excerpt: sourceRef.excerpt,
+        source_ref: sourceRef,
+        aliases: observation.aliases ?? [],
+        attributes: observation.attributes ?? {},
       });
+
+      const observationRecord = observationMap.get(observationId)!;
+      const promotionDecision = getCandidatePromotionDecision(observationRecord);
+      if (!promotionDecision.promote) {
+        suppressedCountsByType[normalizedType] = (suppressedCountsByType[normalizedType] || 0) + 1;
+        if (suppressedCandidateSamples.length < 20) {
+          suppressedCandidateSamples.push({
+            label: observationRecord.label,
+            suggested_type: normalizedType,
+            observation_kind: observationRecord.observation_kind,
+            reason: promotionDecision.reason,
+            source_ref: observationRecord.source_ref,
+          });
+        }
+        continue;
+      }
+
+      upsertCandidate(
+        candidateMap,
+        buildCandidateFromObservation(observationRecord, "observation"),
+      );
     }
+
+    const pct = Math.round(5 + ((i + batch.length) / Math.max(allUnits.length, 1)) * 85);
+    await ctx.onProgress(
+      `Processed unit batch ${Math.floor(i / UNIT_BATCH_SIZE) + 1}/${totalBatches}`,
+      pct,
+    );
   }
 
-  const nodes = Array.from(nodeMap.values());
-  if (nodes.length > 0) {
-    await tc.graph_nodes.insertMany(nodes);
+  const candidateNodes: KB2GraphNodeType[] = Array.from(candidateMap.values()).map((candidate) => ({
+    node_id: candidate.candidate_id,
+    run_id: ctx.runId,
+    execution_id: ctx.executionId,
+    type: candidate.type,
+    display_name: candidate.display_name,
+    aliases: candidate.aliases,
+    attributes: {
+      ...candidate.attributes,
+      _candidate_entity: true,
+      _validation_status: "pending",
+      _observation_ids: candidate.observation_ids,
+      _evidence_count: candidate.source_refs.length,
+    },
+    source_refs: candidate.source_refs,
+    truth_status: "inferred",
+    confidence: candidate.confidence,
+  }));
+
+  if (candidateNodes.length > 0) {
+    await tc.graph_nodes_pre_resolution.insertMany(candidateNodes as any[]);
   }
 
-  await ctx.onProgress(`Extracted ${nodes.length} unique entities`, 100);
+  const observations = Array.from(observationMap.values());
+  const observationsByKind = observations.reduce<Record<string, number>>((acc, observation) => {
+    acc[observation.observation_kind] = (acc[observation.observation_kind] || 0) + 1;
+    return acc;
+  }, {});
+  const candidatesByType = candidateNodes.reduce<Record<string, number>>((acc, node) => {
+    acc[node.type] = (acc[node.type] || 0) + 1;
+    return acc;
+  }, {});
 
-  const grouped: Record<string, { display_name: string; aliases: string[]; confidence: string; source_count: number; source_refs: typeof nodes[0]["source_refs"]; attributes: Record<string, unknown>; reasoning?: string; description?: string; batch_index?: number; llm_call_id?: string }[]> = {};
-  for (const n of nodes) {
-    if (!grouped[n.type]) grouped[n.type] = [];
-    grouped[n.type].push({
-      display_name: n.display_name,
-      aliases: n.aliases,
-      confidence: n.confidence,
-      source_count: n.source_refs.length,
-      source_refs: n.source_refs,
-      attributes: n.attributes ?? {},
-      reasoning: (n.attributes as any)?._reasoning ?? undefined,
-      description: (n.attributes as any)?._description ?? undefined,
-      batch_index: (n.attributes as any)?._batch_index ?? undefined,
-      llm_call_id: (n.attributes as any)?._llm_call_id ?? undefined,
-    });
-  }
-  for (const type of Object.keys(grouped)) {
-    grouped[type].sort((a, b) => a.display_name.localeCompare(b.display_name));
-  }
+  await ctx.onProgress(`Extracted ${candidateNodes.length} candidate entities from ${observations.length} observations`, 100);
+
+  const prioritizedEntitySamples = [
+    ...candidateNodes.filter((node) => node.type === "project"),
+    ...candidateNodes.filter((node) => node.type === "customer_feedback"),
+    ...candidateNodes.filter((node) => node.type === "decision"),
+    ...candidateNodes,
+  ];
+  const uniqueSampleNodeIds = new Set<string>();
+  const entitySamples = prioritizedEntitySamples
+    .filter((node) => {
+      if (uniqueSampleNodeIds.has(node.node_id)) return false;
+      uniqueSampleNodeIds.add(node.node_id);
+      return true;
+    })
+    .slice(0, 15)
+    .map((node) => ({
+    display_name: node.display_name,
+    type: node.type,
+    confidence: node.confidence,
+    aliases: node.aliases,
+    source_refs: node.source_refs,
+    attributes: node.attributes,
+    }));
+  const signalSamplesByKind = Object.fromEntries(
+    (["decision_signal", "process_signal", "pattern_signal"] as const).map((kind) => [
+      kind,
+      observations
+        .filter((observation) => observation.observation_kind === kind)
+        .slice(0, 6)
+        .map((observation) => ({
+          label: observation.label,
+          suggested_type: observation.suggested_type,
+          confidence: observation.confidence,
+          reasoning: observation.reasoning,
+          source_ref: observation.source_ref,
+        })),
+    ]),
+  );
+  const signalOwnerCountsByKind = Object.fromEntries(
+    (["decision_signal", "process_signal", "pattern_signal"] as const).map((kind) => {
+      const counts = new Map<string, number>();
+      for (const observation of observations.filter((item) => item.observation_kind === kind)) {
+        const ref = observation.source_ref as Record<string, unknown>;
+        const owner =
+          ref.slack_speaker ??
+          ref.comment_author ??
+          ref.pr_author ??
+          ref.source_author ??
+          ref.author;
+        if (typeof owner !== "string" || !owner.trim()) continue;
+        const normalizedOwner = owner.trim();
+        counts.set(normalizedOwner, (counts.get(normalizedOwner) ?? 0) + 1);
+      }
+      return [
+        kind,
+        [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 8)
+          .map(([owner, count]) => ({ owner, count })),
+      ];
+    }),
+  );
 
   return {
-    total_entities: nodes.length,
+    total_observations: observations.length,
+    total_entities: candidateNodes.length,
     llm_calls: totalLLMCalls,
-    entities_by_type: grouped,
+    observations_by_kind: observationsByKind,
+    candidate_entities_by_type: candidatesByType,
+    observation_only_counts_by_type: suppressedCountsByType,
+    suppressed_candidate_samples: suppressedCandidateSamples,
+    signal_samples_by_kind: signalSamplesByKind,
+    signal_owner_counts_by_kind: signalOwnerCountsByKind,
+    observations: observations.map((observation) => ({
+      observation_id: observation.observation_id,
+      provider: observation.provider,
+      doc_id: observation.doc_id,
+      parent_doc_id: observation.parent_doc_id,
+      unit_id: observation.unit_id,
+      label: observation.label,
+      suggested_type: observation.suggested_type,
+      observation_kind: observation.observation_kind,
+      confidence: observation.confidence,
+      evidence_excerpt: observation.evidence_excerpt,
+      source_ref: observation.source_ref,
+      reasoning: observation.reasoning,
+      aliases: observation.aliases,
+      attributes: observation.attributes,
+    })),
+    entities_by_type: Object.fromEntries(
+      Object.entries(candidatesByType).map(([type]) => [
+        type,
+        candidateNodes
+          .filter((node) => node.type === type)
+          .map((node) => ({
+            display_name: node.display_name,
+            aliases: node.aliases,
+            confidence: node.confidence,
+            source_count: node.source_refs.length,
+            source_refs: node.source_refs,
+            attributes: node.attributes,
+          })),
+      ]),
+    ),
+    entity_samples: entitySamples,
+    artifact_version: "pass1_v2",
   };
 };

@@ -1,0 +1,70 @@
+step_id: pass1-step-11
+step_number: 11
+step_name: Graph Re-enrichment
+pass: pass1
+
+purpose: >
+  Wire convention nodes and discovery nodes into the graph so downstream retrieval
+  and generation can traverse from features to conventions to owners and supporting
+  evidence, then run traversal QA on the resulting graph.
+
+inputs:
+  - step 9 canonical entities
+  - step 10 convention entities
+  - step 6 and step 7 graph edges
+
+primary_outputs:
+  - convention wiring edges such as CONTAINS and PROPOSED_BY
+  - feature-level APPLIES_TO edges where justified
+  - discovery-to-entity relationships that make discovered work navigable
+  - traversal QA results over downstream-critical paths
+
+judge_should_look_at:
+  - sampled CONTAINS, PROPOSED_BY, APPLIES_TO, and RELATED_TO edges
+  - whether conventions are actually connected to decisions, owners, and relevant features
+  - whether traversal QA shows usable downstream paths
+
+must_do:
+  - connect each convention to its constituent decisions when they can be resolved
+  - connect each convention to its establishing person or team when supported
+  - connect conventions to real proposed features or projects when they clearly apply
+  - connect discovery nodes to relevant canonical entities
+  - run traversal QA and report which paths still fail
+
+must_not_do:
+  - leave convention nodes isolated
+  - spray APPLIES_TO onto generic speculative ticket noise; target real feature-level entities only
+  - create misleading relationship density without traversal value
+  - maximize APPLIES_TO count at the expense of precision
+  - skip reporting traversal failures
+
+success_signals:
+  - convention nodes are traversable through decisions, owners, and target features
+  - discovery nodes are not floating islands
+  - traversal QA shows downstream-critical paths are possible
+
+failure_signals:
+  - conventions exist but remain mostly disconnected
+  - APPLIES_TO lands on noisy ticket fragments instead of the real feature node
+  - traversal QA still fails for key feature-to-convention-to-owner paths
+
+deterministic_checks:
+  - key: convention_edges_positive
+    description: Convention nodes should gain non-zero wiring edges.
+    mode: gte
+    target: 1
+  - key: applies_to_targets_are_features_or_projects
+    description: APPLIES_TO should primarily target real feature-level entities.
+    mode: eq
+    target: 1
+  - key: traversal_checks_positive
+    description: Step 11 should report traversal QA checks.
+    mode: gte
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - convention and discovery nodes are graph-connected in useful ways
+  block_when:
+    - convention nodes are isolated
+    - feature-to-convention traversal needed downstream is still broken

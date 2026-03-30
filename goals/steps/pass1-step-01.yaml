@@ -1,0 +1,71 @@
+step_id: pass1-step-01
+step_number: 1
+step_name: Input Snapshot
+pass: pass1
+
+purpose: >
+  Parse raw tenant inputs into structured provider-specific documents while preserving
+  the metadata that later steps need for attribution, status inference, retrieval,
+  and traceability.
+
+inputs:
+  - raw Slack, Jira, GitHub, Confluence, and customer feedback sources
+
+primary_outputs:
+  - input snapshot artifact
+  - parsed_documents with stable source identity
+  - provider-specific metadata preserved on each parsed document
+  - source units and anchors preserved for downstream chunking and traceability
+
+judge_should_look_at:
+  - artifact counts by provider
+  - sampled parsed documents from each provider
+  - whether authorship, timestamps, headings, ticket keys, and source ids are preserved
+
+must_do:
+  - preserve stable source ids and document boundaries
+  - preserve provider-specific metadata such as speaker, reviewer, author, status, and headings
+  - keep enough original text for downstream evidence and source_refs
+  - normalize inputs into a consistent document shape without flattening away meaning
+
+must_not_do:
+  - collapse all sources into generic blobs with no provider context
+  - lose authorship or ticket-status metadata that later steps need
+  - silently drop source documents
+  - rewrite source text into summaries at this stage
+
+success_signals:
+  - every major provider appears in the snapshot when present in the raw input
+  - sampled documents retain source-specific metadata
+  - later steps could trace a source_ref back to a concrete parsed document
+
+failure_signals:
+  - missing providers or obviously missing source groups
+  - parsed documents with no stable ids or no useful metadata
+  - provider-specific facts only recoverable from raw text scraping later
+
+deterministic_checks:
+  - key: total_documents_positive
+    description: Parsed document count should be greater than zero.
+    mode: gte
+    target: 1
+  - key: provider_diversity
+    description: At least three distinct providers should usually be present on a non-trivial run.
+    mode: gte
+    target: 3
+  - key: source_units_positive
+    description: Parsed inputs should preserve at least some source units or anchors.
+    mode: gte
+    target: 1
+  - key: sampled_docs_have_source_ids
+    description: Sampled parsed documents should expose a stable source identity.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - parsed documents are present and traceable
+    - key provider metadata survives parsing
+  block_when:
+    - parsed documents are missing or nearly empty
+    - provider-specific metadata needed downstream is absent

@@ -35,7 +35,7 @@ Rules:
 - Mark truth_status as "direct" if stated explicitly, "inferred" if derived from context.
 - List entity names referenced in each claim in entity_refs.`;
 
-  const epExecId = await ctx.getStepExecutionId("pass1", 15);
+  const epExecId = await ctx.getStepExecutionId("pass1", 14);
   const epFilter = epExecId ? { execution_id: epExecId } : { run_id: ctx.runId };
   const entityPages = (await tc.entity_pages.find(epFilter).toArray()) as unknown as KB2EntityPageType[];
   const hpExecId = await ctx.getStepExecutionId("pass1", 15);

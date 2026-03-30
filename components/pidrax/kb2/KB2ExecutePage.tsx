@@ -39,8 +39,11 @@ import {
   Square,
   Circle,
   Loader2,
+  FileText,
+  FolderKanban,
+  TicketCheck,
 } from "lucide-react";
-import { KB2RightPanel } from "./KB2RightPanel";
+import { KB2RightPanel, SourceRef } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
 
 // ---------------------------------------------------------------------------
@@ -79,7 +82,53 @@ interface AgentRun {
   output: string[];
 }
 
-type SidebarTab = "store" | "installed" | "runs";
+interface HowtoSummary {
+  howto_id: string;
+  title: string;
+  ticket_id?: string;
+  project_node_id?: string;
+  created_at?: string;
+  sections?: { section_name: string; content: string }[];
+}
+
+interface TicketSummary {
+  ticket_id: string;
+  title: string;
+  description: string;
+  priority: string;
+  workflow_state: string;
+  source: string;
+  status?: string;
+  source_refs?: SourceRef[];
+}
+
+interface ProjectSummary {
+  node_id: string;
+  display_name: string;
+  type: string;
+  attributes?: Record<string, any>;
+  source_refs?: SourceRef[];
+}
+
+type SidebarTab = "store" | "installed" | "ready" | "runs";
+
+function classifyReadyItemKind(howto: HowtoSummary): "ticket" | "project" | "standalone" {
+  if (howto.ticket_id) return "ticket";
+  if (howto.project_node_id) return "project";
+  return "standalone";
+}
+
+function dedupeSourceRefs(sourceRefs: SourceRef[]): SourceRef[] {
+  const seen = new Set<string>();
+  const out: SourceRef[] = [];
+  for (const ref of sourceRefs) {
+    const key = `${ref.source_type}::${ref.doc_id}::${ref.title}::${ref.excerpt ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Agent catalog
@@ -450,26 +499,66 @@ const INITIAL_CONFIGS: Record<string, Record<string, string>> = {
 };
 
 export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("runs");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("ready");
   const [installedIds, setInstalledIds] = useState<Set<string>>(INITIAL_INSTALLED);
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedStoreAgentId, setSelectedStoreAgentId] = useState<string | null>(null);
   const [selectedInstalledAgentId, setSelectedInstalledAgentId] = useState<string | null>(null);
+  const [selectedReadyHowtoId, setSelectedReadyHowtoId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>("run-fake-1");
 
   const [runs, setRuns] = useState<AgentRun[]>(buildFakeRuns);
   const [agentConfigs, setAgentConfigs] = useState<Record<string, Record<string, string>>>(INITIAL_CONFIGS);
-  const [howtos, setHowtos] = useState<{ howto_id: string; title: string; ticket_id?: string }[]>([]);
+  const [howtos, setHowtos] = useState<HowtoSummary[]>([]);
+  const [tickets, setTickets] = useState<TicketSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
 
   useEffect(() => {
-    fetch(`/api/${companySlug}/kb2?type=howto`)
-      .then((r) => r.json())
-      .then((data) => setHowtos(data.howtos ?? []))
+    Promise.all([
+      fetch(`/api/${companySlug}/kb2?type=howto`).then((r) => r.json()),
+      fetch(`/api/${companySlug}/kb2/tickets`).then((r) => r.json()),
+      fetch(`/api/${companySlug}/kb2?type=graph_nodes`).then((r) => r.json()),
+    ])
+      .then(([howtoData, ticketData, graphData]) => {
+        const nextHowtos = howtoData.howtos ?? [];
+        setHowtos(nextHowtos);
+        setTickets(ticketData.tickets ?? []);
+        setProjects((graphData.nodes ?? []).filter((node: ProjectSummary) => node.type === "project"));
+        setSelectedReadyHowtoId((prev) => prev ?? nextHowtos[0]?.howto_id ?? null);
+      })
       .catch(() => {});
   }, [companySlug]);
 
   const installedAgents = AGENTS.filter((a) => installedIds.has(a.id));
+  const installedExecutionAgents = installedAgents.filter((agent) => agent.category === "engineering");
+  const ticketById = new Map(tickets.map((ticket) => [ticket.ticket_id, ticket]));
+  const projectById = new Map(projects.map((project) => [project.node_id, project]));
+  const selectedReadyHowto = howtos.find((howto) => howto.howto_id === selectedReadyHowtoId) ?? null;
+
+  const getReadyItemSourceRefs = (howto: HowtoSummary | null): SourceRef[] => {
+    if (!howto) return [];
+    const linkedTicket = howto.ticket_id ? ticketById.get(howto.ticket_id) : null;
+    const linkedProject = howto.project_node_id ? projectById.get(howto.project_node_id) : null;
+    const ticketRefs = linkedTicket?.source_refs ?? [];
+    const projectRefs = linkedProject?.source_refs ?? [];
+    return dedupeSourceRefs([...ticketRefs, ...projectRefs]);
+  };
+
+  const openHowtoInAgent = (agentId: string, howto: HowtoSummary) => {
+    const linkedTicket = howto.ticket_id ? ticketById.get(howto.ticket_id) : null;
+    const linkedProject = howto.project_node_id ? projectById.get(howto.project_node_id) : null;
+    const taskTitle = linkedTicket
+      ? linkedTicket.title
+      : linkedProject
+        ? linkedProject.display_name
+        : howto.title;
+    updateConfig(agentId, "task", `Implement: ${taskTitle}`);
+    updateConfig(agentId, "_howtoId", howto.howto_id);
+    if (howto.ticket_id) updateConfig(agentId, "_ticketId", howto.ticket_id);
+    setSelectedInstalledAgentId(agentId);
+    setSidebarTab("installed");
+  };
 
   const handleInstall = (id: string) => {
     setInstalledIds((prev) => {
@@ -595,6 +684,19 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
     return acc;
   }, {} as Record<string, Agent[]>);
 
+  const readyGroups = (["ticket", "project", "standalone"] as const)
+    .map((kind) => ({
+      kind,
+      label:
+        kind === "ticket"
+          ? "Ticket Guides"
+          : kind === "project"
+            ? "Project Guides"
+            : "Other Guides",
+      items: howtos.filter((howto) => classifyReadyItemKind(howto) === kind),
+    }))
+    .filter((group) => group.items.length > 0);
+
   // ---------------------------------------------------------------------------
   // Sidebar content per tab
   // ---------------------------------------------------------------------------
@@ -690,6 +792,67 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
                       </div>
                     </div>
                   </button>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        );
+
+      case "ready":
+        return (
+          <ScrollArea className="flex-1">
+            <div className="p-2">
+              {readyGroups.length === 0 ? (
+                <div className="p-4 text-center">
+                  <FileText className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
+                  <p className="text-xs text-muted-foreground">No ready-to-implement guides yet.</p>
+                  <p className="text-[10px] text-muted-foreground/70 mt-1">
+                    Generate a how-to guide first, then it will show up here.
+                  </p>
+                </div>
+              ) : (
+                readyGroups.map((group) => (
+                  <div key={group.kind} className="mb-3">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-2 mb-1 flex items-center gap-1.5">
+                      <span className="flex-1">{group.label}</span>
+                      <Badge variant="secondary" className="text-[8px] h-3.5 px-1">
+                        {group.items.length}
+                      </Badge>
+                    </p>
+                    <div className="space-y-0.5">
+                      {group.items.map((howto) => {
+                        const linkedTicket = howto.ticket_id ? ticketById.get(howto.ticket_id) : null;
+                        const linkedProject = howto.project_node_id ? projectById.get(howto.project_node_id) : null;
+                        return (
+                          <button
+                            key={howto.howto_id}
+                            onClick={() => setSelectedReadyHowtoId(howto.howto_id)}
+                            className={`w-full text-left px-2 py-2 rounded-md transition-colors ${
+                              selectedReadyHowtoId === howto.howto_id && sidebarTab === "ready"
+                                ? "bg-accent"
+                                : "hover:bg-accent/50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              {group.kind === "ticket" ? (
+                                <TicketCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              ) : group.kind === "project" ? (
+                                <FolderKanban className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              ) : (
+                                <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <span className="text-xs font-medium truncate block">{howto.title}</span>
+                                <p className="text-[10px] text-muted-foreground truncate">
+                                  {linkedTicket?.title ?? linkedProject?.display_name ?? "Standalone how-to"}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -938,6 +1101,143 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
           </ScrollArea>
         );
 
+      case "ready":
+        if (!selectedReadyHowto) {
+          return (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-2">
+                <FileText className="h-10 w-10 mx-auto text-muted-foreground/40" />
+                <p className="text-muted-foreground text-sm">Select a ready-to-implement guide.</p>
+                <p className="text-xs text-muted-foreground/70">
+                  These are the items a user can load into an agent before starting a run.
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <ScrollArea className="h-full">
+            <div className="p-6 max-w-3xl">
+              <div className="flex items-start gap-3 mb-5">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <FileText className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-lg font-semibold">{selectedReadyHowto.title}</h1>
+                  <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                    {selectedReadyHowto.ticket_id && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Ticket
+                      </Badge>
+                    )}
+                    {selectedReadyHowto.project_node_id && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Project
+                      </Badge>
+                    )}
+                    {selectedReadyHowto.created_at && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        {new Date(selectedReadyHowto.created_at).toLocaleDateString()}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {selectedReadyHowto.ticket_id && ticketById.get(selectedReadyHowto.ticket_id) && (
+                <Card className="mb-4">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <TicketCheck className="h-3.5 w-3.5" />
+                      Linked Ticket
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pb-4">
+                    <p className="text-sm font-medium">{ticketById.get(selectedReadyHowto.ticket_id)?.title}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {ticketById.get(selectedReadyHowto.ticket_id)?.source} • {ticketById.get(selectedReadyHowto.ticket_id)?.workflow_state}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {selectedReadyHowto.project_node_id && projectById.get(selectedReadyHowto.project_node_id) && (
+                <Card className="mb-4">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <FolderKanban className="h-3.5 w-3.5" />
+                      Linked Project
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pb-4">
+                    <p className="text-sm font-medium">{projectById.get(selectedReadyHowto.project_node_id)?.display_name}</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card className="mb-6">
+                <CardHeader className="py-3">
+                  <CardTitle className="text-sm">Guide Preview</CardTitle>
+                </CardHeader>
+                <CardContent className="pb-4 space-y-4">
+                  {(selectedReadyHowto.sections ?? []).length > 0 ? (
+                    (selectedReadyHowto.sections ?? []).map((section) => (
+                      <div key={section.section_name}>
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+                          {section.section_name}
+                        </h3>
+                        <div className="text-sm whitespace-pre-wrap rounded-md bg-muted/30 px-3 py-2">
+                          {section.content || "No content yet."}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      This guide exists, but it does not have section content yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-sm">Ready to Execute</CardTitle>
+                </CardHeader>
+                <CardContent className="pb-4">
+                  {installedExecutionAgents.length === 0 ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Install an engineering agent first, then load this guide into it.
+                      </p>
+                      <Button variant="outline" onClick={() => setSidebarTab("store")}>
+                        Open Agent Store
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Load this guide into an installed agent, review the config, then start the run.
+                      </p>
+                      <div className="flex gap-2 flex-wrap">
+                        {installedExecutionAgents.map((agent) => (
+                          <Button
+                            key={agent.id}
+                            variant="outline"
+                            onClick={() => openHowtoInAgent(agent.id, selectedReadyHowto)}
+                          >
+                            <agent.icon className="h-4 w-4 mr-2" />
+                            Load in {agent.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </ScrollArea>
+        );
+
       // --- Runs: terminal output ---
       case "runs":
         if (!selectedRun) {
@@ -985,17 +1285,24 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
       <div className="w-64 shrink-0 border-r flex flex-col">
         <div className="p-2 border-b">
           <Tabs value={sidebarTab} onValueChange={(v) => setSidebarTab(v as SidebarTab)}>
-            <TabsList className="w-full h-8">
-              <TabsTrigger value="store" className="flex-1 text-[10px] h-6 gap-1">
+            <TabsList className="w-full h-auto grid grid-cols-2 gap-1">
+              <TabsTrigger value="store" className="text-[10px] h-7 gap-1">
                 <Store className="h-3 w-3" />Store
               </TabsTrigger>
-              <TabsTrigger value="installed" className="flex-1 text-[10px] h-6 gap-1">
+              <TabsTrigger value="installed" className="text-[10px] h-7 gap-1">
                 <Settings2 className="h-3 w-3" />Installed
                 {installedAgents.length > 0 && (
                   <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{installedAgents.length}</Badge>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="runs" className="flex-1 text-[10px] h-6 gap-1">
+              <TabsTrigger value="ready" className="text-[9px] h-7 gap-1">
+                <Play className="h-3 w-3" />
+                <span className="leading-tight">Ready to implement</span>
+                {howtos.length > 0 && (
+                  <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{howtos.length}</Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="runs" className="text-[10px] h-7 gap-1">
                 <Terminal className="h-3 w-3" />Runs
                 {runs.filter((r) => r.status === "running").length > 0 && (
                   <Badge className="text-[8px] h-3.5 px-1 ml-0.5 bg-yellow-500">{runs.filter((r) => r.status === "running").length}</Badge>
@@ -1017,15 +1324,17 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
             autoContext={
               selectedRun && sidebarTab === "runs"
                 ? { type: "howto" as const, id: selectedRun.agentId, title: `${selectedRun.agentName} Run` }
+                : selectedReadyHowto && sidebarTab === "ready"
+                  ? { type: "howto" as const, id: selectedReadyHowto.howto_id, title: selectedReadyHowto.title }
                 : selectedInstalledAgent && sidebarTab === "installed"
                   ? { type: "howto" as const, id: selectedInstalledAgent.id, title: selectedInstalledAgent.name }
                   : selectedStoreAgent && sidebarTab === "store"
                     ? { type: "howto" as const, id: selectedStoreAgent.id, title: selectedStoreAgent.name }
                     : null
             }
-            sourceRefs={[]}
+            sourceRefs={sidebarTab === "ready" ? getReadyItemSourceRefs(selectedReadyHowto) : []}
             relatedEntityPages={[]}
-            defaultTab="chat"
+            defaultTab={sidebarTab === "ready" ? "sources" : "chat"}
           />
         }
       />

@@ -1,3 +1,4 @@
+import { DEFAULT_PROFILE } from "@/src/entities/models/kb2-company-config";
 import type {
   CompanyConfigData,
   ProfileConfig,
@@ -17,23 +18,14 @@ import type {
   ImpactSettings,
 } from "@/src/entities/models/kb2-company-config";
 
-const defaultProfile: ProfileConfig = {
-  company_context: "",
-  company_name: "",
-  business_model: "b2c",
-  product_type: "web_app",
-  project_prefix: "",
-  acronyms: [],
-  focus_areas: [],
-  exclusions: "",
-};
+const defaultProfile: ProfileConfig = { ...DEFAULT_PROFILE };
 
 const defaultKBStructure: KBStructureConfig = {
   layers: {
     company: {
       enabled: true,
       pages: [
-        { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client_company"], order: 1, enabled: true },
+        { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client_company", "repository", "project", "team", "team_member"], order: 1, enabled: true },
         { category: "org_structure", layer: "company", title: "Org Structure", description: "Teams, reporting, on-call, cross-team dependencies", relatedEntityTypes: ["team", "team_member"], order: 2, enabled: true },
         { category: "onboarding", layer: "company", title: "Onboarding", description: "Getting started guide for new employees", relatedEntityTypes: ["team_member", "team", "repository", "environment"], order: 3, enabled: true },
       ],
@@ -44,13 +36,14 @@ const defaultKBStructure: KBStructureConfig = {
         { category: "architecture_overview", layer: "engineering", title: "System Architecture", description: "High-level architecture, repository map, data flow, infrastructure", relatedEntityTypes: ["repository", "infrastructure", "cloud_resource", "database", "integration", "environment"], order: 1, enabled: true },
         { category: "environments_deploy", layer: "engineering", title: "Environments & Deployment", description: "Dev/staging/prod, CI/CD pipelines, deploy process", relatedEntityTypes: ["environment", "pipeline", "repository"], order: 2, enabled: true },
         { category: "tech_stack", layer: "engineering", title: "Tech Stack & Libraries", description: "Languages, frameworks, key dependencies with versions", relatedEntityTypes: ["library", "repository"], order: 3, enabled: true },
-        { category: "past_documented", layer: "engineering", title: "Past Documented", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project", "team_member"], order: 4, enabled: true },
-        { category: "past_undocumented", layer: "engineering", title: "Past Undocumented", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"], order: 5, enabled: true },
-        { category: "ongoing_documented", layer: "engineering", title: "Ongoing Documented", description: "Active projects with explicit documentation", relatedEntityTypes: ["project", "team_member"], order: 6, enabled: true },
-        { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Undocumented", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"], order: 7, enabled: true },
-        { category: "proposed_projects", layer: "engineering", title: "Proposed", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project", "team_member"], order: 8, enabled: true },
+        { category: "past_documented", layer: "engineering", title: "Past Documented", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project"], order: 4, enabled: true },
+        { category: "past_undocumented", layer: "engineering", title: "Past Undocumented", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project"], order: 5, enabled: true },
+        { category: "ongoing_documented", layer: "engineering", title: "Ongoing Documented", description: "Active projects with explicit documentation", relatedEntityTypes: ["project"], order: 6, enabled: true },
+        { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Undocumented", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project"], order: 7, enabled: true },
+        { category: "proposed_projects", layer: "engineering", title: "Proposed", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project"], order: 8, enabled: true },
         { category: "decisions_tradeoffs", layer: "engineering", title: "Other Decisions & Tradeoffs", description: "Architectural and design decisions not tied to a specific project", relatedEntityTypes: ["decision", "repository", "infrastructure", "database", "environment"], order: 9, enabled: true },
-        { category: "processes", layer: "engineering", title: "Team Processes & Workflows", description: "Repeatable workflows, procedures, and practices", relatedEntityTypes: ["process", "team"], order: 10, enabled: true },
+        { category: "hidden_conventions", layer: "engineering", title: "Hidden Conventions & Patterns", description: "Cross-cutting conventions discovered from repeated behavior and scattered evidence", relatedEntityTypes: ["decision", "team_member"], order: 10, enabled: true },
+        { category: "processes", layer: "engineering", title: "Team Processes & Workflows", description: "Repeatable workflows, procedures, and practices", relatedEntityTypes: ["process", "team"], order: 11, enabled: true },
       ],
     },
     marketing: {
@@ -64,6 +57,20 @@ const defaultKBStructure: KBStructureConfig = {
       pages: [],
     },
   },
+};
+
+const defaultClientTemplate = {
+  description: "Structured reference for an external customer (B2B company or B2C user segment).",
+  includeRules: "Customer relationship, products used, contacts, feedback patterns.",
+  excludeRules: "Internal team details.",
+  enabled: true,
+  sections: [
+    { name: "Identity", intent: "Name, type (B2B company / B2C segment), account tier, platform (iOS/Android/web). Include client_category: user_segment, business, or individual.", requirement: "MUST", maxBullets: 5 },
+    { name: "Products Used", intent: "Which of our products/services they use", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+    { name: "Key Contacts", intent: "Client-side contacts + internal point of contact", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+    { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
+    { name: "Special Arrangements", intent: "Custom configs, SLAs, pricing", requirement: "OPTIONAL", maxBullets: 5 },
+  ],
 };
 
 const defaultEntityTemplates: EntityTemplatesConfig = {
@@ -84,7 +91,7 @@ const defaultEntityTemplates: EntityTemplatesConfig = {
       { name: "Known Limitations", intent: "Tech debt, scaling limits, gotchas", requirement: "OPTIONAL", maxBullets: 5 },
     ],
   },
-  person: {
+  team_member: {
     description: "Entity page for an internal team member.",
     includeRules: "Stable attributes: what they own, what they know, contact info.",
     excludeRules: "Daily standup status, personal info.",
@@ -110,18 +117,10 @@ const defaultEntityTemplates: EntityTemplatesConfig = {
       { name: "Processes", intent: "Team-specific workflows, ceremonies, release process, incident response", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
     ],
   },
-  client: {
-    description: "Structured reference for an external customer (B2B company or B2C user segment).",
-    includeRules: "Customer relationship, products used, contacts, feedback patterns.",
-    excludeRules: "Internal team details.",
-    enabled: true,
-    sections: [
-      { name: "Identity", intent: "Name, type (B2B company / B2C segment), account tier, platform (iOS/Android/web). Include client_category: user_segment, business, or individual.", requirement: "MUST", maxBullets: 5 },
-      { name: "Products Used", intent: "Which of our products/services they use", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
-      { name: "Key Contacts", intent: "Client-side contacts + internal point of contact", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
-      { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
-      { name: "Special Arrangements", intent: "Custom configs, SLAs, pricing", requirement: "OPTIONAL", maxBullets: 5 },
-    ],
+  client_company: { ...defaultClientTemplate },
+  client_person: {
+    ...defaultClientTemplate,
+    description: "Structured reference for an external customer contact or end-user segment.",
   },
   project: {
     description: "Entity page for a project or initiative.",
@@ -348,7 +347,7 @@ For B2C products: group end-users into CLIENT_PERSON entities by platform or beh
 ## GRANULAR EXTRACTION BY SOURCE TYPE
 Extract every distinct named feature, initiative, phase, or body of work as its own separate project entity. Do NOT roll sub-features into a parent just because they appear in the same document. Deduplication across batches happens in a later pipeline step — your job is to be exhaustive.
 
-- Confluence / wiki pages: Documents often describe projects with multiple phases, milestones, or named sub-features. Extract EACH phase or named feature as its own project entity with its own source_documents and evidence. For example, a doc titled "Website Redesign" with sections on "Browse Page", "Shelter Pages", and "Mobile Responsiveness" should produce at least 4 project entities — the parent and each sub-initiative. Capture the detailed attributes (status, what was built, who worked on it) from each section.
+- Confluence / wiki pages: Documents often describe projects with multiple phases, milestones, or named sub-features. Extract EACH phase or named feature as its own project entity with its own source_documents and evidence. For example, a doc titled "Platform Refresh" with sections on "Search Flow", "Account Dashboard", and "Mobile Responsiveness" should produce at least 4 project entities — the parent and each sub-initiative. Capture the detailed attributes (status, what was built, who worked on it) from each section.
 
 - Slack messages: Conversations often casually reference multiple distinct features, projects, or work items in a single thread. Extract every named feature, initiative, or project mentioned — even if it is only a brief reference. A message like "priorities: 1) profiles 2) search 3) partner page" should produce 3 separate project entities, not one.
 
@@ -373,7 +372,7 @@ Extract every distinct named feature, initiative, phase, or body of work as its 
 - Store relationships in attributes._relationships as [{target, type, evidence}]
 - Use these relationship types: OWNED_BY, DEPENDS_ON, USES, STORES_IN, DEPLOYED_TO, MEMBER_OF, WORKS_ON, LEADS, CONTAINS, RUNS_ON, BUILT_BY, RESOLVES, BLOCKED_BY, COMMUNICATES_VIA, FEEDBACK_FROM, RELATED_TO
 - Pick the most specific type. Use RELATED_TO only when nothing else fits.
-- For decisions: use RELATED_TO to link to the project/repo/infra the decision affects. Example: {target: "pawfinder-api", type: "RELATED_TO", evidence: "Decision affects the API repo"}
+- For decisions: use RELATED_TO to link to the project/repo/infra the decision affects. Example: {target: "orders-api", type: "RELATED_TO", evidence: "Decision affects the API repo"}
 - Rate confidence: high = multiple sources confirm, medium = single clear mention, low = inferred
 - Each evidence_excerpt must be an EXACT QUOTE copied verbatim from the source document — do NOT paraphrase or summarize
 - The excerpt MUST contain the entity name or a direct reference to it — if your excerpt does not clearly mention the entity, extend the quote or pick a better passage
@@ -396,7 +395,7 @@ RULES:
 - Be conservative — only merge when confident they are the same entity
 - If you are unsure, set unsure: true and should_merge: false. A human will review.
 - For person entities: if one name is a first-name-only mention and the other is a full name with the same first name, and there is no other person with that first name, merge them.
-- Names like 'matt.chen' and 'Matt Chen' are always the same person — merge them.
+- Names like 'alex.lee' and 'Alex Lee' are always the same person — merge them.
 
 CROSS-TYPE PAIRS:
 - Some pairs may have different entity types (e.g. one is a "project" and the other is a "decision"). Merge if they refer to the same real-world thing extracted under different types.

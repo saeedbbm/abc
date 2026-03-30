@@ -1,0 +1,21 @@
+step_id: pass1-step-07
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Mine repeated evidence that can later surface Kim, Tim, and Matt conventions.
+  - Keep Step 7 as evidence mining, not noisy graph generation.
+
+benchmark_must_fit:
+  - Repeated signals around color, layout, and client-side browse behavior should remain visible as candidate evidence packs.
+  - The step should improve recall for hidden conventions without adding graph junk.
+
+benchmark_watchouts:
+  - Missing repeated Kim evidence because the step is too tied to canonical decision nodes
+  - Producing generic graph edges instead of reusable evidence packs
+
+benchmark_questions:
+  - Would this artifact still let Step 10 discover Kim, Tim, and Matt even if Step 3-5 were conservative?
+  - Does Step 7 preserve multi-source repetition clearly enough for a human judge to inspect it?

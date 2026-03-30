@@ -80,6 +80,25 @@ interface Run {
   error?: string;
 }
 
+interface DemoState {
+  state_id: string;
+  company_slug: string;
+  kind: "baseline" | "workspace" | "checkpoint";
+  label: string;
+  base_run_id: string;
+  parent_state_id?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  archived_at?: string | null;
+}
+
+interface DemoStateInfo {
+  active_state: DemoState | null;
+  states: DemoState[];
+  latest_completed_run_id: string | null;
+}
+
 interface RunStep {
   step_id: string;
   run_id: string;
@@ -274,9 +293,10 @@ function InputDataViewer({ rawInput }: { rawInput: RawInputInfo }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-type AdminSection = "runs" | "context" | "prompts" | "settings" | "templates" | "refinements" | "step_detail" | "input_workbench";
+type AdminSection = "demo_state" | "runs" | "context" | "prompts" | "settings" | "templates" | "refinements" | "step_detail" | "input_workbench";
 
 const ADMIN_NAV: { key: AdminSection; label: string; icon: React.ReactNode }[] = [
+  { key: "demo_state", label: "Demo State", icon: <RefreshCw className="h-4 w-4" /> },
   { key: "runs", label: "Pipeline Runs", icon: <Play className="h-4 w-4" /> },
   { key: "context", label: "SE Context", icon: <Info className="h-4 w-4" /> },
   { key: "prompts", label: "Prompts", icon: <FileText className="h-4 w-4" /> },
@@ -347,6 +367,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   const [pass1Steps, setPass1Steps] = useState<StepDef[]>([]);
   const [pass2Steps, setPass2Steps] = useState<StepDef[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [demoStateInfo, setDemoStateInfo] = useState<DemoStateInfo | null>(null);
+  const [demoStateLoading, setDemoStateLoading] = useState(true);
+  const [demoActionLoading, setDemoActionLoading] = useState<string | null>(null);
+  const [demoLabel, setDemoLabel] = useState("");
+  const [demoSourceRunId, setDemoSourceRunId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runSteps, setRunSteps] = useState<RunStep[]>([]);
   const [selectedExecutions, setSelectedExecutions] = useState<Record<string, string>>({});
@@ -368,6 +393,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   const [kbStructure, setKbStructure] = useState<Record<string, any>>({});
   const [refinements, setRefinements] = useState<Record<string, any>>({});
   const [editingTemplateType, setEditingTemplateType] = useState<string | null>(null);
+  const [judgeRerunning, setJudgeRerunning] = useState(false);
 
   const loadConfig = useCallback(async () => {
     setConfigLoading(true);
@@ -418,6 +444,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   // Pipeline controls
   const [singleStep, setSingleStep] = useState<string>("");
   const [fromStep, setFromStep] = useState<string>("");
+  const [toStep, setToStep] = useState<string>("");
   const [reuseRunId, setReuseRunId] = useState("");
   const [pipelineRunning, setPipelineRunning] = useState(false);
 
@@ -471,12 +498,82 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     }
   }, [companySlug]);
 
+  const fetchDemoState = useCallback(async (showLoading = true) => {
+    if (showLoading) setDemoStateLoading(true);
+    try {
+      const res = await fetch(`/api/${companySlug}/kb2/demo-state`);
+      const data = await res.json();
+      setDemoStateInfo({
+        active_state: data.active_state ?? null,
+        states: data.states ?? [],
+        latest_completed_run_id: data.latest_completed_run_id ?? null,
+      });
+    } catch {
+      setDemoStateInfo({
+        active_state: null,
+        states: [],
+        latest_completed_run_id: null,
+      });
+    } finally {
+      if (showLoading) setDemoStateLoading(false);
+    }
+  }, [companySlug]);
+
   useEffect(() => {
     fetchStepDefs();
     fetchRuns();
+    fetchDemoState();
     fetchRawInput();
     loadConfig();
-  }, [fetchStepDefs, fetchRuns, fetchRawInput, loadConfig]);
+  }, [fetchStepDefs, fetchRuns, fetchDemoState, fetchRawInput, loadConfig]);
+
+  const completedRuns = useMemo(
+    () => runs.filter((run) => run.status === "completed"),
+    [runs],
+  );
+
+  useEffect(() => {
+    if (!demoSourceRunId && demoStateInfo?.latest_completed_run_id) {
+      setDemoSourceRunId(demoStateInfo.latest_completed_run_id);
+    }
+  }, [demoSourceRunId, demoStateInfo?.latest_completed_run_id]);
+
+  const runDemoStateAction = useCallback(
+    async (
+      action: string,
+      body: Record<string, unknown> = {},
+      successMessage = "Demo state updated",
+    ) => {
+      setDemoActionLoading(action);
+      try {
+        const res = await fetch(`/api/${companySlug}/kb2/demo-state`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, ...body }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Action failed");
+        await Promise.all([fetchRuns(), fetchDemoState(false)]);
+        const baseRunId =
+          data.workspace?.base_run_id
+          ?? data.checkpoint?.base_run_id
+          ?? data.baseline?.base_run_id
+          ?? data.state?.base_run_id
+          ?? demoStateInfo?.latest_completed_run_id
+          ?? null;
+        if (baseRunId) setSelectedRunId(baseRunId);
+        if (body.label) setDemoLabel("");
+        toast.success(successMessage);
+        return data;
+      } catch (e: any) {
+        toast.error("Demo state action failed", { description: e?.message ?? "Unknown error" });
+        return null;
+      } finally {
+        setDemoActionLoading(null);
+      }
+    },
+    [companySlug, demoStateInfo?.latest_completed_run_id, fetchDemoState, fetchRuns],
+  );
 
   // -------------------------------------------------------------------------
   // Fetch steps for a selected run
@@ -519,7 +616,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      const activeRunId = (body.reuseRunId as string | undefined) ?? reuseRunId || selectedRunId;
+      const activeRunId = (body.reuseRunId as string | undefined) ?? reuseRunId ?? selectedRunId;
       const pollInterval = setInterval(() => {
         if (activeRunId) {
           fetchRunSteps(activeRunId);
@@ -589,6 +686,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
               if (entry.type === "done" || entry.type === "error") {
                 fetchRuns();
+                fetchDemoState(false);
                 if (entry.runId) {
                   setSelectedRunId(entry.runId);
                   fetchRunSteps(entry.runId);
@@ -617,7 +715,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         abortRef.current = null;
       }
     },
-    [companySlug, pipelineRunning, reuseRunId, selectedRunId, fetchRuns, fetchRunSteps],
+    [companySlug, pipelineRunning, reuseRunId, selectedRunId, fetchRuns, fetchRunSteps, fetchDemoState],
   );
 
   useEffect(() => {
@@ -1570,6 +1668,317 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     );
   };
 
+  const renderDemoState = () => {
+    const activeState = demoStateInfo?.active_state ?? null;
+    const states = demoStateInfo?.states ?? [];
+    const latestCompletedRunId = demoStateInfo?.latest_completed_run_id ?? null;
+    const sourceRunId = demoSourceRunId || latestCompletedRunId || "";
+    const actionBusy = demoActionLoading !== null;
+    const stateCounts = states.reduce(
+      (acc, state) => {
+        acc[state.kind] += 1;
+        return acc;
+      },
+      { baseline: 0, workspace: 0, checkpoint: 0 },
+    );
+    const kindMeta: Record<DemoState["kind"], { label: string; className: string }> = {
+      baseline: {
+        label: "Baseline",
+        className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+      },
+      workspace: {
+        label: "Workspace",
+        className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+      },
+      checkpoint: {
+        label: "Checkpoint",
+        className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+      },
+    };
+
+    return (
+      <ScrollArea className="flex-1">
+        <div className="p-6 max-w-5xl space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Demo State</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Manage baselines, workspaces, checkpoints, and reset directly from the admin UI.
+            </p>
+          </div>
+
+          {demoStateLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading demo state…
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <div className="text-sm font-semibold">Active State</div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    {activeState ? (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={kindMeta[activeState.kind].className}>
+                            {kindMeta[activeState.kind].label}
+                          </Badge>
+                          <Badge variant="secondary">Active</Badge>
+                        </div>
+                        <div className="font-medium">{activeState.label}</div>
+                        <div className="text-muted-foreground">
+                          Base run: <span className="font-mono">{activeState.base_run_id.slice(0, 8)}</span>
+                        </div>
+                        <div className="text-muted-foreground">
+                          Updated: {fmtDate(activeState.updated_at)}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">No active demo state found.</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <div className="text-sm font-semibold">Source Run</div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    <div className="text-muted-foreground">
+                      Choose which completed run to publish or clone into a fresh workspace.
+                    </div>
+                    {completedRuns.length === 0 ? (
+                      <div className="h-9 px-3 rounded-md border flex items-center text-muted-foreground">
+                        No completed runs available
+                      </div>
+                    ) : (
+                      <Select value={sourceRunId} onValueChange={setDemoSourceRunId}>
+                        <SelectTrigger className="h-9 text-xs">
+                          <SelectValue placeholder="Select source run" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {completedRuns.map((run) => (
+                            <SelectItem key={run.run_id} value={run.run_id}>
+                              {run.title ?? "Untitled Run"} [{run.run_id.slice(0, 8)}]
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <div className="text-muted-foreground">
+                      Latest completed:{" "}
+                      {latestCompletedRunId ? (
+                        <span className="font-mono">{latestCompletedRunId.slice(0, 8)}</span>
+                      ) : (
+                        "none"
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <div className="text-sm font-semibold">State Counts</div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span>Baselines</span>
+                      <Badge variant="secondary">{stateCounts.baseline}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Workspaces</span>
+                      <Badge variant="secondary">{stateCounts.workspace}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Checkpoints</span>
+                      <Badge variant="secondary">{stateCounts.checkpoint}</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">Controls</div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        KB edits, tickets, how-to guides, and verification changes will follow the active demo state.
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() => fetchDemoState()}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="demo-state-label">Optional Label</Label>
+                    <input
+                      id="demo-state-label"
+                      value={demoLabel}
+                      onChange={(e) => setDemoLabel(e.target.value)}
+                      placeholder="Used for new workspace, checkpoint, or reset names"
+                      className="w-full h-9 rounded-md border bg-background px-3 text-xs"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={actionBusy || !sourceRunId}
+                      onClick={() => runDemoStateAction(
+                        "publish_baseline",
+                        { run_id: sourceRunId },
+                        "Baseline published",
+                      )}
+                    >
+                      {demoActionLoading === "publish_baseline" ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Publish Baseline
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      disabled={actionBusy || !sourceRunId}
+                      onClick={() => runDemoStateAction(
+                        "start_workspace",
+                        {
+                          run_id: sourceRunId,
+                          label: demoLabel.trim() || undefined,
+                        },
+                        "Fresh workspace started",
+                      )}
+                    >
+                      {demoActionLoading === "start_workspace" ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Start Workspace
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={actionBusy || !activeState}
+                      onClick={() => runDemoStateAction(
+                        "save_checkpoint",
+                        { label: demoLabel.trim() || undefined },
+                        "Checkpoint saved",
+                      )}
+                    >
+                      {demoActionLoading === "save_checkpoint" ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Save Checkpoint
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={actionBusy || !activeState}
+                      onClick={() => runDemoStateAction(
+                        "reset_workspace",
+                        { label: demoLabel.trim() || undefined },
+                        "Workspace reset to baseline",
+                      )}
+                    >
+                      {demoActionLoading === "reset_workspace" ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Reset Workspace
+                    </Button>
+                  </div>
+
+                  <div className="text-[11px] text-muted-foreground">
+                    Completed pipeline runs auto-publish reusable baselines. Reset creates a fresh workspace from the current baseline without rerunning the pipeline.
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="text-sm font-semibold">Available States</div>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {states.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No demo states available yet.</p>
+                  ) : (
+                    states.map((state) => (
+                      <div
+                        key={state.state_id}
+                        className={`rounded-md border p-3 text-xs ${
+                          state.is_active ? "border-primary bg-accent/30" : ""
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge className={kindMeta[state.kind].className}>
+                                {kindMeta[state.kind].label}
+                              </Badge>
+                              {state.is_active && <Badge variant="secondary">Active</Badge>}
+                              {state.archived_at && <Badge variant="outline">Archived</Badge>}
+                            </div>
+                            <div className="font-medium truncate">{state.label}</div>
+                            <div className="text-muted-foreground">
+                              Base run: <span className="font-mono">{state.base_run_id.slice(0, 8)}</span>
+                            </div>
+                            <div className="text-muted-foreground">
+                              Updated: {fmtDate(state.updated_at)}
+                            </div>
+                            <div className="text-muted-foreground font-mono opacity-70">
+                              State ID: {state.state_id.slice(0, 8)}
+                            </div>
+                          </div>
+
+                          {!state.is_active && !state.archived_at ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={actionBusy}
+                              onClick={() => runDemoStateAction(
+                                "activate_state",
+                                { state_id: state.state_id },
+                                `Activated ${state.label}`,
+                              )}
+                            >
+                              {demoActionLoading === "activate_state" ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              Activate
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      </ScrollArea>
+    );
+  };
+
   return (
     <SplitLayout
       autoSaveId="admin"
@@ -1662,7 +2071,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       </div>
 
       {/* Admin section content */}
-      {activeSection === "context" ? (
+      {activeSection === "demo_state" ? (
+        renderDemoState()
+      ) : activeSection === "context" ? (
         <ScrollArea className="flex-1">{renderSEContext()}</ScrollArea>
       ) : activeSection === "prompts" ? (
         <ScrollArea className="flex-1">{renderPromptsEditor()}</ScrollArea>
@@ -2418,8 +2829,43 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                     );
                   }
 
+                  const rerunJudge = async () => {
+                    if (!runStep.execution_id || judgeRerunning) return;
+                    setJudgeRerunning(true);
+                    try {
+                      const res = await fetch(`/api/${companySlug}/kb2/judge`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ executionId: runStep.execution_id }),
+                      });
+                      const data = await res.json();
+                      if (data.judge_result) {
+                        setRunSteps((prev) => prev.map((s) =>
+                          s.execution_id === runStep.execution_id ? { ...s, judge_result: data.judge_result } : s,
+                        ));
+                        toast.success("Judge evaluation complete");
+                      } else {
+                        toast.error(data.error ?? "Judge rerun failed");
+                      }
+                    } catch (err: any) {
+                      toast.error(`Judge rerun failed: ${err.message}`);
+                    } finally {
+                      setJudgeRerunning(false);
+                    }
+                  };
+
                   const jr = runStep.judge_result;
-                  if (!jr) return <p className="text-xs text-muted-foreground">No judge result available. This step may not have an LLM-as-Judge evaluation, or it hasn&apos;t been run yet.</p>;
+                  if (!jr) return (
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">No judge result available for this step.</p>
+                      {runStep.artifact && (
+                        <Button size="sm" onClick={rerunJudge} disabled={judgeRerunning || pipelineRunning}>
+                          {judgeRerunning ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1" />}
+                          Run Judge
+                        </Button>
+                      )}
+                    </div>
+                  );
 
                   return (
                     <div className="space-y-4">
@@ -2431,6 +2877,10 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                           {jr.pass ? "PASS" : "FAIL"}
                         </Badge>
                         {jr.evaluated_at && <span className="text-[10px] text-muted-foreground">{new Date(jr.evaluated_at).toLocaleString()}</span>}
+                        <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" onClick={rerunJudge} disabled={judgeRerunning || pipelineRunning}>
+                          {judgeRerunning ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                          Rerun Judge
+                        </Button>
                       </div>
 
                       {jr.llm_judge_error && (
@@ -2654,6 +3104,14 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
           >
             <Play className="h-3.5 w-3.5 mr-1" /> Run All
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => runPipeline({ pass: "pass1", toStep: 11 })}
+            disabled={pipelineRunning}
+          >
+            <Play className="h-3.5 w-3.5 mr-1" /> Run P1 Steps 1–11
+          </Button>
 
           <div className="w-px h-6 bg-border" />
 
@@ -2722,6 +3180,68 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
               }}
             >
               Run From Here
+            </Button>
+          </div>
+
+          <div className="w-px h-6 bg-border" />
+
+          {/* Run range (from → to) */}
+          <div className="flex items-end gap-1">
+            <div className="space-y-1">
+              <label className="text-[10px] text-muted-foreground">
+                Run Range
+              </label>
+              <div className="flex items-center gap-1">
+                <Select value={fromStep} onValueChange={setFromStep}>
+                  <SelectTrigger className="w-36 h-8 text-xs">
+                    <SelectValue placeholder="From…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allSteps.map((s) => (
+                      <SelectItem
+                        key={`range-from-${s.pass}-${s.index}`}
+                        value={`${s.pass}-${s.index}`}
+                      >
+                        <span className="text-muted-foreground mr-1">
+                          {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
+                        </span>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-xs text-muted-foreground">→</span>
+                <Select value={toStep} onValueChange={setToStep}>
+                  <SelectTrigger className="w-36 h-8 text-xs">
+                    <SelectValue placeholder="To…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allSteps.map((s) => (
+                      <SelectItem
+                        key={`range-to-${s.pass}-${s.index}`}
+                        value={`${s.pass}-${s.index}`}
+                      >
+                        <span className="text-muted-foreground mr-1">
+                          {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
+                        </span>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!fromStep || !toStep || pipelineRunning}
+              onClick={() => {
+                const [fPass, fIdx] = fromStep.split("-");
+                const [, tIdx] = toStep.split("-");
+                runPipeline({ pass: fPass, fromStep: Number(fIdx), toStep: Number(tIdx) });
+              }}
+            >
+              Run Range
             </Button>
           </div>
 
@@ -2993,6 +3513,10 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                             key={step.step_id}
                             step={step}
                             companySlug={companySlug}
+                            onSelectSources={(refs, runId) => {
+                              setRightPanelSources(refs);
+                              setRightPanelRunId(runId);
+                            }}
                             onRerun={() => {
                               runPipeline({ pass: step.pass, step: step.step_number, reuseRunId: step.run_id });
                             }}
@@ -3018,6 +3542,10 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                             key={step.step_id}
                             step={step}
                             companySlug={companySlug}
+                            onSelectSources={(refs, runId) => {
+                              setRightPanelSources(refs);
+                              setRightPanelRunId(runId);
+                            }}
                             onRerun={() => {
                               runPipeline({ pass: step.pass, step: step.step_number, reuseRunId: step.run_id });
                             }}
@@ -3186,13 +3714,54 @@ function EmbedDocumentsViewer({ artifact }: {
     chunk_size: number;
     chunk_overlap: number;
     qdrant_collection: string;
-    by_provider: Record<string, { docs: number; chunks: number }>;
-    by_document: { title: string; provider: string; contentLen: number; chunks: number }[];
+    by_provider: Record<string, { docs?: number; chunks?: number; units?: number; spans?: number }>;
+    by_document: Array<{
+      title?: string;
+      provider?: string;
+      contentLen?: number;
+      content_length?: number;
+      content_len?: number;
+      chunks?: number;
+      source_units?: number;
+      sourceUnits?: number;
+      spans?: number;
+    }>;
   };
 }) {
   const [filterProvider, setFilterProvider] = useState<string>("all");
-  const providers = Object.keys(artifact.by_provider).sort();
-  const docs = artifact.by_document ?? [];
+  const providers = Object.keys(artifact.by_provider ?? {}).sort();
+  const docs = (artifact.by_document ?? []).map((doc) => {
+    const rawContentLen = doc.contentLen ?? doc.content_length ?? doc.content_len;
+    const rawSourceUnits = doc.source_units ?? doc.sourceUnits;
+    const rawChunkCount = doc.chunks ?? doc.spans;
+
+    const contentLen = typeof rawContentLen === "number"
+      ? rawContentLen
+      : typeof rawContentLen === "string" && rawContentLen.trim().length > 0
+        ? Number(rawContentLen)
+        : null;
+    const sourceUnits = typeof rawSourceUnits === "number"
+      ? rawSourceUnits
+      : typeof rawSourceUnits === "string" && rawSourceUnits.trim().length > 0
+        ? Number(rawSourceUnits)
+        : 0;
+    const chunkCount = typeof rawChunkCount === "number"
+      ? rawChunkCount
+      : typeof rawChunkCount === "string" && rawChunkCount.trim().length > 0
+        ? Number(rawChunkCount)
+        : 0;
+
+    return {
+      title: doc.title ?? "Untitled",
+      provider: doc.provider ?? "unknown",
+      contentLen: Number.isFinite(contentLen as number) ? contentLen : null,
+      sourceUnits: Number.isFinite(sourceUnits) ? sourceUnits : 0,
+      chunkCount: Number.isFinite(chunkCount) ? chunkCount : 0,
+    };
+  });
+  const hasContentLengths = docs.some((doc) => doc.contentLen != null);
+  const metricLabel = hasContentLengths ? "Content (chars)" : "Source Units";
+  const chunkLabel = hasContentLengths ? "Chunks" : "Evidence Spans";
   const filtered = filterProvider === "all" ? docs : docs.filter((d) => d.provider === filterProvider);
 
   const EMBED_PROVIDER_COLORS: Record<string, string> = {
@@ -3292,26 +3861,40 @@ function EmbedDocumentsViewer({ artifact }: {
                 <tr className="bg-muted/50">
                   <th className="text-left px-3 py-1.5 font-medium">Title</th>
                   <th className="text-left px-3 py-1.5 font-medium">Provider</th>
-                  <th className="text-right px-3 py-1.5 font-medium">Content (chars)</th>
-                  <th className="text-right px-3 py-1.5 font-medium">Chunks</th>
+                  <th className="text-right px-3 py-1.5 font-medium">{metricLabel}</th>
+                  <th className="text-right px-3 py-1.5 font-medium">{chunkLabel}</th>
                   <th className="text-left px-3 py-1.5 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((doc, i) => {
-                  const expectedChunks = Math.max(1, Math.ceil((doc.contentLen - artifact.chunk_overlap) / (artifact.chunk_size - artifact.chunk_overlap)));
-                  const chunkMismatch = Math.abs(doc.chunks - expectedChunks) > 1;
+                  const canEstimateChunks =
+                    doc.contentLen != null &&
+                    artifact.chunk_size > artifact.chunk_overlap;
+                  const expectedChunks = canEstimateChunks
+                    ? Math.max(
+                        1,
+                        Math.ceil((doc.contentLen - artifact.chunk_overlap) / (artifact.chunk_size - artifact.chunk_overlap)),
+                      )
+                    : null;
+                  const chunkMismatch =
+                    expectedChunks != null && Math.abs(doc.chunkCount - expectedChunks) > 1;
+                  const primaryMetric = hasContentLengths
+                    ? doc.contentLen ?? 0
+                    : doc.sourceUnits;
                   return (
                     <tr key={i} className="border-t">
                       <td className="px-3 py-1.5 max-w-[300px] truncate">{doc.title}</td>
                       <td className="px-3 py-1.5">
                         <Badge className={`text-[10px] ${EMBED_PROVIDER_COLORS[doc.provider] ?? "bg-gray-100 text-gray-800"}`}>{doc.provider}</Badge>
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono">{doc.contentLen.toLocaleString()}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{doc.chunks}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{primaryMetric.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{doc.chunkCount.toLocaleString()}</td>
                       <td className="px-3 py-1.5">
-                        {doc.chunks === 0 ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">0 chunks!</span>
+                        {doc.chunkCount === 0 ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                            {hasContentLengths ? "0 chunks!" : "0 spans!"}
+                          </span>
                         ) : chunkMismatch ? (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">expected ~{expectedChunks}</span>
                         ) : (
@@ -4343,6 +4926,37 @@ const PROVIDER_ICONS: Record<string, string> = {
 // Extraction Validation artifact viewer
 // ---------------------------------------------------------------------------
 
+type ExtractionValidationRecoveryDetail = {
+  display_name: string;
+  type?: string;
+  recovery_source?: string;
+  reason?: string;
+};
+
+type ExtractionValidationRecoveryDetails =
+  | ExtractionValidationRecoveryDetail[]
+  | {
+      deterministic_actions?: Array<Record<string, unknown>>;
+      kept?: Array<Record<string, unknown>>;
+      rejected?: Array<Record<string, unknown>>;
+      retyped?: Array<Record<string, unknown>>;
+    };
+
+function normalizeExtractionValidationRecoveryDetails(
+  recoveryDetails: ExtractionValidationRecoveryDetails | undefined,
+): ExtractionValidationRecoveryDetail[] {
+  if (!Array.isArray(recoveryDetails)) return [];
+  return recoveryDetails
+    .filter((detail): detail is ExtractionValidationRecoveryDetail => Boolean(detail && typeof detail === "object"))
+    .map((detail) => ({
+      display_name: String(detail.display_name ?? "").trim(),
+      type: detail.type ? String(detail.type) : undefined,
+      recovery_source: detail.recovery_source ? String(detail.recovery_source) : undefined,
+      reason: detail.reason ? String(detail.reason) : undefined,
+    }))
+    .filter((detail) => detail.display_name.length > 0);
+}
+
 function isExtractionValidation(step: RunStep, artifact: unknown): boolean {
   if (!artifact || typeof artifact !== "object") return false;
   return (
@@ -4361,7 +4975,7 @@ function ExtractionValidationViewer({ artifact, companySlug, runId, executionId,
     opus_retyped?: number;
     final_count: number;
     source_coverage?: { total_documents: number; documents_with_zero_entities: string[] };
-    recovery_details: { display_name: string; type: string; recovery_source: string; reason: string }[];
+    recovery_details: ExtractionValidationRecoveryDetails;
     attribute_validation?: {
       total_checked: number;
       backfilled: number;
@@ -4398,6 +5012,10 @@ function ExtractionValidationViewer({ artifact, companySlug, runId, executionId,
   const gap = artifact.final_count - artifact.original_count;
   const av = artifact.attribute_validation;
   const totalCandidates = artifact.programmatic_candidates + artifact.crossllm_candidates;
+  const recoveryDetails = useMemo(
+    () => normalizeExtractionValidationRecoveryDetails(artifact.recovery_details),
+    [artifact.recovery_details],
+  );
 
   // --- Fetch graph nodes ---
   useEffect(() => {
@@ -4589,10 +5207,10 @@ function ExtractionValidationViewer({ artifact, companySlug, runId, executionId,
       }
     }
     const recoveredNames = new Set<string>(
-      artifact.recovery_details.map((r) => r.display_name.toLowerCase().trim()),
+      recoveryDetails.map((r) => r.display_name.toLowerCase().trim()),
     );
     return { issuesByName, recoveredNames };
-  }, [av?.issues, artifact.recovery_details]);
+  }, [av?.issues, recoveryDetails]);
 
   // --- Build type counts and filtered list ---
   const typeCounts = useMemo(() => {
@@ -4946,7 +5564,7 @@ function ExtractionValidationViewer({ artifact, companySlug, runId, executionId,
                                 {/* Recovery info for +NEW entities */}
                                 {isRecovered && (() => {
                                   const recoverySource = (node.attributes as any)?._recovery_source;
-                                  const recoveryDetail = artifact.recovery_details.find((r) => r.display_name.toLowerCase().trim() === nameKey);
+                                  const recoveryDetail = recoveryDetails.find((r) => r.display_name.toLowerCase().trim() === nameKey);
                                   return (
                                     <div className="flex items-start gap-2 text-xs bg-emerald-50 dark:bg-emerald-950/30 rounded px-3 py-2 border border-emerald-200 dark:border-emerald-800">
                                       <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 shrink-0">+NEW</span>
@@ -6415,12 +7033,14 @@ function VerifyCardsViewer({ artifact }: {
 function StepCard({
   step,
   companySlug,
+  onSelectSources,
   onRerun,
   pipelineRunning,
   executionCount,
 }: {
   step: RunStep;
   companySlug: string;
+  onSelectSources?: (refs: any[], runId: string) => void;
   onRerun?: () => void;
   pipelineRunning?: boolean;
   executionCount?: number;
@@ -6628,17 +7248,17 @@ function StepCard({
 
           {/* Entity extraction results */}
           {!isInputSnapshot && isEntityExtraction(step, step.artifact) && (
-            <EntityExtractionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+            <EntityExtractionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => onSelectSources?.(refs, step.run_id)} />
           )}
 
           {/* Extraction validation results */}
           {!isInputSnapshot && isExtractionValidation(step, step.artifact) && (
-            <ExtractionValidationViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+            <ExtractionValidationViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} stepId={step.step_id} onSelectSources={(refs) => onSelectSources?.(refs, step.run_id)} />
           )}
 
           {/* Entity resolution results */}
           {!isInputSnapshot && isEntityResolution(step, step.artifact) && (
-            <EntityResolutionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+            <EntityResolutionViewer artifact={step.artifact as any} companySlug={companySlug} runId={step.run_id} executionId={step.execution_id} onSelectSources={(refs) => onSelectSources?.(refs, step.run_id)} />
           )}
 
           {/* Graph enrichment results */}
@@ -6653,7 +7273,7 @@ function StepCard({
 
           {/* Discovery results */}
           {!isInputSnapshot && isDiscovery(step, step.artifact) && (
-            <DiscoveryViewer artifact={step.artifact as any} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(step.run_id); }} />
+            <DiscoveryViewer artifact={step.artifact as any} onSelectSources={(refs) => onSelectSources?.(refs, step.run_id)} />
           )}
 
           {/* Attribute Completion results */}

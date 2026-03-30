@@ -1,0 +1,70 @@
+step_id: pass1-step-03
+step_number: 3
+step_name: Entity Extraction
+pass: pass1
+
+purpose: >
+  Extract evidence-backed candidate entities from parsed documents with useful typing,
+  source references, and provenance, while leaving full canonical deduplication to
+  later steps.
+
+inputs:
+  - step 1 parsed documents
+
+primary_outputs:
+  - observations
+  - candidate graph nodes
+  - source_refs for each extracted entity
+  - typed candidates covering projects, decisions, processes, people, tickets, and other artifacts
+
+judge_should_look_at:
+  - entity counts by type
+  - sampled extracted entities and their source_refs
+  - whether source_refs preserve provenance such as speaker or reviewer role
+
+must_do:
+  - extract observations and candidate entities with explicit evidence
+  - choose entity types using clear ontology boundaries
+  - attach meaningful source_refs rather than bare names
+  - preserve aliases and near-duplicate variants without aggressive canonical merging
+
+must_not_do:
+  - treat every ticket, PR, or bug fix as a project
+  - aggressively merge entities across documents at extraction time
+  - create entities with no evidence trail
+  - infer hidden conventions directly instead of extracting the underlying decisions
+
+success_signals:
+  - sampled entities are plausible and evidence-backed
+  - entity type coverage is broad
+  - source_refs are rich enough for later attribution and retrieval
+
+failure_signals:
+  - heavy project inflation from one-off work items
+  - bare entities whose evidence does not support the type assigned
+  - provenance needed later is missing from extracted evidence
+
+deterministic_checks:
+  - key: observation_count_positive
+    description: Extraction should produce at least some observations on a non-empty dataset.
+    mode: gte
+    target: 1
+  - key: total_entities_positive
+    description: Extraction should produce at least one entity on a non-empty dataset.
+    mode: gte
+    target: 1
+  - key: type_diversity
+    description: Non-trivial runs should cover several entity types.
+    mode: gte
+    target: 5
+  - key: sampled_entities_have_source_refs
+    description: Sampled entities should include source references.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - extracted entities have evidence and reasonable type diversity
+    - sampled source_refs are informative enough for later steps
+  block_when:
+    - entities are mostly unsupported, mis-typed, or missing provenance

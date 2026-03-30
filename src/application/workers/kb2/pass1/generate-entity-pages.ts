@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
-import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
+import { getFastModel, getFastModelName, getReasoningModel, getReasoningModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import {
   getEntityTemplate as getStaticEntityTemplate,
@@ -30,6 +30,26 @@ const GeneratedSectionSchema = z.object({
   })),
 });
 
+function summarizeEntityPageSample(
+  page: KB2EntityPageType,
+  extras?: { priority?: string; project_category?: string | null },
+) {
+  return {
+    title: page.title,
+    node_type: page.node_type,
+    priority: extras?.priority ?? null,
+    project_category: extras?.project_category ?? null,
+    sections: page.sections.slice(0, 3).map((section) => ({
+      section_name: section.section_name,
+      items: section.items.slice(0, 3).map((item) => ({
+        text: item.text,
+        confidence: item.confidence,
+        source_count: item.source_refs.length,
+      })),
+    })),
+  };
+}
+
 export const generateEntityPagesStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-gen-entity-pages");
@@ -57,6 +77,8 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
 
   const model = getFastModel(ctx.config?.pipeline_settings?.models);
   const pages: KB2EntityPageType[] = [];
+  const pageSamples: ReturnType<typeof summarizeEntityPageSample>[] = [];
+  const criticalPageSamples: ReturnType<typeof summarizeEntityPageSample>[] = [];
   let totalLLMCalls = 0;
 
   await ctx.onProgress(`Generating ${entityPacks.length} entity pages...`, 5);
@@ -70,6 +92,11 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
     const node = nodeById.get(plan.node_id);
     if (!node) continue;
 
+    const isConventionNode = node.attributes?.is_convention === true;
+    const useReasoning = node.type === "team_member" || isConventionNode;
+    const pageModel = useReasoning ? getReasoningModel(ctx.config?.pipeline_settings?.models) : model;
+    const pageModelName = useReasoning ? getReasoningModelName(ctx.config?.pipeline_settings?.models) : getFastModelName(ctx.config?.pipeline_settings?.models);
+
     const pgSettings = ctx.config?.pipeline_settings?.page_generation;
     const DOC_SNIPPETS = pgSettings?.doc_snippets_per_entity_page ?? 8;
     const VECTOR_SNIPPETS = pgSettings?.vector_snippets_per_entity_page ?? 6;
@@ -82,10 +109,28 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
       : "Generate relevant sections based on the entity type.";
 
     const sourceRefsList = node.source_refs.map((r) => `- "${r.title}" (${r.source_type})`).join("\n");
+    const isConvention = node.attributes?.is_convention === true;
+    const conventionContextLines: string[] = [];
+    if (isConvention) {
+      conventionContextLines.push("## Convention Attributes");
+      conventionContextLines.push(`is_convention: true`);
+      if (node.attributes?.pattern_rule) {
+        conventionContextLines.push(`Pattern/Rule: ${node.attributes.pattern_rule}`);
+      }
+      if (node.attributes?.established_by) {
+        conventionContextLines.push(`Established By: ${node.attributes.established_by}`);
+      }
+      if (Array.isArray(node.attributes?.constituent_decisions)) {
+        conventionContextLines.push(`Constituent Decisions: ${node.attributes.constituent_decisions.join(", ")}`);
+      }
+      conventionContextLines.push("");
+    }
+
     const context = [
       "## Graph Context",
       ...pack.graph_context,
       "",
+      ...conventionContextLines,
       "## Available Source Documents (use these titles in source_excerpts)",
       sourceRefsList || "(no sources listed)",
       "",
@@ -96,12 +141,22 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
       ...pack.vector_snippets.slice(0, VECTOR_SNIPPETS),
     ].join("\n");
 
+    const conventionSectionOverride = isConvention
+      ? `\nThis entity is a CONVENTION. Use the following section layout:
+- Convention Rule: The core pattern, rule, or standard this convention encodes.
+- Established By: Who introduced it, when, and why (team member, decision, PR, etc.).
+- Evidence Trail: The constituent decisions, discussions, and artifacts that led to this convention.
+- Applied On: Which features, services, or modules currently follow this convention.
+- Future Applications: Where this convention should be applied next and any proposed changes.
+`
+      : "";
+
     let entityPageSystemPrompt = `You generate structured entity reference pages for a knowledge base.
 Each page has sections with bullet-point items. Each item is a single factual statement.
 
-${template ? `Include rules: ${template.includeRules}\nExclude rules: ${template.excludeRules}\n` : ""}
+${template ? `Include rules: ${template.includeRules}\nExclude rules: ${template.excludeRules}\n` : ""}${conventionSectionOverride}
 Section layout:
-${sectionInstructions}
+${isConvention ? "Convention Rule, Established By, Evidence Trail, Applied On, Future Applications" : sectionInstructions}
 
 Rules:
 - Each item must be a standalone factual statement.
@@ -119,7 +174,7 @@ Rules:
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
-      model,
+      model: pageModel,
       system: entityPageSystemPrompt,
       prompt: `Generate the entity page for "${node.display_name}" (type: ${node.type}).
 
@@ -131,8 +186,8 @@ ${context}`,
     });
     totalLLMCalls++;
     if (usageData) {
-      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models), `Entity page: ${node.display_name}`, JSON.stringify(result, null, 2).slice(0, 5000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+      const cost = calculateCostUsd(pageModelName, usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, pageModelName, `Entity page: ${node.display_name}`, JSON.stringify(result, null, 2).slice(0, 5000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
     const requirement = template?.sections ?? [];
@@ -207,6 +262,19 @@ ${context}`,
     };
 
     pages.push(page);
+    const pagePlanMeta = plan as { priority?: string; project_category?: string | null };
+    const sample = summarizeEntityPageSample(page, pagePlanMeta);
+    if (pageSamples.length < 5) {
+      pageSamples.push(sample);
+    }
+    const isCriticalPage =
+      node.attributes?.is_convention === true ||
+      ["proposed_projects", "past_undocumented", "ongoing_undocumented"].includes(
+        pagePlanMeta.project_category ?? "",
+      );
+    if (isCriticalPage && criticalPageSamples.length < 8) {
+      criticalPageSamples.push(sample);
+    }
 
     if ((i + 1) % 5 === 0 || i === entityPacks.length - 1) {
       const pct = Math.round(5 + ((i + 1) / entityPacks.length) * 90);
@@ -218,6 +286,21 @@ ${context}`,
     await tc.entity_pages.insertMany(pages);
   }
 
+  const plannedRepositoryPages = Array.isArray(entityPlans)
+    ? entityPlans.filter((plan: any) => plan.node_type === "repository")
+    : [];
+  const generatedProjectPagesByCategory = pages.reduce<Record<string, string[]>>((acc, page) => {
+    if (page.node_type !== "project") return acc;
+    const plan = entityPlans.find((candidate: any) => candidate.page_id === page.page_id);
+    const category = typeof plan?.project_category === "string" ? plan.project_category : null;
+    if (!category) return acc;
+    (acc[category] ??= []).push(page.title);
+    return acc;
+  }, {});
+  for (const titles of Object.values(generatedProjectPagesByCategory)) {
+    titles.sort((a, b) => a.localeCompare(b));
+  }
+
   await ctx.onProgress(`Generated ${pages.length} entity pages`, 100);
   return {
     total_pages: pages.length,
@@ -226,5 +309,14 @@ ${context}`,
       acc[p.node_type] = (acc[p.node_type] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
+    planned_repository_page_count: plannedRepositoryPages.length,
+    repository_page_titles: pages
+      .filter((page) => page.node_type === "repository")
+      .map((page) => page.title)
+      .sort((a, b) => a.localeCompare(b)),
+    generated_project_pages_by_category: generatedProjectPagesByCategory,
+    page_samples: pageSamples,
+    critical_page_samples: criticalPageSamples,
+    critical_page_titles: criticalPageSamples.map((sample) => sample.title),
   };
 };

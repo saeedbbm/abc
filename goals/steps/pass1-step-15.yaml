@@ -1,0 +1,73 @@
+step_id: pass1-step-15
+step_number: 15
+step_name: Generate Human Pages
+pass: pass1
+
+purpose: >
+  Generate human-readable narrative pages that explain themes, patterns, and
+  cross-entity stories that do not fit on a single entity page.
+
+inputs:
+  - step 12 human page plan
+  - step 13 retrieval packs
+  - step 14 entity pages when cross-linking is needed
+
+primary_outputs:
+  - human pages with linked entity references
+
+judge_should_look_at:
+  - sampled human pages
+  - whether page narratives are grounded in real entities and evidence
+  - whether linked entity page references are valid and useful
+  - whether Company Overview is substantive and project hubs are project-led
+
+must_do:
+  - tell coherent multi-entity stories grounded in the graph
+  - include the important human pages planned upstream
+  - link back to real entity pages and entities
+  - turn convention evidence into understandable narrative when relevant
+
+must_not_do:
+  - generate generic essays detached from the graph
+  - skip the hidden-conventions page when conventions exist
+  - confuse node ids and entity page ids in linkage fields
+
+success_signals:
+  - pages are narrative, grounded, and cross-linked
+  - the hidden-conventions page helps a human understand the discovered patterns
+  - human pages guide exploration back into entity pages and source evidence
+  - Company Overview is non-placeholder and project hub pages link mostly project pages
+
+failure_signals:
+  - narrative pages are fluffy summaries with weak grounding
+  - link fields are broken or point to the wrong kind of object
+  - important cross-cutting knowledge remains invisible
+  - Company Overview remains placeholder or project category pages are mostly people-led
+
+deterministic_checks:
+  - key: human_pages_generated
+    description: Planned human pages should be generated.
+    mode: gte
+    target: 1
+  - key: hidden_conventions_page_present_when_needed
+    description: The hidden-conventions human page should exist when conventions exist.
+    mode: eq
+    target: 1
+  - key: linked_entity_page_ids_valid
+    description: Human pages should link to actual entity pages where expected.
+    mode: eq
+    target: 1
+  - key: company_overview_non_placeholder
+    description: Company Overview should not render placeholder text.
+    mode: eq
+    target: 1
+  - key: project_hub_links_are_project_led
+    description: Project category pages should link mostly project pages rather than mostly people.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - human pages are grounded and correctly linked
+  block_when:
+    - key narrative pages are missing or disconnected from the rest of the KB

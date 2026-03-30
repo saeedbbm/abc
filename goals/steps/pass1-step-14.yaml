@@ -1,0 +1,64 @@
+step_id: pass1-step-14
+step_number: 14
+step_name: Generate Entity Pages
+pass: pass1
+
+purpose: >
+  Generate grounded entity pages that make individual graph nodes useful to humans
+  and downstream systems.
+
+inputs:
+  - step 12 entity page plan
+  - step 13 retrieval packs
+
+primary_outputs:
+  - entity pages with sections and linked evidence
+
+judge_should_look_at:
+  - sampled entity pages across multiple node types
+  - whether page sections reflect the underlying entity type
+  - whether pages stay grounded in retrieved context
+  - whether repository and key project pages were actually generated
+
+must_do:
+  - generate clear entity pages for planned nodes
+  - reflect key attributes and relationships on the page
+  - treat convention entities as first-class pages rather than generic decision stubs
+  - preserve traceability to sources and related entities
+
+must_not_do:
+  - hallucinate unsupported details
+  - flatten all entity types into the same generic page
+  - omit the relationships that make a convention or team-member page useful
+
+success_signals:
+  - pages are readable, grounded, and type-appropriate
+  - sampled convention pages explain the rule, owner, evidence, and applications
+  - sampled person pages surface conventions or decisions they established when relevant
+  - repository pages and key project pages are present when they were planned
+
+failure_signals:
+  - pages are generic summaries disconnected from the graph
+  - conventions are invisible or underdescribed on entity pages
+  - important attributes remain absent despite being available upstream
+  - planned repository pages are missing from the generated output
+
+deterministic_checks:
+  - key: entity_pages_generated
+    description: Planned entity pages should be generated.
+    mode: gte
+    target: 1
+  - key: sampled_pages_have_source_refs_or_entity_links
+    description: Sampled entity pages should remain traceable.
+    mode: eq
+    target: 1
+  - key: repository_pages_generated_when_planned
+    description: Planned repository pages should be generated.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - entity pages are grounded and useful
+  block_when:
+    - generated pages are generic, ungrounded, or omit key graph facts

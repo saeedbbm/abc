@@ -1,0 +1,331 @@
+# Follow-Up Plan (Pipeline + UI)
+
+## Anti-Goals And Non-Regression Rules
+- Do NOT do a big-bang rewrite. Make changes in narrow phases, keep current working behavior, and only move to the next phase when the current one is stable.
+- Preserve the useful work already completed: demo-state baseline/workspace/reset flow, run/demo scoping, and other working latest-run fixes. New work should build on top of that, not destabilize it.
+- Keep current API/UI contracts stable while migrating. Add new fields, backfills, and QA artifacts before removing old inference paths.
+- After every accepted phase, verify these surfaces still load and still use the latest scoped data: `Discover`, `Tickets`, `Guides`, `Chat`, `KB`, `Admin Demo State`.
+- If a phase fixes one demo surface but regresses another already-working surface, stop and fix the regression before moving forward.
+- Keep the no-cheating boundary explicit at every phase: `ground-truth/*` and `goals/*` may be used for evaluation, scoring, and rerun decisions only; never leak them into runtime prompts or runtime materialization logic.
+
+## Shared Iteration Loop For Every Phase
+- 1. Capture the current baseline: latest run ID, active demo state, and the current outputs on all demo surfaces.
+- 2. Make the smallest code/data-flow change that should improve the active phase only.
+- 3. Rerun from the earliest changed step, not the whole pipeline unless required.
+- 4. Re-score the result using:
+- `goals/goal.txt`
+- `demo_story.txt`
+- `ground-truth/A-projects.txt`
+- `ground-truth/B-decisions.txt`
+- `ground-truth/D-team-members.txt`
+- `ground-truth/E-customer-feedback.txt`
+- `ground-truth/F-entity-counts.txt`
+- `ground-truth/G-key-pages.txt`
+- 5. Inspect the live product surfaces, not only the step artifacts.
+- 6. Compare the new result to the previous accepted result and ask: did this improve the target phase, and did it avoid regression elsewhere?
+- 7. If improved and non-regressing, keep it and advance. If not, revise and rerun the SAME phase again.
+- 8. Do not move to the next phase until the current phase exit gate passes.
+
+## Content Language Quality Gate (applies to every phase that generates text)
+
+Every phase that touches prompts, generates text, or materializes user-facing content must pass a language quality gate before advancing.
+
+### The rerun-until-readable loop
+- 1. After every prompt change or rerun, sample 5 generated outputs of each type affected (ticket titles, ticket descriptions, verify card titles, entity page items, how-to sections, human page paragraphs).
+- 2. Read them as a user would. Ask: would I show this to a non-technical person without embarrassment?
+- 3. Fail the gate if ANY of these are true:
+  - A title is longer than 10 words.
+  - A description starts with "A Jira ticket for..." or "This entity represents..." or "This project involves..."
+  - A title contains "may", "potentially", "appears to", "based on available evidence", "it seems that".
+  - A verify card title tries to encode both the diagnosis and the uncertainty in one sentence.
+  - A how-to section is generic advice that does not reference any specific team convention, person, or source.
+  - An entity page item is a paragraph crammed into a bullet point (more than 2 sentences).
+  - Any text uses jargon that is not the actual technical term from the source material.
+- 4. If the gate fails: rewrite the prompt, rerun the step, re-sample. Do NOT advance.
+- 5. If the gate passes: record the passing sample and move on.
+
+### What good language looks like
+- Titles: short, scannable, entity-first. "Kim Color Convention — Missing Source", not "The color convention attributed to Kim may be missing a source reference from the 2024 conversation".
+- Descriptions: what to do, in 2-4 sentences. Not a restatement of the title with more hedging.
+- Bullet items: one fact per bullet. Active voice, short sentence.
+- No filler intros ("This project involves...", "Based on the analysis...").
+- No hedge-padding ("may", "potentially", "it appears that") in titles or summaries. Hedging belongs in `verification_question` only.
+- Plain English. If a non-engineer would be confused, rewrite.
+
+## Strict Execution Sequence
+
+### Phase 0: UI Restructure
+- Objective: restructure the product UI from an admin tool into a clean demo-ready product before fixing content/pipeline issues.
+- Why first: the UI is the first thing a viewer sees. No amount of correct data matters if it looks messy and hard to read.
+
+#### Step 0a: Sidebar nav (5+2 with separator)
+- Replace 8 flat nav items with: Discover, Tickets, Guides, Chat, KB — separator — Settings, Admin.
+- File: `AppSidebar.tsx`
+- Exit gate: nav renders with new labels, icons, and grouping. All routes still work.
+
+#### Step 0b: Chat prompts
+- Replace generic prompts with the four role-based PawFinder prompts from `demo_story.txt`.
+- File: `KB2ChatPage.tsx`
+- Exit gate: chat shows role-aware prompts. Chat still sends/receives correctly.
+
+#### Step 0c: Ticket detail cleanup
+- Remove source excerpts from the ticket body (lines 330-349 in current code). Sources belong in the right panel only.
+- Remove linked entities section from the ticket body (lines 440-466). Linked entities belong in the right panel Related tab only.
+- Keep subtasks: show existing subtask list + add input. Remove the "No subtasks yet" empty-state label. If there are zero subtasks, just show the input.
+- Keep comments: show existing comments + textarea. Remove "Comments (0)" heading when empty. If there are zero comments, just show the textarea.
+- Keep status/priority dropdowns in a compact details row at the bottom. They are real edit controls.
+- Move "Edit in Verify" from a prominent mid-page button to a small secondary link at the bottom of the detail view.
+- File: `KB2TicketsPage.tsx`
+- Exit gate: ticket detail is clean. Sources and linked entities are in the right panel. Subtasks and comments are functional. Edit in Verify is reachable but not visually dominant.
+
+#### Step 0d: Entity page cleanup
+- Hide MUST/SHOULD requirement badges.
+- Hide confidence level badges (or reduce to subtle colored dot on hover).
+- Hide empty sections entirely instead of showing "Unknown" in red.
+- Keep "Edit in Verify" pencil on selected items as a subtle action — it is a real feature for creating verification cards.
+- File: `KB2KBPage.tsx`
+- Exit gate: entity pages read as clean bullet-point summaries, not data quality reports. Verify pencil is still accessible but not visually dominant.
+
+#### Step 0e: KB sidebar simplification
+- Collapse 17 entity types into 5 groups: People & Teams, Projects & Work, Decisions & Patterns, Systems & Infrastructure, Feedback.
+- File: `KB2KBPage.tsx`
+- Exit gate: sidebar is scannable. All entity pages still accessible within groups.
+
+#### Step 0f: Verify merged into Tickets
+- Add a tab bar to the Tickets sidebar: Tasks | Verify.
+- When Verify tab is active, sidebar shows verify cards; center shows verify card detail.
+- Remove `/verify` from the primary nav (redirect to `/tickets?tab=verify` or handle internally).
+- Files: `KB2TicketsPage.tsx`, route adjustments
+- Exit gate: verify cards accessible from Tickets page. No top-level Verify nav item.
+
+#### Step 0g: Guides cleanup
+- Remove 3 of the 4 sidebar filter dropdowns (person, ticket status, project status). Keep only search + tabs. This also fixes the broken person filter (it matched against ticket assignees which are usually empty).
+- Collapse Discussion section by default in how-to detail.
+- Make Human/AI Agent toggle subtle (small, not prominent).
+- Ensure how-to sources (from linked ticket + project) feed into the right panel.
+- Execute accessible as a tab or action within the guide, not its own nav item.
+- File: `KB2HowtoPage.tsx`
+- Exit gate: guides page is clean. Sources show in right panel. Execute is reachable.
+
+#### Step 0h: Discover page (new)
+- Build a new page component for the Discover route.
+- Content: Customer Feedback section (blockquote cards), Proposed Projects section (project cards with linked feedback count), Hidden Patterns section (convention cards with owner + evidence count).
+- Right panel: sources for the clicked item.
+- Read-only. No edit controls.
+- Files: new `KB2DiscoverPage.tsx`, route in `app/[companySlug]/discover/page.tsx`
+- Exit gate: Discover page renders with real data from the latest run. The demo story is visible without manual explanation.
+
+#### Step 0i: Right panel rename
+- Rename "AI KB Pages" tab to "Related".
+- Remove confidence-colored dots from related entity page items.
+- File: `KB2RightPanel.tsx`
+- Exit gate: right panel tabs are Sources, Related, Chat. Clean rendering.
+
+### Phase 1: Chat Scoping
+- Objective: fix chat contamination first so a PawFinder question cannot answer from another company and poison the demo.
+- Why after UI: the UI restructure makes the demo presentable; chat scoping makes it safe for live Q&A.
+- Primary references:
+- `goals/goal.txt` — Demo-Ready Acceptance / chat by role
+- `demo_story.txt` — Chat section
+- `ground-truth/B-decisions.txt`
+- `ground-truth/D-team-members.txt`
+- `ground-truth/E-customer-feedback.txt`
+- Work shape:
+- Make chat tenant-scoped, run-scoped, and demo-state-scoped.
+- Keep the answer grounded in PawFinder pages, nodes, tickets, and source refs only.
+- Do not broaden prompts yet; first fix retrieval/scoping correctness.
+- Rerun / validate:
+- No full rerun required unless retrieval depends on regenerated downstream artifacts.
+- After each change, run the four role-based chat questions from `demo_story.txt`.
+- Exit gate:
+- PawFinder questions answer only from PawFinder.
+- No Brew & Go contamination.
+- Answers are at least directionally useful for developer / product manager / project manager / executive roles.
+- Language quality gate: chat answers read like a knowledgeable teammate, not an LLM summary. No "Based on the available knowledge base context..."
+
+### Phase 2: Proposed Ticket Materialization
+- Objective: turn the toy-donation feedback cluster into a visible, human-readable proposed ticket while preserving the proposed project.
+- Why second: the demo story needs `feedback -> proposed project -> proposed ticket` before it can feel like an actionable work pipeline.
+- Primary references:
+- `goals/goal.txt` — Demo-Ready Acceptance / Toy Donation evidence / KB-Ticket-How-To continuity
+- `demo_story.txt` — Tickets section
+- `ground-truth/E-customer-feedback.txt`
+- `ground-truth/A-projects.txt`
+- `ground-truth/F-entity-counts.txt`
+- Work shape:
+- Implement deterministic proposed-ticket materialization for feedback-backed features.
+- Backfill latest-run ticket docs so the UI can show the result without stale or duplicate rows.
+- Preserve current Jira-backed ticket richness while adding inferred/proposed ticket support.
+- Rerun / validate:
+- Rerun from the earliest changed discovery/ticket-materialization step.
+- Re-check the latest run on `/tickets` and `/discover`.
+- Exit gate:
+- `Toy Donation Feature` is visible as a proposed project on Discover.
+- A human-readable proposed ticket for toy donation / gifting to a specific pet is visible on Tickets.
+- The ticket is linked to the project and to the three feedback sources.
+- No duplicate sibling ticket mess is introduced.
+- Language quality gate: the proposed ticket title is <=10 words, the description is 2-4 sentences of plain English, not a restated LLM summary.
+
+### Phase 3: Convention Application
+- Objective: make the Toy Donation story actually carry Kim, Tim, and Matt in usable implementation form.
+- Why third: without this, the How-To remains generic and the hidden-pattern story does not land.
+- Primary references:
+- `goals/goal.txt` — conventions / graph connectivity / How-To payoff
+- `demo_story.txt` — Guides section
+- `ground-truth/B-decisions.txt`
+- `ground-truth/E-customer-feedback.txt`
+- Work shape:
+- Add explicit convention-application records or equivalent deterministic outputs.
+- Ensure Toy Donation is linked to Kim's color convention, Tim's layout convention, and Matt's small-list browse pattern in a way downstream generation can consume.
+- Rerun / validate:
+- Rerun from the earliest changed convention/graph step through downstream How-To generation.
+- Exit gate:
+- The graph can support the Toy Donation -> convention path for Kim, Tim, and Matt.
+- The How-To can reference all 3 conventions with concrete implementation choices, not only green CTA.
+- Language quality gate: the How-To names each convention plainly ("use green for the donate button — Kim's color convention") not vaguely ("consider applying established team patterns").
+
+### Phase 4: Hidden Conventions Page
+- Objective: populate the hidden-pattern pages after convention application is stable.
+- Why fourth: the page should reflect final convention truth, not placeholder or partial intermediate data.
+- Primary references:
+- `goals/goal.txt` — pages / hidden patterns
+- `demo_story.txt` — Discover / KB sections
+- `ground-truth/B-decisions.txt`
+- `ground-truth/G-key-pages.txt`
+- Work shape:
+- Regenerate convention entity pages and the `Hidden Conventions & Patterns` human page from the corrected scoped graph.
+- Ensure team-member pages also surface established conventions where expected.
+- Rerun / validate:
+- Rerun the affected page-generation steps only.
+- Exit gate:
+- `Hidden Conventions & Patterns` is populated.
+- Convention entity pages are non-empty.
+- The page content reflects Kim, Tim, and Matt with evidence and can support the demo narrative.
+- The Discover page shows the conventions from the populated pages.
+- Language quality gate: the human page reads like a well-written article, not an LLM-generated list. Each convention paragraph has a clear claim, names the person, and cites specific sources.
+
+### Phase 5: Verify Cleanup
+- Objective: make Verify a supporting trust layer instead of a noisy or embarrassing side panel.
+- Why fifth: Verify should support the demo after the main story is correct.
+- Primary references:
+- `goals/goal.txt` — verify cards
+- `demo_story.txt` — Tickets > Verify tab
+- `ground-truth/A-projects.txt`
+- `ground-truth/B-decisions.txt`
+- Work shape:
+- Deduplicate verify cards.
+- Canonicalize duplicate-cluster pair ordering.
+- Shorten titles and move uncertainty into `problem_explanation` / `verification_question`.
+- Preserve source refs, page occurrences, and current UI expectations while cleaning up content.
+- Rerun / validate:
+- Rerun from `Create Verify Cards` and re-check the Verify tab inside Tickets.
+- Exit gate:
+- Verify card count is manageable.
+- Duplicate-cluster cards are deduped.
+- Titles are concise and readable.
+- Language quality gate: every verify card title is <=10 words, entity-first, no hedging. "Kim Color Convention — Wrong Attribution" not "The color convention attributed to Kim may have an incorrect attribution based on PR evidence". Hedging goes in `verification_question` only.
+
+### Phase 6: Content Language Pass
+- Objective: run a dedicated pass across all generated text to ensure consistent quality.
+- Why after Phase 5: all content-generating phases are now complete, so this is the final polish before the smoke test.
+- Work shape:
+- Sample 5 outputs from each: ticket titles, ticket descriptions, verify card titles, entity page items, how-to sections, human page paragraphs, convention names, project names.
+- Apply the language quality gate from the "Content Language Quality Gate" section above.
+- For each type that fails: trace back to the prompt that generated it, rewrite the prompt, rerun the step, re-sample.
+- Keep looping until all types pass.
+- Exit gate:
+- All sampled text passes the language quality gate.
+- A non-technical person can read any page in the product and understand it on first pass.
+- No title longer than 10 words across tickets, verify cards, entity pages, and how-to guides.
+- No description starts with filler ("A Jira ticket for...", "This entity represents...").
+- No hedging in titles or summaries.
+
+### Phase 7: Final Demo Smoke Test
+- Objective: prove the demo story works end-to-end and that the accepted fixes improved things without breaking previous work.
+- Why last: only after the upstream story is correct and the language is clean should we do the final integrated demo pass.
+- Primary references:
+- `goals/goal.txt`
+- `demo_story.txt`
+- All `ground-truth/*` files
+- Required smoke checks:
+- Discover shows the 3 toy-donation feedback items, the proposed project, and the 3 conventions.
+- Tickets shows a proposed toy-donation ticket under Proposed. Sources and linked entities are in the right panel, not in the ticket body.
+- Guides shows `How-To: Toy Donation Feature` referencing Kim, Tim, and Matt by name with specific implementation choices.
+- Chat answers the 4 role-based questions from PawFinder only. Answers read like a human expert, not an LLM.
+- Verify (inside Tickets) is usable and non-noisy. Card titles are short and clear.
+- KB shows entity pages as clean bullet points without admin clutter.
+- All text passes the language quality gate.
+- Exit gate:
+- The end-to-end product supports the final demo story in `demo_story.txt` without the operator having to explain away missing steps, messy UI, or bad generated language.
+
+## Non-Regression Protocol
+
+### How to make sure we are not making things worse
+- Before any change: screenshot or record the current state of every demo surface. Save the current run ID and demo state.
+- After any change: compare the same surfaces. If any surface looks worse, the change is rejected until the regression is fixed.
+- Never accept "we improved X but Y broke" — both X and Y must be at least as good as before.
+- The iteration loop (section above) enforces this: step 6 says "compare the new result to the previous accepted result" and step 7 says "if not improved AND non-regressing, rerun the SAME phase again."
+
+### How to keep iterating until quality is right
+- The plan is explicitly designed for looping, not linear progression. Every phase says "if the gate fails, revise and rerun."
+- The language quality gate applies to every phase that generates text. It is not a one-time check — it runs every time.
+- If a prompt change makes titles better but descriptions worse: revert the description prompt, keep the title prompt, rerun, re-check.
+- Track accepted prompt versions. When a prompt passes the quality gate, save it. Only modify from the last accepted version.
+- Do not batch prompt changes. Change one prompt at a time, rerun, check quality, accept or reject.
+
+## Architecture Change
+- Separate `jira_ticket` records from inferred/proposed `work_item` records. Right now one storage model is trying to hold both, which is why items like `PAW-32` and `Supply Orders` can show up as separate sibling tickets for the same work.
+- Persist source-rich ticket payloads in `kb2_tickets`: raw Jira title, raw Jira description, status, assignee, reporter, created/resolved dates, sprint, and normalized summary. The UI should not need to reconstruct rich ticket detail from linked graph nodes.
+- Store resolved linked entities directly on ticket docs as stable objects, not just `linked_entity_ids`. Each stored link should carry `node_id`, `display_name`, `type`, and source refs so reruns do not leave the UI with raw UUIDs and empty source panels.
+- Keep two explicit state fields on tickets: `semantic_bucket` (`past`, `ongoing`, `proposed`) and `workflow_state` (`backlog`, `todo`, `in_progress`, `review`, `done`). The UI should not have to infer semantic status from a mix of source type and workflow state.
+- Add stable dedupe/merge identity for tickets beyond the current sync key so an inferred/proposed ticket can be marked as `same_as` or `derived_from` an existing Jira ticket instead of being materialized as a second visible ticket.
+- Make `customer_feedback` -> `proposed_project` -> `proposed_ticket` an explicit model path. The same toy-donation evidence should support both the proposed project and the visible proposed ticket without relying on the UI to guess the relationship.
+- Persist explicit evidence packs on proposed projects and proposed tickets. For the toy-donation story, the three feedback submissions should be directly attached as source refs and surfaced in Discover, Tickets, and Guides.
+- Make chat strictly tenant-scoped, run-scoped, and demo-state-scoped. `kb2/chat` must read PawFinder data only when the user is on PawFinder; answering from another company is demo-breaking.
+- Add a convention-application storage layer that records not just that a convention exists, but how it applies to a feature (`green CTA`, `vertical selection nav`, `client-side small-list browse`). The Guides step should consume these explicit application records instead of inferring from broad page text.
+- Ensure human pages and entity pages are generated from the same final scoped state so pages like `Hidden Conventions & Patterns` cannot exist as empty shells while the related entity pages are populated.
+- Give verify cards stable semantic identity/dedupe keys so the same issue cannot appear multiple times with slightly different wording or pair ordering. This is especially important for `duplicate_cluster` cards and repetitive low-confidence cards.
+- Separate verify-card display fields more cleanly: short display title, detailed problem explanation, explicit verification question, and recommended action. The UI should not force the title to carry the whole speculative sentence.
+
+## Step Add Or Removal
+- Add a dedicated deterministic ticket materialization step after Pass 1 Step 9. That step should project graph/entity evidence into ticket docs, enrich them, dedupe them, and stamp semantic bucket/state before any UI reads them.
+- Remove ticket creation/sync responsibility from `page-plan.ts` / Step 12-style page planning. Page planning should consume final ticket docs, not create or reinterpret them.
+- Add a ticket QA artifact/check after ticket materialization that fails if there are stale linked IDs, missing linked names, missing source refs for Jira-backed tickets, or obvious duplicate sibling tickets for the same work.
+- Add a deterministic proposed-ticket materialization step for feedback-backed features. When customer feedback clusters into a feature like Toy Donation, the pipeline should emit at least one human-readable proposed ticket, not only a proposed project.
+- Add a deterministic evidence-clustering check that confirms the three toy-donation feedback items are grouped into the same proposed work-item family rather than left as isolated feedback nodes.
+- Add a convention-application QA artifact after graph re-enrichment. Fail if `Toy Donation Feature` does not carry usable convention links to Kim, Tim, and Matt when the evidence exists.
+- Add a chat/demo readiness check after page and how-to generation. Fail if the Hidden Conventions page is empty, the Toy Donation proposed ticket is missing, or chat answers from the wrong tenant/company.
+- Treat Execute as bonus-only in final demo gating. The main acceptance path should end at the generated How-To guide; agent execution should not be required for a run to be considered demo-ready.
+- Add a verify-card normalization/dedupe pass after card creation. That pass should collapse semantically duplicate cards, enforce canonical pair ordering for duplicate cards, and remove repeated low-value cards before the UI reads them.
+- Add a verify-card title normalization pass or check. Card titles should become short entity-first labels, while hedging and nuance move into `problem_explanation` and `verification_question`.
+
+## Prompt Change
+- Change Jira-backed ticket prompts so they preserve concrete source detail. The model may add a short summary, but it must not replace the raw scope with vague text like `A ticket for...`.
+- Change inferred/proposed ticket prompts so they first ask whether the work is already represented by an existing Jira ticket, PR, or project. If yes, emit a relation such as `same_as` / `derived_from` instead of a new standalone ticket.
+- Change link-generation prompts so linked entities return human display names plus a short reason/evidence string, not only raw IDs.
+- Change ticket-writing prompts so priority and state are normalized into explicit enums rather than mixed labels like `P2` in some places and `Medium` in others.
+- Change proposed ticket prompts so titles are human-readable and specific (`Toy Donation Feature`, `Dedicated Toy Donation Flow`, etc.), not vague fragments or unrelated backlog labels.
+- Change how-to prompts so they explicitly name the hidden conventions they are applying and map each one to a concrete implementation choice: Kim -> green money CTA, Tim -> vertical/sidebar pet-selection flow, Matt -> client-side load for small lists.
+- Change human page prompts so `Hidden Conventions & Patterns` is a narrative page with evidence, not an empty placeholder.
+- Change chat prompts so answers can be framed for four roles: developer, product manager, project manager, and executive. The answer style may vary by role, but the evidence base must stay the same.
+- Change verify-card prompts so they prioritize demo-critical issues: wrong attribution of conventions, missing proposed ticket for feedback-backed work, missing source refs, missing convention applications, or wrong-tenant chat contamination.
+- Change verify-card title prompts so titles are concise, entity-first, and non-speculative. Max 10 words. No hedging. Example: "Kim Color Convention — Wrong Attribution".
+- Change verify-card prompts so uncertainty and reviewer guidance go into `verification_question` and `problem_explanation`, not into the title itself.
+- Change duplicate-card prompts so pair titles are canonical and symmetric (same ordering every time), preventing `A and B` / `B and A` duplicates from both appearing.
+- Add explicit prompt instructions for all text-generating steps: "Write like a knowledgeable teammate, not an AI. Use short sentences, active voice, plain English. No filler intros. No hedge words in titles. If a non-engineer would be confused by the text, rewrite it."
+
+## Others
+- Add a backfill script that repairs existing ticket docs for the latest run without a full pipeline rerun: recompute `semantic_bucket`, linked entity names, linked source refs, and rich source fields from stored run data.
+- Add eval checks for ticket quality: no Jira/proposed duplicate siblings for the same work, no empty linked-name display when IDs exist, no empty source panel for Jira-backed tickets, and minimum detail coverage for descriptions.
+- Add UI-level regression checks for the demo surfaces so ordering, source rendering, and human-readable labels do not break again.
+- Keep the no-cheating boundary explicit: use ground truth only in judge/eval code, never in runtime ticket prompts or ticket materialization logic.
+- Add a demo-readiness eval/checklist that fails unless all of the following are true in the final state: Discover shows three toy-donation feedback items plus proposed project plus conventions, Tickets shows a proposed ticket, Guides shows the How-To referencing all 3 conventions, Chat answers from PawFinder only, Verify is usable, all text passes the language quality gate.
+- Add targeted regression checks for the exact demo surfaces: `Discover`, `Tickets`, `Guides`, `Chat`, `KB`, and `Verify` (inside Tickets). The demo should not depend on manual interpretation of broken or duplicate UI.
+- Add content-quality checks for how-to output: mention of all 3 hidden conventions, visible source-backed justification, and no fallback generic guidance when convention paths are available.
+- Add content-quality checks for ticket output: no duplicate siblings, no empty linked-source panels, and no requirement for the operator to explain missing ticketization by hand.
+- Add a short smoke test that runs the four role-based chat queries for the toy-donation story and fails if the answer references another company or ignores the hidden patterns.
+- Treat Verify as a supporting trust layer in the demo, not the primary wow factor. It should be used to show governance/traceability only after the main flow is working.
+- Add content-quality checks for verify output: no repeated duplicate-cluster cards for the same pair, no long hedge-heavy titles, and no title that tries to encode both the diagnosis and the uncertainty in one sentence.
+- Roll these changes out additively first: new fields, new QA artifacts, and backfills before removing old logic. Preserve current API/UI contracts while migrating so the fixes improve demo quality without breaking working pages.
+- Add an explicit migration check after each major change set: all demo surfaces should still render from the latest run/demo state before older fields or inference paths are removed.
+- Add a language regression check to the demo-readiness eval: sample 5 outputs of each generated text type, apply the language quality gate, fail if any sample fails.

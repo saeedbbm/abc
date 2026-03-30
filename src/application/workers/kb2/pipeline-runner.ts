@@ -8,6 +8,8 @@ import {
 import type { KB2RunType, KB2RunStepType } from "@/src/entities/models/kb2-types";
 import type { CompanyConfigData } from "@/src/entities/models/kb2-company-config";
 import { getCompanyConfig, getActiveConfigVersion } from "@/src/application/lib/kb2/company-config";
+import { evaluateStep } from "@/src/application/lib/kb2/step-judge-configs";
+import { publishRunAsBaseline } from "@/src/application/lib/kb2/demo-state";
 
 export type ProgressCallback = (detail: string, percent: number, stepPercent?: number, stepId?: string) => void | Promise<void>;
 
@@ -82,6 +84,7 @@ export interface RunOptions {
   pass?: "pass1" | "pass2" | "all";
   step?: number;
   fromStep?: number;
+  toStep?: number;
   reuseRunId?: string;
   title?: string;
   onProgress?: ProgressCallback;
@@ -105,6 +108,9 @@ function generateStepSummary(stepName: string, artifact: unknown): string {
   }
 
   if (a.total_entities !== undefined) {
+    if (a.total_observations !== undefined) {
+      return `Extracted ${a.total_observations} observations and ${a.total_entities} candidate entities`;
+    }
     parts.push(`Extracted ${a.total_entities} unique entities`);
     if (a.llm_calls) parts.push(`using ${a.llm_calls} LLM calls`);
     const byType = a.entities_by_type as Record<string, unknown[]> | undefined;
@@ -120,7 +126,14 @@ function generateStepSummary(stepName: string, artifact: unknown): string {
   }
 
   if (a.total_chunks !== undefined) {
-    parts.push(`Embedded ${a.total_chunks} chunks from ${a.total_docs ?? "?"} documents`);
+    parts.push(`Embedded ${a.total_chunks} chunks from ${a.total_documents ?? a.total_docs ?? "?"} documents`);
+    const byProvider = a.by_provider as Record<string, { docs?: number; chunks?: number; spans?: number }> | undefined;
+    if (byProvider) {
+      const provs = Object.entries(byProvider)
+        .map(([k, v]) => `${k}: ${v.chunks ?? v.spans ?? "?"}`)
+        .join(", ");
+      parts.push(`(${provs})`);
+    }
     return parts.join(" ");
   }
 
@@ -132,6 +145,12 @@ function generateStepSummary(stepName: string, artifact: unknown): string {
 
   if (a.new_edges !== undefined && a.added_edges !== undefined) {
     parts.push(`Discovered +${a.new_edges} relationships across ${a.total_nodes} entities`);
+    return parts.join(", ");
+  }
+
+  if (a.pattern_candidates !== undefined) {
+    const candidates = Array.isArray(a.pattern_candidates) ? a.pattern_candidates.length : 0;
+    parts.push(`Mined ${candidates} pattern candidates from ${a.total_nodes ?? "?"} observations`);
     return parts.join(", ");
   }
 
@@ -202,6 +221,10 @@ function generateStepSummary(stepName: string, artifact: unknown): string {
 
   if (a.total_new_edges !== undefined && a.discovery_edges_added !== undefined) {
     parts.push(`Added ${a.total_new_edges} edges (${a.discovery_edges_added} discovery, ${a.convention_edges_added} convention, ${a.applies_to_edges_added} applies-to)`);
+    const qa = (a.traversal_qa as { summary?: { full_pass?: number; checked?: number } } | undefined)?.summary;
+    if (qa && qa.checked !== undefined) {
+      parts.push(`Traversal QA ${qa.full_pass ?? 0}/${qa.checked}`);
+    }
     return parts.join(" ");
   }
 
@@ -223,9 +246,18 @@ function generateRunTitle(opts: RunOptions, pass1Steps: StepDef[], pass2Steps: S
     const stepDef = steps[opts.step - 1];
     return `${passLabel} → Step ${opts.step}: ${stepDef?.name ?? "Unknown"}`;
   }
+  if (opts.fromStep !== undefined && opts.toStep !== undefined) {
+    const fromDef = steps[opts.fromStep - 1];
+    const toDef = steps[opts.toStep - 1];
+    return `${passLabel} Steps ${opts.fromStep}–${opts.toStep}: ${fromDef?.name ?? "?"} → ${toDef?.name ?? "?"}`;
+  }
   if (opts.fromStep !== undefined) {
     const stepDef = steps[opts.fromStep - 1];
     return `${passLabel} from Step ${opts.fromStep}: ${stepDef?.name ?? "Unknown"}`;
+  }
+  if (opts.toStep !== undefined) {
+    const toDef = steps[opts.toStep - 1];
+    return `${passLabel} Steps 1–${opts.toStep}: through ${toDef?.name ?? "Unknown"}`;
   }
   return passLabel;
 }
@@ -352,6 +384,11 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
           endIdx = opts.step;
         } else if (opts.fromStep !== undefined) {
           startIdx = opts.fromStep - 1;
+          if (opts.toStep !== undefined) {
+            endIdx = opts.toStep;
+          }
+        } else if (opts.toStep !== undefined) {
+          endIdx = opts.toStep;
         }
 
         startIdx = Math.max(0, Math.min(startIdx, totalSteps));
@@ -468,6 +505,16 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
               summary, steps_remaining: endIdx - (i + 1),
               metrics: { llm_calls: llmCalls, input_tokens: agg.tokens_in, output_tokens: agg.tokens_out, cost_usd: agg.cost },
             });
+
+            if (!abortCtrl.signal.aborted) {
+              try {
+                console.log(`[pipeline] Running auto-judge for ${stepDef.name} (exec=${executionId})...`);
+                const judgeResult = await evaluateStep(opts.companySlug, executionId);
+                console.log(`[pipeline] Auto-judge completed for ${stepDef.name}: ${judgeResult.overall_score}% ${judgeResult.pass ? "PASS" : "FAIL"}`);
+              } catch (judgeErr) {
+                console.error(`[pipeline] Judge failed for ${stepDef.name}: ${judgeErr}`);
+              }
+            }
           } catch (err: any) {
             const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");
             const durationMs = Date.now() - stepStart;
@@ -492,6 +539,7 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
         $set: { status: "completed", completed_at: new Date().toISOString() },
         $unset: { error: "" },
       });
+      await publishRunAsBaseline(tc, opts.companySlug, runId);
     } catch (err: any) {
       const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");
       const status = isCancelled ? "cancelled" : "failed";

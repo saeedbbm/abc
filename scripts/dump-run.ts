@@ -102,7 +102,7 @@ async function main() {
 
     // Check convention entities
     console.log("\n=== Convention Entities ===\n");
-    const conventions = await db.collection("graph_nodes").find({
+    const conventions = await db.collection("kb2_graph_nodes").find({
       run_id: run.run_id,
       "attributes.is_convention": true,
     }).toArray();
@@ -118,14 +118,14 @@ async function main() {
     // Check APPLIES_TO, PROPOSED_BY edges
     console.log("\n=== Convention Edges ===\n");
     for (const edgeType of ["APPLIES_TO", "PROPOSED_BY", "CONTAINS"]) {
-      const edges = await db.collection("graph_edges").find({
+      const edges = await db.collection("kb2_graph_edges").find({
         run_id: run.run_id,
         type: edgeType,
       }).toArray();
       console.log(`${edgeType}: ${edges.length} edges`);
       for (const e of edges.slice(0, 5)) {
-        const src = await db.collection("graph_nodes").findOne({ node_id: e.source_node_id, run_id: run.run_id });
-        const tgt = await db.collection("graph_nodes").findOne({ node_id: e.target_node_id, run_id: run.run_id });
+        const src = await db.collection("kb2_graph_nodes").findOne({ node_id: e.source_node_id, run_id: run.run_id });
+        const tgt = await db.collection("kb2_graph_nodes").findOne({ node_id: e.target_node_id, run_id: run.run_id });
         console.log(`  ${src?.display_name || e.source_node_id} → ${tgt?.display_name || e.target_node_id}`);
       }
     }
@@ -137,7 +137,7 @@ async function main() {
       { $group: { _id: "$type", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
     ];
-    const counts = await db.collection("graph_nodes").aggregate(pipeline).toArray();
+    const counts = await db.collection("kb2_graph_nodes").aggregate(pipeline).toArray();
     for (const c2 of counts) {
       console.log(`  ${c2._id}: ${c2.count}`);
     }

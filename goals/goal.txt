@@ -1,0 +1,292 @@
+## What the KB2 Pipeline Should Achieve
+
+### The Core Goal
+
+The pipeline ingests raw company data — Slack conversations, Jira tickets, GitHub PRs, Confluence docs, and customer feedback — and produces a structured knowledge base that a new team member (or an AI chatbot) could use to understand *how this company actually works*, not just what the documentation says.
+
+The most valuable output is not the documented stuff (anyone can read a Confluence page). It's **the things nobody wrote down** — the conventions, the tribal knowledge, the patterns that only exist in people's heads or scattered across hundreds of messages.
+
+---
+
+### The Three Layers of Value
+
+**Layer 1: Documented knowledge, organized**
+- Take the 6 Confluence docs, 34 Jira tickets, 16 PRs, and turn them into clean entity pages (one page per project, decision, person, process, etc.)
+- This is table stakes. It's useful but not remarkable.
+
+**Layer 2: Undocumented knowledge, discovered**
+- Find the 4 past projects that were completed but never had a Confluence doc (Pet Categories Page, Pet Adoption Chooser, Contact Form Page, Shelter Events Browser)
+- Find the 5 ongoing projects that have no formal documentation (Site Navigation Improvements, Supply Tracking, Supply Orders, Event Calendar, Volunteer Hours Tracking)
+- Find proposed features from customer feedback (Toy Donation Feature from 3 separate customer requests)
+- Each of these should become an entity with sources traced back to the exact Slack messages, PR descriptions, or feedback submissions that prove it exists
+
+**Layer 3: Hidden patterns, synthesized — this is the demo money shot**
+- **Kim's Color Convention**: Across 10 sources over 2+ years, Kim consistently uses pink/blue for gender and green for money CTAs. No document ever says "our rule is pink for girls, blue for boys, green for money." The pipeline should discover this by cross-referencing her Slack messages from 2023-03-14, 2023-10-02, 2024-02-19, 2024-06-10, 2025-03-10, plus Confluence redesign doc phases 1-3, plus Tim's PRs that implement her designs.
+- **Tim's Layout Convention**: Vertical sidebar for selection/navigation, horizontal columns for comparison. Never written as a rule — only visible across his Slack messages and PR review comments spanning 3 years and 4+ features.
+- **Matt's Client-Side Browse Pattern**: For lists under ~20 items, load everything in one API call, navigate client-side. Never stated as a principle — only visible in his own PR #23, his review comments on PRs #47, #49, #52, #55, and his approval of pagination for the one case (PR #58) where the list was 30-40 items.
+
+---
+
+### What "Success" Looks Like
+
+**For entity completeness:**
+- Every entity has `status`, `documentation_level`, and `description` as public attributes — not hidden behind `_description`
+- Every process uses `status` (not a separate `process_status` field)
+- Every decision has `decided_by`, `rationale`, and `scope` filled (or explicitly marked as unknown with reasoning)
+- Step 8 discovery nodes are not bare — they have the same attribute coverage as Step 5 entities
+
+**For conventions:**
+- 3 convention entities exist, each with `is_convention: true`, `pattern_rule`, `constituent_decisions`, `established_by`, and combined `source_refs` from all underlying evidence
+- Each convention is connected to its constituent individual decisions via `CONTAINS` edges
+- Each convention is connected to the team member who established it via `PROPOSED_BY` edges
+- Each convention is connected to proposed features it applies to via `APPLIES_TO` edges
+- Kim's Color Convention has source refs spanning 5 Slack conversations, 3 Confluence doc sections, and 2 PRs
+
+**For graph connectivity:**
+- Discovery nodes (Step 8) have edges connecting them to related existing entities — not floating as isolated islands with zero edges
+- The graph can be traversed from "Toy Donation Feature" → `APPLIES_TO` → "Kim's Color Convention" → `PROPOSED_BY` → "Kim"
+- No dangling edges pointing to nonexistent nodes (the 490 broken MENTIONED_IN edges from Step 6 should be addressed)
+
+**For pages:**
+- Convention entities get their own entity pages using the `decision` template
+- A "Hidden Conventions & Patterns" human page exists that narratively describes these patterns with evidence
+- Kim's team_member entity page has an "Established Conventions" section
+- The "Other Decisions & Tradeoffs" page includes conventions alongside regular decisions
+
+**For How-To guides:**
+- The Toy Donation Feature how-to guide should reference all 3 conventions in its implementation guidance
+- It should say things like: "Use green for the donate CTA (per the team's established color convention for financial actions)" and "Use a vertical sidebar for toy category selection (per the team's layout convention for selection interfaces)" and "Load the toy list in a single API call on mount since shelters typically have under 20 toys available (per the team's client-side browse pattern for small datasets)"
+- This is only possible if the `APPLIES_TO` edges exist and the How-To step can follow them to find convention entity pages
+
+**For verify cards:**
+- A manageable number (under 30), not 200+
+- No cards that question the existence of conventions (they're synthesized by design)
+- Focused on genuinely questionable claims: wrong attributions, contradictory facts, missing critical info
+
+**For traceability:**
+- From any human page paragraph → click entity reference → entity page → click source ref → original document with highlighted excerpt
+- The chain is: human page `entity_refs` / `entity_node_ids` → node → entity page `source_refs` → original parsed document
+- If someone decides to change the color convention from green to blue for money, you can trace every entity, page, and source that mentions it
+
+---
+
+### Product UI/UX Acceptance
+
+**Navigation structure (5+2):**
+- Primary: Discover, Tickets, Guides, Chat, KB
+- Secondary (below separator): Settings, Admin
+- No more than 7 items visible in the sidebar at any time
+
+**Discover page:**
+- Shows customer feedback clusters, proposed projects, and hidden conventions/patterns
+- Read-only storytelling surface — no edit controls
+- Sources feed into the right panel for the selected item
+- This is the demo entry point
+
+**Tickets page:**
+- Two tabs in the sidebar area: Tasks and Verify
+- Ticket detail shows: title, description, subtasks (list + add input), comments (list + textarea), compact details row (status dropdown, priority dropdown, source badge, date), "Edit in Verify" as a small link at the bottom
+- Sources and linked entities are in the right panel only — NOT in the ticket body
+- Empty-state labels removed: no "No subtasks yet", no "Comments (0)" when empty — just show the input/textarea
+- Verify tab shows verify cards with problem/question/evidence — the trust layer
+
+**Guides page:**
+- Left sidebar has search + Tickets/Projects/How-to tabs only (no filter dropdowns for person, ticket status, project status)
+- How-to detail shows clean readable sections with sources in the right panel
+- Discussion collapsed by default, Human/AI toggle subtle
+- Execute accessible as a tab or action within a guide
+
+**Chat page:**
+- Suggested prompts are the four role-based PawFinder questions (developer, PM, project manager, executive)
+- Answers grounded in PawFinder data only — no cross-tenant contamination
+- Right panel shows sources and related pages from the latest answer
+
+**KB page:**
+- Sidebar groups entities into 5 human-friendly buckets: People & Teams, Projects & Work, Decisions & Patterns, Systems & Infrastructure, Feedback
+- Entity pages show sections as clean bullet points — no MUST/SHOULD badges, no confidence levels, no "Unknown" red text
+- "Edit in Verify" pencil stays on selected items as a subtle action (real feature for creating verification cards)
+- Human pages show narrative with highlighted entity references
+
+**Right panel (shared):**
+- Three tabs: Sources, Related (renamed from AI KB Pages), Chat
+- Sources show raw documents with excerpt highlighting
+- Related shows entity page summaries as clean bullet points without confidence dots
+- Chat is contextual mini-chat scoped to the selected item
+- Ticket sources and linked entities belong here, not in the ticket body
+
+---
+
+### Content Language Acceptance
+
+All generated text that a user reads must pass these rules. This applies to: ticket titles, ticket descriptions, verify card titles, verify card descriptions, entity page items, how-to sections, human page paragraphs, convention names, project names, chat answers.
+
+**Titles must be scannable:**
+- Max 10 words
+- Entity-first, action-oriented or noun-phrase
+- No hedging: no "may", "potentially", "appears to", "based on available evidence"
+- No filler: no "A Jira ticket for...", no "This entity represents..."
+- Good: "Toy Donation Feature", "Kim Color Convention — Missing Source"
+- Bad: "A ticket for building a shelter comparison feature allowing users to select and compare shelters"
+- Bad: "The color convention attributed to Kim may be missing a source reference from the 2024 conversation"
+
+**Descriptions must be useful, not restated:**
+- 2-4 sentences max
+- What needs to happen, or what is the issue — not a restatement of the title with more padding
+- The source is in the right panel. The description adds context the source doesn't give.
+- No filler intros: skip "This project involves...", "Based on the analysis..."
+
+**Bullet items (entity pages, lists) must be atomic:**
+- One fact per bullet
+- Active voice, short sentence
+- Not a paragraph crammed into a list item (max 2 sentences per bullet)
+
+**Verify card titles must separate facts from questions:**
+- Title: short, entity-first, states the issue. "Kim Color Convention — Wrong Attribution"
+- `problem_explanation`: detailed description of what is wrong
+- `verification_question`: what to check. This is where hedging is allowed.
+- The title must NOT contain the full explanation, the question, AND the uncertainty all in one sentence.
+
+**Chat answers must read like a human expert:**
+- No "Based on the available knowledge base context..."
+- No "According to the information provided..."
+- Answer like a teammate who knows the codebase. Short paragraphs, specific claims, source-backed.
+
+**The rerun-until-readable protocol:**
+- After every prompt change, sample 5 outputs and read them as a user would.
+- If any title > 10 words, any description starts with filler, any hedge in a title, or any paragraph bullet: rewrite the prompt, rerun, re-sample.
+- Do not advance to the next phase with bad language.
+- Track accepted prompt versions. Only modify from the last accepted version.
+- Change one prompt at a time, not batch changes.
+
+---
+
+### Demo-Ready Acceptance
+
+**For the demo narrative:**
+- The demo should start from the three toy-donation customer feedback submissions on the Discover page and end at the generated How-To guide on the Guides page.
+- Execute / agent handoff is a bonus segment, not the core acceptance gate or primary wow factor.
+- The story must be visible in the product without manual explanation: Discover (feedback + proposed project + conventions) → Tickets (proposed ticket) → Guides (How-To) → Chat (role-based Q&A).
+
+**For Toy Donation evidence:**
+- The three customer feedback submissions (`Donating toys`, `Donation question`, `Toys for shelter pets`) are each visible with excerpts and timestamps.
+- These three pieces of evidence are clustered into one clear proposed work-item family centered on toy donation / gifting to a specific pet.
+- The evidence must support both a proposed `Toy Donation Feature` project and at least one human-readable proposed ticket visible on the Tickets page.
+- The project/ticket description must preserve the specific-pet matching story: choosing which toy or donation goes to which specific dog, cat, or shelter pet.
+
+**For Discover / Tickets / Guides continuity:**
+- The Discover page shows `Toy Donation Feature` as a proposed project with visible evidence and source refs.
+- The Tickets page shows a proposed ticket for toy donation or gifting to a specific pet; it must not be replaced by unrelated backlog Jira tickets or vague duplicates.
+- The project and ticket are explicitly linked so a user can move from Discover to Tickets to Guides without guessing.
+- The Guides page can generate or display a toy-donation How-To from that proposed work item with the same evidence and linked entities.
+
+**For the How-To payoff:**
+- The Toy Donation Feature How-To guide is the primary demo payoff.
+- It explicitly references Kim's color convention, Tim's layout/navigation convention, and Matt's client-side browse pattern in implementation guidance.
+- It ties each convention to a concrete implementation choice: green donate CTA, vertical/sidebar selection flow, and single-call/client-side handling for small lists.
+- The guide includes enough source-backed context that a user can explain why those implementation choices were recommended.
+- Sources from linked tickets, projects, and conventions are visible in the right panel.
+
+**For hidden patterns in the demo:**
+- The `Hidden Conventions & Patterns` human page is populated and narratively explains Kim, Tim, and Matt with evidence.
+- Convention entity pages are non-empty and navigable from the Guides / KB experience.
+- The Discover page shows the conventions as compact pattern cards.
+- The graph can be traversed from `Toy Donation Feature` to the relevant conventions and from those conventions to the people who established them.
+
+**For chat demo by role:**
+- Chat must be tenant-scoped and run-scoped; PawFinder questions must never answer from Brew & Go or any other company.
+- Chat can answer four role-specific questions well using the same KB evidence:
+- Developer: what conventions and implementation patterns should I follow for Toy Donation?
+- Product manager: what customer evidence supports building this feature and what is in MVP?
+- Project manager: what dependencies, owners, and related workstreams does it touch?
+- Executive: why does this matter, what customer signal supports it, and what makes it low/high risk?
+- Chat answers should be grounded in the same entities, pages, and source refs shown elsewhere in the demo.
+- Suggested prompts in the Chat UI match these four roles.
+- Chat answers read like a knowledgeable teammate, not an LLM summary.
+
+**For verify in the demo:**
+- Verify is a supporting trust segment accessible via the Verify tab inside Tickets, not a top-level nav item.
+- Verify cards shown in the demo should be few, meaningful, and tied to real issues such as missing evidence, wrong attribution, or missing convention links.
+- Verify card titles are short, entity-first, no hedging. Hedging goes in `verification_question` only.
+- The demo should be able to show that a claim/page can be traced back to sources and corrected.
+
+**For content language:**
+- Every piece of generated text passes the language acceptance rules in the Content Language Acceptance section.
+- A non-technical person can read any page in the product and understand it on first read.
+- No LLM-style hedging, filler intros, or restatement fluff anywhere in the demo path.
+
+---
+
+### Demo Hardening Protocol
+
+- Do NOT do big-bang rewrites that replace ticket logic, verify-card fields, or chat retrieval in one shot.
+- Use additive migration: new fields, backfills, QA checks, and rerun validation first; remove older paths only after the new path is proven stable.
+- Preserve the working improvements already made, especially latest-run/latest-demo-state scoping and demo-state baseline/workspace/reset behavior.
+- After every accepted change set, confirm that `Discover`, `Tickets`, `Guides`, `Chat`, `KB`, and `Admin Demo State` still render from the correct scoped state.
+- Ground truth is for evaluation only. It may guide judge logic, audits, and go/no-go decisions, but must never be leaked into runtime prompts or runtime KB materialization.
+
+**Required execution order for demo hardening:**
+- `0. UI restructure` (nav, ticket cleanup, chat prompts, entity cleanup, KB sidebar, Verify merge, Guides cleanup, Discover page, right panel rename)
+- `1. Chat scoping`
+- `2. Proposed ticket materialization`
+- `3. Convention application`
+- `4. Hidden conventions page`
+- `5. Verify cleanup`
+- `6. Content language pass`
+- `7. Final demo smoke test`
+
+**How each phase should be worked:**
+- Make the smallest change set that should improve the active phase.
+- Rerun from the earliest changed step, not the whole pipeline unless required.
+- Compare the new result against this goal file plus the relevant ground-truth sections.
+- Apply the language quality gate to every phase that generates text.
+- Inspect both the step artifacts and the live product surfaces.
+- If the change improves the target area and does not regress another accepted area, keep it.
+- If it regresses another accepted area, stop, fix that regression, and rerun the same phase again.
+- Do not move to the next phase until the current phase exit gate AND language quality gate are both satisfied.
+
+**How to make sure we are not making things worse:**
+- Before any change: capture the current state of every demo surface (screenshot, run ID, demo state).
+- After any change: compare. If any surface is worse, reject the change until the regression is fixed.
+- Track accepted prompt versions. Only modify from the last accepted version.
+- Change one prompt at a time, not batch changes. Rerun, re-check, accept or reject.
+- Never accept "X improved but Y broke" — both must be at least as good as before.
+
+---
+
+### What "Failure" Looks Like
+
+- **Fragmented conventions**: Instead of one "Kim's Color Convention" entity, there are 6 separate decisions ("Use pink/blue on pet cards", "Use green for donate button", "Use green for sponsor button", etc.) with no connection between them. A new team member reading the KB would see individual page-level choices, not the pattern.
+
+- **No edges on discovery nodes**: Step 8 finds the Toy Donation Feature but it floats in the graph with zero connections. The How-To step can't find any conventions to reference because there are no edges to follow. The generated guide is generic: "Build a donation page" with no mention of team conventions.
+
+- **Bare entities**: Half the entities have `_description` but no `description`, or processes have `process_status` while projects have `status`, or discovery nodes have no `documentation_level`. Page generation LLMs get inconsistent data and produce uneven pages.
+
+- **Wrong attributions**: Kim's color decisions are attributed to Tim (because Tim's PRs implement Kim's designs and his name appears in the source text). Matt's browse pattern is attributed to Jack (because Jack's PRs are the ones being reviewed). The `decided_by` field tells the wrong story.
+
+- **Overwhelming verify cards**: 150+ cards, most of them S4 noise like "Missing optional section 'Known Issues' on date-fns library page". The real issues (wrong attributions, contradictory statuses) are buried.
+
+- **Conventions invisible on team member pages**: Kim's entity page talks about her design work but never mentions her color convention because the template has no section for it and the graph context doesn't surface it.
+
+- **How-To guides ignore conventions**: The Toy Donation Feature guide says "design a UI for toy selection" instead of "use a vertical sidebar for toy category selection (Tim's convention)."
+
+- **No proposed ticket for the demo story**: The Toy Donation evidence exists only as feedback or as a proposed project, but no proposed ticket shows up on the Tickets page.
+
+- **Wrong-tenant chat**: A PawFinder question in chat answers from Brew & Go or another company.
+
+- **Empty Hidden Conventions page**: The page exists in navigation but contains no content.
+
+- **Partial How-To payoff**: The How-To only mentions one convention and misses Tim's and Matt's patterns.
+
+- **Admin-tool UI on the demo path**: Ticket detail shows sources and linked entities duplicated in the body instead of the right panel. KB sidebar lists 17 raw entity types. Chat prompts are generic. Navigation has 8 undifferentiated items.
+
+- **Bad generated language**: Ticket titles are full sentences ("A ticket for building a shelter comparison feature allowing users to..."). Verify card titles are hedge-heavy paragraphs. Entity page items start with "This entity represents..." or "Based on the available evidence...". How-to sections give generic advice without naming specific conventions. Chat answers start with "Based on the available knowledge base context...". A viewer reads the text and thinks "an AI wrote this, and it's not very good."
+
+---
+
+### The Demo Pitch
+
+The single most powerful thing this pipeline should enable:
+
+> "We found that across 10 different sources over 2 years, your UX designer consistently uses pink for female animals, blue for male animals, and green for money-related CTAs. This was never documented as a convention, but it is one. Here are all 10 sources. And when we wrote the implementation guide for the Toy Donation Feature your customers keep requesting, we automatically applied this convention along with 2 others we discovered."
+
+That's Layer 3. If the pipeline achieves that, with full traceability back to original sources, it's a success. Everything else — clean entities, complete attributes, manageable verify cards — is infrastructure to make that possible.

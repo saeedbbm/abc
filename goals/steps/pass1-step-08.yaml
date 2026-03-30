@@ -1,0 +1,69 @@
+step_id: pass1-step-08
+step_number: 8
+step_name: Project & Ticket Discovery
+pass: pass1
+
+purpose: >
+  Emit discovery hypotheses with evidence packs for undocumented work and proposed
+  work that earlier steps did not canonically capture, while avoiding automatic
+  Jira-title-to-project promotion.
+
+inputs:
+  - step 5 canonical nodes
+  - step 1 parsed documents
+  - graph context from earlier steps when helpful
+
+primary_outputs:
+  - discovery hypothesis nodes with category, description, and evidence packs
+  - proposed features or projects from recurring external signals
+  - undocumented work hypotheses inferred from internal evidence
+
+judge_should_look_at:
+  - discovery hypotheses by category
+  - sampled hypothesis nodes and their source_refs
+  - whether recurring evidence is grouped into one feature instead of ticket noise
+
+must_do:
+  - discover real undocumented work from observations and canonical gaps
+  - consider recurring feedback as a signal for proposed features
+  - attach useful descriptions and evidence packs to discovery nodes
+  - deduplicate discoveries against existing canonical entities
+
+must_not_do:
+  - invent synthetic ticket-shaped noise from vague conversations or feedback
+  - split one recurring feature request into multiple duplicate discoveries
+  - produce bare discovery nodes with weak evidence
+  - auto-promote Jira-only titles into project hypotheses
+  - depend on benchmark-specific names or counts
+
+success_signals:
+  - recurring requests become one coherent proposed feature or project node
+  - undocumented work is found with enough evidence to survive downstream steps
+  - discovery output adds signal rather than clutter
+
+failure_signals:
+  - many low-confidence proposed tickets crowd out real discoveries
+  - recurring feedback is fragmented across multiple nodes
+  - discovery duplicates entities that already exist
+
+deterministic_checks:
+  - key: discovery_count_positive
+    description: Discovery should find at least some items on non-trivial runs.
+    mode: gte
+    target: 1
+  - key: category_diversity
+    description: Discovery should usually cover more than one category.
+    mode: gte
+    target: 2
+  - key: zero_jira_auto_project_promotions
+    description: Step 8 should not auto-promote Jira-only titles into project hypotheses.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - discovery nodes are evidence-backed and not mostly noise
+    - recurring user requests are grouped into coherent feature candidates
+  block_when:
+    - proposed-ticket noise dominates the step
+    - important recurring signals remain fragmented or duplicate existing entities

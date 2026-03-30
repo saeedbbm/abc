@@ -1,0 +1,22 @@
+step_id: pass1-step-05
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Canonicalize only strong duplicate identities.
+  - Avoid merging parent work with child work or project with decision/process.
+
+benchmark_must_fit:
+  - Merge true duplicates like repeated ticket or PR references.
+  - Keep distinct scopes separate so later Toy Donation and convention wiring stay possible.
+
+benchmark_watchouts:
+  - Treating merge as a fix for wrong ontology
+  - Collapsing project, process, and decision nodes because names overlap
+
+benchmark_questions:
+  - Are real duplicates merged while distinct scopes remain separate?
+  - Does the canonical entity set still preserve the benchmark’s real project boundaries?

@@ -1,6 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ModelSettings } from "@/src/entities/models/kb2-company-config";
+import { getServerEnv, getOptionalServerEnv } from "@/lib/server-env";
 
 const DEFAULT_FAST = "claude-sonnet-4-6";
 const DEFAULT_REASONING = "claude-opus-4-6";
@@ -22,18 +23,12 @@ export function calculateCostUsd(
 }
 
 function getAnthropicProvider() {
-    const apiKey = process.env.ANTHROPIC_API_KEY || '';
-    if (!apiKey) {
-        throw new Error('ANTHROPIC_API_KEY not configured.');
-    }
+    const apiKey = getServerEnv("ANTHROPIC_API_KEY");
     return createAnthropic({ apiKey });
 }
 
 function getOpenAIProvider() {
-    const apiKey = process.env.OPENAI_API_KEY || '';
-    if (!apiKey) {
-        throw new Error('OPENAI_API_KEY not configured.');
-    }
+    const apiKey = getServerEnv("OPENAI_API_KEY");
     return createOpenAI({ apiKey });
 }
 
@@ -66,16 +61,16 @@ export function getPrimaryModel(models?: ModelSettings) {
 }
 
 export function getCrossCheckModel(models?: ModelSettings) {
-    const name = models?.judge ?? process.env.CROSS_CHECK_MODEL ?? DEFAULT_JUDGE;
+    const name = models?.judge ?? getOptionalServerEnv("CROSS_CHECK_MODEL") ?? DEFAULT_JUDGE;
     return resolveModel(name);
 }
 
 export function getCrossCheckModelName(models?: ModelSettings): string {
-    return models?.judge ?? process.env.CROSS_CHECK_MODEL ?? DEFAULT_JUDGE;
+    return models?.judge ?? getOptionalServerEnv("CROSS_CHECK_MODEL") ?? DEFAULT_JUDGE;
 }
 
 export function getEmbeddingModel() {
     return getOpenAIProvider().embedding(
-        process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
+        getOptionalServerEnv("EMBEDDING_MODEL") || 'text-embedding-3-small'
     );
 }

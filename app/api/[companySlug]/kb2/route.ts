@@ -1,22 +1,16 @@
 import { NextRequest } from "next/server";
+import { getTenantCollections } from "@/lib/mongodb";
 import {
-  kb2RawInputsCollection,
-  kb2InputSnapshotsCollection,
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-  kb2ClaimsCollection,
-  kb2FactGroupsCollection,
-  kb2VerificationCardsCollection,
-  kb2EntityPagesCollection,
-  kb2HumanPagesCollection,
-  kb2RunsCollection,
-  kb2RunStepsCollection,
-  kb2LLMCallsCollection,
-  kb2TicketsCollection,
-  kb2HowtoCollection,
-  kb2PeopleCollection,
-  getTenantCollections,
-} from "@/lib/mongodb";
+  getLatestCompletedRunId,
+  getLatestCompletedStepExecutionId,
+  getLatestRunIdFromCollection,
+} from "@/src/application/lib/kb2/run-scope";
+import {
+  buildBaselineRunFilter,
+  buildStateFilter,
+  isWorkspaceLikeState,
+  resolveActiveDemoState,
+} from "@/src/application/lib/kb2/demo-state";
 
 export async function GET(
   request: NextRequest,
@@ -26,7 +20,41 @@ export async function GET(
   const type = request.nextUrl.searchParams.get("type");
   const runId = request.nextUrl.searchParams.get("run_id");
   const executionId = request.nextUrl.searchParams.get("execution_id");
+  const stateId = request.nextUrl.searchParams.get("state_id");
   const tc = getTenantCollections(companySlug);
+  const activeDemoState =
+    !runId && !executionId
+      ? await resolveActiveDemoState(tc, companySlug, stateId)
+      : stateId
+        ? await resolveActiveDemoState(tc, companySlug, stateId)
+        : null;
+  const baseRunIdFromState = activeDemoState?.base_run_id ?? null;
+
+  function baselineFilterForRun(targetRunId: string): Record<string, any> {
+    return buildBaselineRunFilter(targetRunId) as Record<string, any>;
+  }
+
+  function demoFilterForCollection(targetRunId?: string): Record<string, any> {
+    if (isWorkspaceLikeState(activeDemoState)) {
+      return buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+    }
+    if (targetRunId) {
+      return baselineFilterForRun(targetRunId);
+    }
+    return { demo_state_id: { $exists: false } };
+  }
+
+  function dedupeGraphNodes(nodes: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    const seen = new Set<string>();
+    return nodes.filter((node) => {
+      const nodeId = typeof node.node_id === "string" && node.node_id.trim().length > 0
+        ? node.node_id
+        : `${String(node.type ?? "")}:${String(node.display_name ?? "")}`;
+      if (seen.has(nodeId)) return false;
+      seen.add(nodeId);
+      return true;
+    });
+  }
 
   const filter: Record<string, any> = {};
   if (executionId) {
@@ -73,6 +101,7 @@ export async function GET(
       }
       const inputFilter: Record<string, any> = {};
       if (runId) inputFilter.run_id = runId;
+      else if (baseRunIdFromState) inputFilter.run_id = baseRunIdFromState;
       const doc = await tc.input_snapshots.findOne(inputFilter, { sort: { created_at: -1 } });
       return Response.json({ snapshot: doc });
     }
@@ -83,17 +112,21 @@ export async function GET(
       }
 
       const peopleFilter: Record<string, any> = { node_type: "team_member" };
-      if (!filter.run_id) {
+      let effectiveRunId = filter.run_id as string | undefined;
+      if (!effectiveRunId) {
         const runIdsWithEP = await tc.entity_pages.distinct("run_id");
-        if (runIdsWithEP.length > 0) {
-          const latestRun = await tc.runs.findOne(
-            { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) peopleFilter.run_id = latestRun.run_id;
-        }
-      } else {
-        peopleFilter.run_id = filter.run_id;
+        effectiveRunId = runIdsWithEP.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithEP)) ?? undefined
+          : undefined;
+      }
+
+      const latestEntityPagesExecId = effectiveRunId
+        ? await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-14")
+        : null;
+      if (latestEntityPagesExecId) {
+        peopleFilter.execution_id = latestEntityPagesExecId;
+      } else if (effectiveRunId) {
+        peopleFilter.run_id = effectiveRunId;
       }
 
       const personPages = await tc.entity_pages.find(peopleFilter).toArray();
@@ -120,24 +153,37 @@ export async function GET(
     }
     case "graph_nodes": {
       if (executionId) {
-        const nodes = await tc.graph_nodes.find({ execution_id: executionId }).toArray();
+        const nodes = await tc.graph_nodes.find({ execution_id: executionId, demo_state_id: { $exists: false } }).toArray();
         if (nodes.length > 0) return Response.json({ nodes });
       }
-      let effectiveRunId = runId ?? undefined;
+      if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
+        const nodes = await tc.graph_nodes.find(buildStateFilter(activeDemoState.state_id)).toArray();
+        return Response.json({ nodes: dedupeGraphNodes(nodes) });
+      }
+      let effectiveRunId = runId ?? baseRunIdFromState ?? undefined;
       if (!effectiveRunId) {
-        const runIdsWithNodes = await tc.graph_nodes.distinct("run_id");
-        if (runIdsWithNodes.length > 0) {
-          const latestRun = await tc.runs.findOne(
-            { run_id: { $in: runIdsWithNodes }, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) effectiveRunId = (latestRun as any).run_id;
+        const runIdsWithNodes = await tc.graph_nodes.distinct("run_id", { demo_state_id: { $exists: false } });
+        effectiveRunId = runIdsWithNodes.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithNodes)) ?? undefined
+          : undefined;
+      }
+      if (effectiveRunId) {
+        const latestStep9ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-9");
+        const latestStep10ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-10");
+        const latestStep11ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-11");
+        const latestNodeExecIds = [latestStep9ExecId, latestStep10ExecId, latestStep11ExecId].filter(Boolean);
+        if (latestNodeExecIds.length > 0) {
+          const nodes = await tc.graph_nodes.find({
+            execution_id: { $in: latestNodeExecIds },
+            demo_state_id: { $exists: false },
+          }).toArray();
+          return Response.json({ nodes: dedupeGraphNodes(nodes) });
         }
       }
-      const gnFilter: Record<string, any> = {};
-      if (effectiveRunId) gnFilter.run_id = effectiveRunId;
-      const nodes = await tc.graph_nodes.find(gnFilter).toArray();
-      return Response.json({ nodes });
+      const nodes = await tc.graph_nodes.find(
+        effectiveRunId ? baselineFilterForRun(effectiveRunId) : { demo_state_id: { $exists: false } },
+      ).toArray();
+      return Response.json({ nodes: dedupeGraphNodes(nodes) });
     }
     case "graph_edges": {
       if (executionId) {
@@ -145,17 +191,27 @@ export async function GET(
         if (edges.length > 0) return Response.json({ edges });
       }
       const edgeFilter: Record<string, any> = {};
-      if (runId) edgeFilter.run_id = runId;
+      const effectiveRunId =
+        runId
+        ?? baseRunIdFromState
+        ?? await getLatestRunIdFromCollection(tc, companySlug, tc.graph_edges);
+      if (effectiveRunId) edgeFilter.run_id = effectiveRunId;
       const edges = await tc.graph_edges.find(edgeFilter).toArray();
       return Response.json({ edges });
     }
     case "claims": {
       if (executionId) {
-        const claims = await tc.claims.find({ execution_id: executionId }).toArray();
+        const claims = await tc.claims.find({ execution_id: executionId, demo_state_id: { $exists: false } }).toArray();
         if (claims.length > 0) return Response.json({ claims });
       }
       const claimsFilter: Record<string, any> = {};
-      if (runId) claimsFilter.run_id = runId;
+      const effectiveRunId =
+        runId
+        ?? baseRunIdFromState
+        ?? await getLatestRunIdFromCollection(tc, companySlug, {
+          distinct: (field: string) => tc.claims.distinct(field, { demo_state_id: { $exists: false } }),
+        });
+      Object.assign(claimsFilter, demoFilterForCollection(effectiveRunId ?? undefined));
       const claims = await tc.claims.find(claimsFilter).toArray();
       return Response.json({ claims });
     }
@@ -165,48 +221,54 @@ export async function GET(
         if (groups.length > 0) return Response.json({ groups });
       }
       const fgFilter: Record<string, any> = {};
-      if (runId) fgFilter.run_id = runId;
+      const effectiveRunId = runId ?? await getLatestRunIdFromCollection(tc, companySlug, tc.fact_groups);
+      if (effectiveRunId) fgFilter.run_id = effectiveRunId;
       const groups = await tc.fact_groups.find(fgFilter).toArray();
       return Response.json({ groups });
     }
     case "verify_cards": {
       if (executionId) {
-        const cards = await tc.verification_cards.find({ execution_id: executionId }).toArray();
+        const cards = await tc.verification_cards.find({ execution_id: executionId, demo_state_id: { $exists: false } }).toArray();
         if (cards.length > 0) return Response.json({ cards });
       }
       const vcFilter: Record<string, any> = {};
-      if (runId) {
-        vcFilter.run_id = runId;
-      } else {
-        const runIdsWithCards = await tc.verification_cards.distinct("run_id");
-        if (runIdsWithCards.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithCards }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) vcFilter.run_id = latestRun.run_id;
-        }
-      }
+      const effectiveRunId =
+        runId
+        ?? baseRunIdFromState
+        ?? await getLatestRunIdFromCollection(tc, companySlug, {
+          distinct: (field: string) => tc.verification_cards.distinct(field, { demo_state_id: { $exists: false } }),
+        })
+        ?? await getLatestCompletedRunId(tc, companySlug);
+      Object.assign(vcFilter, demoFilterForCollection(effectiveRunId ?? undefined));
       const cards = await tc.verification_cards.find(vcFilter).toArray();
       return Response.json({ cards });
     }
     case "entity_pages": {
       if (executionId) {
-        const pages = await tc.entity_pages.find({ execution_id: executionId }).toArray();
+        const pages = await tc.entity_pages.find({ execution_id: executionId, demo_state_id: { $exists: false } }).toArray();
         if (pages.length > 0) return Response.json({ pages });
       }
+      if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
+        const pages = await tc.entity_pages.find(buildStateFilter(activeDemoState.state_id)).toArray();
+        return Response.json({ pages });
+      }
       const epFilter: Record<string, any> = {};
-      if (runId) {
-        epFilter.run_id = runId;
+      let effectiveRunId = runId ?? baseRunIdFromState ?? undefined;
+      if (!effectiveRunId) {
+        const runIdsWithEP = await tc.entity_pages.distinct("run_id", { demo_state_id: { $exists: false } });
+        effectiveRunId = runIdsWithEP.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithEP)) ?? undefined
+          : undefined;
+      }
+      const latestEntityPagesExecId = effectiveRunId
+        ? await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-14")
+        : null;
+      if (latestEntityPagesExecId) {
+        epFilter.execution_id = latestEntityPagesExecId;
+      } else if (effectiveRunId) {
+        Object.assign(epFilter, baselineFilterForRun(effectiveRunId));
       } else {
-        const runIdsWithEP = await tc.entity_pages.distinct("run_id");
-        if (runIdsWithEP.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) epFilter.run_id = latestRun.run_id;
-        }
+        epFilter.demo_state_id = { $exists: false };
       }
       const pages = await tc.entity_pages.find(epFilter).toArray();
       return Response.json({ pages });
@@ -217,17 +279,20 @@ export async function GET(
         if (pages.length > 0) return Response.json({ pages });
       }
       const hpFilter: Record<string, any> = {};
-      if (runId) {
-        hpFilter.run_id = runId;
-      } else {
+      let effectiveRunId = runId ?? baseRunIdFromState ?? undefined;
+      if (!effectiveRunId) {
         const runIdsWithHP = await tc.human_pages.distinct("run_id");
-        if (runIdsWithHP.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithHP }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) hpFilter.run_id = latestRun.run_id;
-        }
+        effectiveRunId = runIdsWithHP.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithHP)) ?? undefined
+          : undefined;
+      }
+      const latestHumanPagesExecId = effectiveRunId
+        ? await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-15")
+        : null;
+      if (latestHumanPagesExecId) {
+        hpFilter.execution_id = latestHumanPagesExecId;
+      } else if (effectiveRunId) {
+        hpFilter.run_id = effectiveRunId;
       }
       const pages = await tc.human_pages.find(hpFilter).toArray();
       return Response.json({ pages });
@@ -258,43 +323,35 @@ export async function GET(
     }
     case "tickets": {
       if (executionId) {
-        const tickets = await tc.tickets.find({ execution_id: executionId }).sort({ created_at: -1 }).toArray();
+        const tickets = await tc.tickets.find({ execution_id: executionId, demo_state_id: { $exists: false } }).sort({ created_at: -1 }).toArray();
         if (tickets.length > 0) return Response.json({ tickets });
       }
       const tFilter: Record<string, any> = {};
-      if (runId) {
-        tFilter.run_id = runId;
-      } else {
-        const runIdsWithTickets = await tc.tickets.distinct("run_id");
-        if (runIdsWithTickets.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithTickets }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) tFilter.run_id = latestRun.run_id;
-        }
-      }
+      const effectiveRunId =
+        runId
+        ?? baseRunIdFromState
+        ?? await getLatestRunIdFromCollection(tc, companySlug, {
+          distinct: (field: string) => tc.tickets.distinct(field, { demo_state_id: { $exists: false } }),
+        })
+        ?? await getLatestCompletedRunId(tc, companySlug);
+      Object.assign(tFilter, demoFilterForCollection(effectiveRunId ?? undefined));
       const tickets = await tc.tickets.find(tFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ tickets });
     }
     case "howto": {
       if (executionId) {
-        const howtos = await tc.howto.find({ execution_id: executionId }).sort({ created_at: -1 }).toArray();
+        const howtos = await tc.howto.find({ execution_id: executionId, demo_state_id: { $exists: false } }).sort({ created_at: -1 }).toArray();
         if (howtos.length > 0) return Response.json({ howtos });
       }
       const htFilter: Record<string, any> = {};
-      if (runId) {
-        htFilter.run_id = runId;
-      } else {
-        const runIdsWithHowto = await tc.howto.distinct("run_id");
-        if (runIdsWithHowto.length > 0) {
-          const latestRun = await kb2RunsCollection.findOne(
-            { run_id: { $in: runIdsWithHowto }, company_slug: companySlug, status: "completed" },
-            { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-          );
-          if (latestRun) htFilter.run_id = latestRun.run_id;
-        }
-      }
+      const effectiveRunId =
+        runId
+        ?? baseRunIdFromState
+        ?? await getLatestRunIdFromCollection(tc, companySlug, {
+          distinct: (field: string) => tc.howto.distinct(field, { demo_state_id: { $exists: false } }),
+        })
+        ?? await getLatestCompletedRunId(tc, companySlug);
+      Object.assign(htFilter, demoFilterForCollection(effectiveRunId ?? undefined));
       const howtos = await tc.howto.find(htFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ howtos });
     }
@@ -314,11 +371,13 @@ export async function GET(
       const docId = request.nextUrl.searchParams.get("doc_id");
       if (!docId) return Response.json({ error: "Missing doc_id" }, { status: 400 });
       const sourceType = request.nextUrl.searchParams.get("source_type");
-      const runId = request.nextUrl.searchParams.get("run_id");
+      const requestedParsedRunId = request.nextUrl.searchParams.get("run_id");
 
       const snapshotFilter: Record<string, any> = { company_slug: companySlug };
-      if (runId) {
-        snapshotFilter.run_id = runId;
+      if (requestedParsedRunId) {
+        snapshotFilter.run_id = requestedParsedRunId;
+      } else if (baseRunIdFromState) {
+        snapshotFilter.run_id = baseRunIdFromState;
       } else {
         const latestRun = await tc.runs.findOne(
           { company_slug: companySlug, status: "completed" },

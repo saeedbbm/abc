@@ -1,0 +1,204 @@
+# Demo Story
+
+## Big Picture
+- The most appealing demo is not "we can run an agent."
+- The most appealing demo is: customers asked for something new, the KB discovered the real feature request, surfaced the hidden team conventions that should shape it, and turned that into a concrete How-To guide.
+- The main wow factor should end at the generated How-To document.
+- Execute is a bonus because implementation is what Claude Code or another coding agent does with the guide, not the core value of the KB itself.
+
+## Why This Demo Is Strong
+- It starts from real customer pull, not an internal roadmap.
+- It shows undocumented knowledge, not just documentation search.
+- It connects product demand to engineering guidance without a human manually stitching the story together.
+- It shows why the KB matters to multiple audiences, not only developers.
+
+## Ideal Demo Flow
+1. Open **Discover** — show the three customer feedback requests about toy donation and gifting to a specific pet, the proposed project `Toy Donation Feature`, and the hidden conventions.
+2. Open **Tickets** — show the proposed ticket that turns the discovered opportunity into actionable work.
+3. Open **Guides** — show `How-To: Toy Donation Feature` as the payoff artifact. This is the main wow moment.
+4. Open **Chat** — show four role-based questions answering the same story for different audiences.
+5. Open **Tickets > Verify tab** — briefly show the trust/governance layer.
+6. Optionally show **Guides > Execute** as icing on top.
+7. Open **KB** only if someone asks to drill into the full knowledge base reference.
+
+## Product Navigation
+
+### Primary nav (5 items)
+- `Discover` — customer feedback clusters, proposed projects, hidden conventions/patterns. The demo entry point and "look what we found" moment.
+- `Tickets` — tasks (past/ongoing/proposed) with a **Verify** tab for trust/governance cards.
+- `Guides` — how-to implementation guides with an **Execute** tab for agent handoff. Sources visible in the right panel.
+- `Chat` — role-aware Q&A grounded in PawFinder evidence. Suggested prompts match the four demo roles.
+- `KB` — full knowledge base reference (human pages + entity pages). The deep-dive shelf, not the demo starting point.
+
+### Secondary nav (below separator)
+- `Settings` — company configuration, integrations. For the company IT person.
+- `Admin` — pipeline runs, graph explorer, demo state. For the Pidrax developer.
+
+### Why this order
+- **Discover** is first because the demo story starts from customer evidence, not from a database index.
+- **Tickets** is second because after seeing the evidence, you want to see the actionable work.
+- **Guides** is third because the How-To is the payoff: conventions applied to real implementation guidance.
+- **Chat** is fourth because it proves the KB is usable by different roles, not just engineers.
+- **KB** is last in the primary group because it is the reference shelf — valuable but not where the story starts.
+- **Settings** and **Admin** are separated because they are operator tools, not demo surfaces.
+
+## Content Presentation Rules
+
+### Ticket detail layout
+- Title (h1)
+- Description text
+- Subtasks: show existing subtask list + add input. If no subtasks exist, just show the input, no "No subtasks yet" label.
+- Comments: show existing comments + textarea. If no comments, just show the textarea, no "Comments (0)" label.
+- Details row: Status dropdown, Priority dropdown, Source badge, Created date — all in one compact row.
+- "Edit in Verify" as a small secondary link at the bottom of the detail, not a prominent button in the middle.
+- Sources and linked entities belong in the **right panel** (Sources tab and Related tab), NOT duplicated inside the ticket body.
+
+### Entity pages
+- Sections as clean bullet points.
+- No MUST/SHOULD requirement badges.
+- No confidence level badges (or subtle dot on hover only).
+- Empty sections do not render — no "Unknown" in red text.
+- "Edit in Verify" pencil stays on selected items as a subtle action, not a prominent element.
+
+### KB sidebar
+- 17 entity types collapsed into 5 human-friendly groups: People & Teams, Projects & Work, Decisions & Patterns, Systems & Infrastructure, Feedback.
+
+### Bullet points over prose
+- Entity details, key decisions, linked items use short bullet points, not paragraphs.
+
+### No data model leaking into UI
+- No raw type names, no structural badges, no empty-state labels.
+
+### Source in the right panel
+- Every page feeds source refs into the right panel Sources tab.
+- Every page feeds linked entities into the right panel Related tab.
+- Guides show sources from linked tickets, projects, and conventions.
+- Discover shows sources from the feedback items and convention evidence.
+- Sources and linked entities are NOT duplicated inside the main content body. The right panel is where you look at them.
+
+### Chat prompts match the demo
+- Developer: "What conventions and implementation patterns should I follow for Toy Donation?"
+- Product manager: "What customer evidence supports Toy Donation Feature, and what should the MVP include?"
+- Project manager: "What owners, dependencies, and workstreams does Toy Donation touch?"
+- Executive: "Why does this matter, what customer demand supports it, and what makes it feasible or risky?"
+
+### Right panel tabs
+- **Sources** — raw source documents with excerpt highlighting. Same as today.
+- **Related** — related entity page summaries as clean bullet points (renamed from "AI KB Pages").
+- **Chat** — contextual mini-chat scoped to the selected item.
+
+## Content Language Rules
+
+All generated text that a user reads — ticket titles, ticket descriptions, verify card titles, entity page items, how-to sections, human page paragraphs — must follow these rules:
+
+### Write like a human, not like an LLM
+- No "A Jira ticket for building..." restatements. Show the actual Jira title and description directly.
+- No hedge-padding: avoid "may", "potentially", "it appears that", "based on the available evidence" in titles and summaries. State the fact or the question plainly.
+- No filler intros: skip "This project involves..." or "This decision relates to..." — start with the actual content.
+- Short sentences. Active voice. Plain English. No jargon unless the jargon is the actual technical term from the source.
+
+### Titles must be scannable
+- Ticket titles: action-oriented or noun-phrase. "Toy Donation Feature", "Shelter Comparison Page", not "A ticket for building a shelter comparison feature allowing users to..."
+- Verify card titles: entity-first, short. "Kim Color Convention — Missing Source Ref", not "The color convention attributed to Kim may be missing a source reference from the 2024 Slack conversation".
+- Entity page titles: the entity name. "Kim", "Pet Adoption Chooser", "Client-Side Browse Pattern".
+- How-to titles: "How-To: Toy Donation Feature", not "Implementation Guide for the Proposed Toy Donation Feature Based on Customer Feedback".
+
+### Descriptions must be useful, not restated
+- Ticket description: what needs to be done, in 2-4 sentences max. Not a restatement of the title. Not a summary of the source. The source is in the right panel — the description adds context the source doesn't give.
+- Verify card description: what is wrong, what should be checked, what to do about it. Not a restatement of the title with more hedging.
+- Entity page items: one fact per bullet. Not a paragraph crammed into a list item.
+
+### The rerun-until-readable protocol
+- After every prompt change or pipeline rerun that generates user-facing text, sample 5 outputs and read them as a human would.
+- Check: Would you show this to a non-technical person without embarrassment? Would they understand it on first read?
+- If any title is longer than 10 words, rewrite the prompt and rerun.
+- If any description starts with "A Jira ticket for..." or "This entity represents...", rewrite the prompt and rerun.
+- If any verify card title contains "may", "potentially", or "appears to", rewrite the prompt and rerun.
+- Keep rerunning the same step until the sampled outputs pass. Do not advance to the next phase with bad language.
+
+## What The Demo Should Show In Each Surface
+
+### Discover
+- Show the three toy-donation feedback submissions as clean blockquotes with source badges and dates.
+- Show `Toy Donation Feature` as a proposed project card with a one-line description and linked feedback count.
+- Show the three hidden conventions (Kim's Color, Tim's Layout, Matt's Browse) as compact pattern cards with owner name and evidence count.
+- Right panel shows source documents for whatever card you click.
+- No edit controls. Pure read-only storytelling.
+
+### Tickets
+- **Tasks tab**: left sidebar with Past / Ongoing / Proposed groups. Detail view shows title, description, subtasks (with add input), comments (with textarea), compact details row (status dropdown, priority dropdown, source badge, date). "Edit in Verify" as a small link at the bottom. Sources and linked entities in the right panel only.
+- **Verify tab**: same sidebar space switches to verify cards grouped by severity. Center shows card detail with problem, verification question, supporting/missing evidence. This is the trust layer.
+- A proposed ticket for toy donation is visible under Proposed, linked to the project and feedback sources.
+
+### Guides
+- Left sidebar with Tickets / Projects / How-to tabs (simplified — remove the 3 filter dropdowns, keep just search + tabs).
+- Detail view shows the how-to content as clean readable sections.
+- Sources from linked tickets, projects, and conventions appear in the right panel.
+- Human/AI Agent toggle is subtle (small toggle, not a prominent mode switch). Discussion section is collapsed by default.
+- Execute is accessible as a tab or secondary action within a guide, not its own top-level page.
+
+### Chat
+- Four role-based suggested prompts (developer, PM, project manager, executive).
+- Answers grounded in PawFinder evidence only. No Brew & Go contamination.
+- Right panel shows sources and related KB pages from the latest answer.
+
+### KB
+- Left sidebar simplified: Human pages grouped by layer (Company, Engineering, etc.). AI entities grouped into 5 buckets (People & Teams, Projects & Work, Decisions & Patterns, Systems & Infrastructure, Feedback).
+- Entity pages show sections as clean bullet points without MUST/SHOULD badges or confidence levels.
+- Human pages show narrative text with highlighted entity references.
+- Right panel shows sources for the selected page or entity.
+
+## Hardening Sequence Before Final Live Demo
+- The final live demo should not be treated as ready until the execution sequence in `plan-march-23.txt` has passed in order.
+- The required hardening order is:
+- `0. UI restructure` — nav, ticket cleanup, chat prompts, entity page cleanup, KB sidebar, Verify merge, Discover page.
+- `1. Chat scoping` — fix tenant contamination.
+- `2. Proposed ticket materialization` — feedback -> proposed ticket.
+- `3. Convention application` — Kim, Tim, Matt linked to Toy Donation.
+- `4. Hidden conventions page` — populate the page after convention graph is stable.
+- `5. Verify cleanup` — dedupe, normalize, support the demo.
+- `6. Content language pass` — rerun-until-readable on all user-facing text.
+- `7. Final demo smoke test` — end-to-end pass.
+
+## What Must Stay Stable While Hardening
+- Baseline/workspace/checkpoint demo-state behavior should stay stable.
+- Latest-run and latest-demo-state scoping should stay stable.
+- We should not accept a fix that makes one surface look better but quietly breaks another already-working surface.
+- Every hardening phase should be checked against `goals/goal.txt` plus the relevant `ground-truth/*` files before moving on.
+
+## Current Readiness Of The Existing Build
+
+### Strong Enough Today
+- The three toy-donation feedback items exist in the data.
+- A proposed project exists: `Toy Donation Feature`.
+- A generated guide exists: `How-To: Toy Donation Feature`.
+- The current How-To already carries the green CTA convention and the specific-pet donation idea.
+- Execute can be shown as bonus simulation only.
+
+### Not Ready Yet For The Full Story
+- The current Tickets page does not show a clear toy-donation proposed ticket.
+- The `Hidden Conventions & Patterns` page currently exists but is empty.
+- The graph does not clearly connect Toy Donation to Kim, Tim, and Matt in the way the demo needs.
+- The current How-To reflects Kim's color rule much more clearly than Tim's and Matt's patterns.
+- Chat is not safe to demo live until tenant scoping is fixed and PawFinder questions cannot answer from another company.
+- Verify can be shown as a generic workflow, but not yet as the core proof of the toy-donation story.
+- The UI has 8 flat nav items instead of the 5+2 structure. KB sidebar exposes 17 raw entity types. Chat prompts are generic.
+- Generated text quality is uneven: some ticket descriptions start with "A Jira ticket for...", verify card titles are long hedge-heavy sentences, entity page items mix confidence levels into the reading flow.
+
+## Best Honest Demo To Give Right Now
+- Open Discover (once built) or KB to show the customer feedback evidence.
+- Show `Toy Donation Feature` as a proposed project.
+- Show `How-To: Toy Donation Feature` as the main payoff.
+- Mention that Execute exists as a bonus handoff into Claude Code.
+- Do not rely on Tickets for the toy-donation proposed ticket until materialization is done.
+- Do not rely on live chat until tenant scoping is fixed.
+
+## Best Final Demo To Aim For
+- Discover shows the feedback, proposed project, and hidden conventions.
+- Tickets shows the proposed implementation work.
+- Guides shows the How-To that applies Kim, Tim, and Matt.
+- Chat explains the same story for developer, PM, project manager, and executive.
+- Verify (inside Tickets) proves traceability and correctness.
+- Execute (inside Guides) is the optional next step.
+- KB is the full reference shelf for anyone who wants to drill deeper.
+- Every piece of generated text reads like a human wrote it. No LLM hedging, no restatement fluff, no jargon soup.

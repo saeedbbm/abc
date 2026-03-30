@@ -1,0 +1,21 @@
+step_id: pass1-step-06
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Keep Step 6 conservative and source-derived.
+  - Do not create benchmark-looking semantics from plain co-occurrence.
+
+benchmark_must_fit:
+  - APPLIES_TO and PROPOSED_BY should not appear just because related entities were mentioned together.
+  - The graph should stay precise enough that later convention wiring is meaningful.
+
+benchmark_watchouts:
+  - Co-occurrence-only semantic edges
+  - Early graph density that looks useful but is not source-grounded
+
+benchmark_questions:
+  - Are Step 6 edges visibly grounded in explicit relationships or structured provenance?
+  - Did the step avoid creating fake convention-style semantics too early?

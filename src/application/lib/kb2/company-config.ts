@@ -96,6 +96,51 @@ function backfillPrompts(data: CompanyConfigData): CompanyConfigData {
   return { ...data, prompts: merged as PromptsConfig };
 }
 
+function backfillKBStructure(data: CompanyConfigData): CompanyConfigData {
+  const defaults = buildDefaultConfigData();
+  if (!defaults.kb_structure || !data.kb_structure) return data;
+
+  let patched = false;
+  const mergedLayers = { ...data.kb_structure.layers } as KBStructureConfig["layers"];
+
+  for (const [layer, defaultLayer] of Object.entries(defaults.kb_structure.layers)) {
+    const existingLayer = mergedLayers[layer as keyof KBStructureConfig["layers"]];
+    if (!existingLayer) {
+      mergedLayers[layer as keyof KBStructureConfig["layers"]] = {
+        enabled: defaultLayer.enabled,
+        pages: defaultLayer.pages.map((page) => ({ ...page })),
+      };
+      patched = true;
+      continue;
+    }
+
+    const existingPages = existingLayer.pages ?? [];
+    const existingCategories = new Set(existingPages.map((page) => page.category));
+    const missingPages = defaultLayer.pages
+      .filter((page) => !existingCategories.has(page.category))
+      .map((page) => ({ ...page }));
+
+    if (missingPages.length === 0) continue;
+
+    mergedLayers[layer as keyof KBStructureConfig["layers"]] = {
+      ...existingLayer,
+      pages: [...existingPages, ...missingPages].sort(
+        (a, b) => a.order - b.order || a.title.localeCompare(b.title),
+      ),
+    };
+    patched = true;
+  }
+
+  if (!patched) return data;
+  return {
+    ...data,
+    kb_structure: {
+      ...data.kb_structure,
+      layers: mergedLayers,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Core reader
 // ---------------------------------------------------------------------------
@@ -114,7 +159,7 @@ export async function getCompanyConfig(companySlug: string): Promise<CompanyConf
   const activeVersion = doc.versions.find((v) => v.version === doc!.active_version);
   if (!activeVersion) return null;
 
-  const data = backfillPrompts(activeVersion.data);
+  const data = backfillKBStructure(backfillPrompts(activeVersion.data));
   configCache.set(companySlug, { data, version: activeVersion.version, ts: Date.now() });
   return data;
 }
@@ -138,16 +183,7 @@ export async function getCompanyContext(companySlug: string): Promise<string> {
 export async function getProfile(companySlug: string): Promise<ProfileConfig> {
   const cfg = await getCompanyConfig(companySlug);
   if (cfg?.profile) return cfg.profile;
-  return {
-    company_context: "",
-    company_name: "",
-    business_model: "b2c",
-    product_type: "web_app",
-    project_prefix: "",
-    acronyms: [],
-    focus_areas: [],
-    exclusions: "",
-  };
+  return { ...DEFAULT_PROFILE };
 }
 
 // ---------------------------------------------------------------------------
@@ -170,16 +206,22 @@ export async function getHumanPages(companySlug: string): Promise<HumanPageCateg
   const cfg = await getCompanyConfig(companySlug);
   if (cfg?.kb_structure) {
     const pages: HumanPageCategory[] = [];
+    const defaultPagesByCategory = new Map(
+      STANDARD_HUMAN_PAGES.map((page) => [page.category, page] as const),
+    );
     for (const [layer, layerCfg] of Object.entries(cfg.kb_structure.layers)) {
       if (!layerCfg.enabled) continue;
       for (const p of layerCfg.pages) {
         if (!p.enabled) continue;
+        const defaultPage = defaultPagesByCategory.get(p.category);
         pages.push({
           category: p.category,
           layer: p.layer,
           title: p.title,
           description: p.description,
-          relatedEntityTypes: p.relatedEntityTypes,
+          // Keep existing labels, but use the latest default entity coverage
+          // so old configs do not stay stuck on outdated page wiring.
+          relatedEntityTypes: defaultPage?.relatedEntityTypes ?? p.relatedEntityTypes,
         });
       }
     }

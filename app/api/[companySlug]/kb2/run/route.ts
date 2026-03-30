@@ -28,7 +28,7 @@ export async function POST(
 ) {
   const { companySlug } = await params;
   const body = await request.json();
-  const { pass, step, fromStep, reuseRunId } = body;
+  const { pass, step, fromStep, toStep, reuseRunId } = body;
 
   ensureStepsRegistered();
 
@@ -49,6 +49,7 @@ export async function POST(
         pass: pass || "all",
         step: step ? Number(step) : undefined,
         fromStep: fromStep ? Number(fromStep) : undefined,
+        toStep: toStep ? Number(toStep) : undefined,
         reuseRunId,
         onProgress: async (detail, percent, stepPercent?, stepId?) => {
           await send({ type: "progress", detail, percent, step_percent: stepPercent, step_id: stepId });

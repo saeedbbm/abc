@@ -1,9 +1,15 @@
 import { NextRequest } from "next/server";
-import { kb2HowtoCollection, kb2TicketsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel } from "@/lib/ai-model";
 import { generateText } from "ai";
 import { spawn } from "child_process";
 import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
+import {
+  buildBaselineRunFilter,
+  buildStateFilter,
+  isWorkspaceLikeState,
+  resolveActiveDemoState,
+} from "@/src/application/lib/kb2/demo-state";
 
 export const maxDuration = 300;
 
@@ -12,9 +18,19 @@ export async function POST(
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const tc = getTenantCollections(companySlug);
   const config = await getCompanyConfig(companySlug);
   const body = await request.json();
   const { agentId, task, repo, branch, mode, howtoId, ticketId } = body;
+  const activeDemoState = await resolveActiveDemoState(tc, companySlug);
+  let readFilter: Record<string, unknown>;
+  if (isWorkspaceLikeState(activeDemoState)) {
+    readFilter = buildStateFilter(activeDemoState.state_id);
+  } else if (activeDemoState) {
+    readFilter = buildBaselineRunFilter(activeDemoState.base_run_id);
+  } else {
+    readFilter = { demo_state_id: { $exists: false } };
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -33,7 +49,7 @@ export async function POST(
         let ticketContent = "";
 
         if (howtoId) {
-          const howto = await kb2HowtoCollection.findOne({ howto_id: howtoId });
+          const howto = await tc.howto.findOne({ howto_id: howtoId, ...readFilter });
           if (howto) {
             howtoContent = (howto as any).sections
               ?.map((s: any) => `## ${s.section_name}\n${s.content}`)
@@ -43,7 +59,7 @@ export async function POST(
         }
 
         if (ticketId) {
-          const ticket = await kb2TicketsCollection.findOne({ ticket_id: ticketId });
+          const ticket = await tc.tickets.findOne({ ticket_id: ticketId, ...readFilter });
           if (ticket) {
             ticketContent = `Ticket: ${(ticket as any).title}\n${(ticket as any).description}`;
             send({ type: "progress", detail: `Loaded ticket: ${(ticket as any).title}`, percent: 15 });

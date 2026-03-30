@@ -1,18 +1,18 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import {
-  kb2VerificationCardsCollection,
-  kb2EntityPagesCollection,
-  kb2TicketsCollection,
-  kb2GraphNodesCollection,
-  kb2GraphEdgesCollection,
-  kb2RunsCollection,
-} from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { generateText } from "ai";
 import { PrefixLogger } from "@/lib/utils";
 import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
+import { getLatestCompletedRunId, getLatestRunIdFromCollection } from "@/src/application/lib/kb2/run-scope";
+import {
+  buildBaselineRunFilter,
+  buildStateFilter,
+  isWorkspaceLikeState,
+  resolveActiveDemoState,
+} from "@/src/application/lib/kb2/demo-state";
 
 export const maxDuration = 120;
 
@@ -23,40 +23,48 @@ const AffectedNodesSchema = z.object({
   reasoning: z.string().describe("Brief explanation of why these nodes are affected"),
 });
 
-async function resolveLatestRunId(companySlug: string): Promise<string | null> {
-  const runIdsWithEP = await kb2EntityPagesCollection.distinct("run_id");
-  if (runIdsWithEP.length === 0) return null;
-  const latestRun = await kb2RunsCollection.findOne(
-    { run_id: { $in: runIdsWithEP }, company_slug: companySlug, status: "completed" },
-    { sort: { completed_at: -1 }, projection: { run_id: 1 } },
-  );
-  return latestRun?.run_id ?? null;
-}
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const tc = getTenantCollections(companySlug);
   const config = await getCompanyConfig(companySlug);
   const { cardId, modificationText, answers } = await request.json();
   const logger = new PrefixLogger("verify-check");
+  const activeDemoState = await resolveActiveDemoState(tc, companySlug);
+  let activeStateFilter: Record<string, unknown>;
+  if (isWorkspaceLikeState(activeDemoState)) {
+    activeStateFilter = buildStateFilter(activeDemoState.state_id);
+  } else if (activeDemoState) {
+    activeStateFilter = buildBaselineRunFilter(activeDemoState.base_run_id);
+  } else {
+    activeStateFilter = { demo_state_id: { $exists: false } };
+  }
 
   if (!cardId || !modificationText) {
     return Response.json({ error: "Missing cardId or modificationText" }, { status: 400 });
   }
 
-  const card = await kb2VerificationCardsCollection.findOne({ card_id: cardId });
+  const card = await tc.verification_cards.findOne({ card_id: cardId, ...activeStateFilter });
   if (!card) return Response.json({ error: "Card not found" }, { status: 404 });
 
-  const runId = await resolveLatestRunId(companySlug);
+  const runId =
+    (typeof card.run_id === "string" && card.run_id.trim().length > 0 ? card.run_id : null)
+    ?? await getLatestRunIdFromCollection(tc, companySlug, tc.entity_pages)
+    ?? await getLatestCompletedRunId(tc, companySlug);
   const runFilter: Record<string, any> = {};
-  if (runId) runFilter.run_id = runId;
+  if (isWorkspaceLikeState(activeDemoState)) {
+    Object.assign(runFilter, buildStateFilter(activeDemoState.state_id));
+  } else if (runId) {
+    Object.assign(runFilter, buildBaselineRunFilter(runId));
+  }
 
   // ── Step 1: Get all graph nodes and entity pages for context ──
-  const allNodes = await kb2GraphNodesCollection.find(runFilter).toArray();
-  const allEdges = await kb2GraphEdgesCollection.find(runFilter).toArray();
-  const allPages = await kb2EntityPagesCollection.find(runFilter).toArray();
+  const allNodes = await tc.graph_nodes.find(runFilter).toArray();
+  const edgeFilter = runId ? buildBaselineRunFilter(runId) : {};
+  const allEdges = await tc.graph_edges.find(edgeFilter).toArray();
+  const allPages = await tc.entity_pages.find(runFilter).toArray();
 
   const nodeList = allNodes.map((n: any) => `- ${n.display_name} [${n.type}] (node_id: ${n.node_id})`).join("\n");
 
@@ -152,7 +160,7 @@ Which nodes have entity pages that would need to change? List ALL of them by dis
   }
 
   // Also check tickets
-  const allTickets = await kb2TicketsCollection.find(runFilter).toArray();
+  const allTickets = await tc.tickets.find(runFilter).toArray();
   const affectedTickets: any[] = [];
   for (const ticket of allTickets) {
     const linkedIds = (ticket as any).linked_entity_ids ?? [];
@@ -169,7 +177,7 @@ Which nodes have entity pages that would need to change? List ALL of them by dis
     return Response.json({
       drafts: [],
       questions: [`No affected pages found. The LLM identified these nodes as affected: ${[...affectedNames].join(", ")}. But no matching entity pages were found.`],
-      debug: { reasoning: identifyResult.reasoning, affectedNames: [...affectedNames], nodesTotal: allNodes.length, pagesTotal: allPages.length },
+      debug: { reasoning: identifyReasoning, affectedNames: [...affectedNames], nodesTotal: allNodes.length, pagesTotal: allPages.length },
     });
   }
 
@@ -249,7 +257,7 @@ Pages to process:
 ${batchContext}
 
 Apply the change. Skip pages that don't need changes.`,
-        maxTokens: config?.pipeline_settings?.verify_check?.max_tokens ?? 16384,
+        maxOutputTokens: config?.pipeline_settings?.verify_check?.max_tokens ?? 16384,
       });
 
       let parsed: { drafts: any[]; questions: string[] };

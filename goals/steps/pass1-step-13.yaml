@@ -1,0 +1,62 @@
+step_id: pass1-step-13
+step_number: 13
+step_name: GraphRAG Retrieval
+pass: pass1
+
+purpose: >
+  Build retrieval packs for planned pages by combining graph context and source
+  snippets so later generation steps are grounded in the right evidence.
+
+inputs:
+  - step 12 page plan
+  - step 9 canonical entities
+  - step 10 convention entities
+  - step 6, 7, and 11 graph edges
+  - step 1 parsed documents and step 2 embeddings
+
+primary_outputs:
+  - retrieval packs for entity pages and human pages
+  - graph context snippets
+  - document and vector snippets for generation
+
+judge_should_look_at:
+  - retrieval pack count versus planned page count
+  - sampled packs for conventions, proposed features, and human pages
+  - whether graph and source evidence complement each other
+
+must_do:
+  - read the correct page plan artifact
+  - retrieve context relevant to each planned page
+  - include multi-hop graph context when it materially helps a page
+  - keep retrieval focused enough to support factual generation
+
+must_not_do:
+  - read the wrong upstream artifact
+  - retrieve mostly irrelevant snippets
+  - ignore graph structure when building packs for conventions or proposed features
+
+success_signals:
+  - most planned pages have useful retrieval packs
+  - convention packs include supporting decisions, owners, and applicable features when available
+  - human page packs include the right cross-entity context
+
+failure_signals:
+  - retrieval is missing for planned pages
+  - convention or feature pages lack the context needed to explain relationships
+  - packs are noisy enough to encourage hallucination
+
+deterministic_checks:
+  - key: retrieval_pack_count_matches_plan
+    description: Retrieval packs should be generated for planned pages.
+    mode: eq
+    target: 1
+  - key: sampled_packs_have_graph_and_source_context
+    description: Sampled retrieval packs should contain both graph and evidence context when relevant.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - retrieval packs are available and relevant for planned pages
+  block_when:
+    - retrieval is missing, grossly irrelevant, or structurally incomplete for important pages

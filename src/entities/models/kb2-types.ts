@@ -157,6 +157,7 @@ export type KB2FactGroupType = z.infer<typeof KB2FactGroup>;
 export const KB2VerificationCard = z.object({
   card_id: z.string(),
   run_id: z.string(),
+  execution_id: z.string().optional(),
   card_type: KB2VerifyCardTypeEnum,
   severity: KB2SeverityEnum,
   title: z.string(),

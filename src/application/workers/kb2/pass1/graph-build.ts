@@ -61,7 +61,7 @@ const EDGE_RULES: Record<string, EdgeRule> = {
   USES:        { validSources: new Set([...PERSON_TYPES, ...WORK_ITEMS, "process"]), validTargets: new Set([...TECH_ITEMS, "integration"]), reversible: true },
   CONTAINS:    { validSources: CONTAINER_TYPES, validTargets: CHILD_TYPES, reversible: false },
   PART_OF:     { validSources: CHILD_TYPES, validTargets: CONTAINER_TYPES, reversible: false },
-  APPLIES_TO:  { validSources: new Set(["decision", "process", "integration"]), validTargets: new Set([...WORK_ITEMS, "integration", "repository"]), reversible: true },
+  APPLIES_TO:  { validSources: new Set(["decision"]), validTargets: new Set(["project"]), reversible: true },
   PROPOSED_BY: { validSources: new Set(["decision"]), validTargets: PERSON_TYPES, reversible: true },
   BUILT_BY:    { validSources: WORK_ITEMS, validTargets: PERSON_TYPES, reversible: true },
   OWNED_BY:    { validSources: new Set([...WORK_ITEMS, "process", "repository"]), validTargets: new Set([...PERSON_TYPES, ...ORGS]), reversible: true },
@@ -309,8 +309,8 @@ CRITICAL RULES for source → target direction:
 - USES: person/project → library/infrastructure/integration (never library → team)
 - CONTAINS: parent → child (project → ticket, team → person)
 - PART_OF: child → parent (ticket → project, library → repository)
-- APPLIES_TO: decision/process → project/ticket (never project → decision)
-- PROPOSED_BY: decision → person who proposed it
+- APPLIES_TO: ONLY for convention/rule → feature/project. Do NOT use for generic decision or process co-occurrence.
+- PROPOSED_BY: ONLY for convention/feature/decision → person who originated it. Do NOT use for generic mentions.
 - BUILT_BY: project/ticket → person who built it
 - RESOLVES: pull_request → ticket
 - FEEDBACK_FROM: customer_feedback → person/company
@@ -318,6 +318,11 @@ CRITICAL RULES for source → target direction:
 - OWNED_BY: project/process → person/team
 - RELATED_TO: only when no better type fits
 - NONE: co-occurrence without a meaningful relationship (prefer this over guessing)
+
+ADDITIONAL TYPE CONSTRAINTS:
+- Person → Project: prefer WORKS_ON or REVIEWS. Never use APPLIES_TO or PROPOSED_BY.
+- Decision → Project: use RELATED_TO at weight 0.3 (not APPLIES_TO unless the decision is a rule/convention).
+- If you are unsure between APPLIES_TO/PROPOSED_BY and a simpler type, choose the simpler type or NONE.
 
 Valid types: ${LLM_EDGE_TYPES.join(", ")}
 Return "source" and "target" as the exact display_name strings provided, respecting the direction rules above.`;
@@ -382,6 +387,11 @@ Return "source" and "target" as the exact display_name strings provided, respect
         if (edgeKeySet.has(key)) continue;
         edgeKeySet.add(key);
 
+        let coWeight = 0.8;
+        if (inferred.type === "RELATED_TO" && srcType === "decision" && WORK_ITEMS.has(tgtType)) {
+          coWeight = 0.3;
+        }
+
         edges.push({
           edge_id: randomUUID(),
           run_id: ctx.runId,
@@ -389,7 +399,7 @@ Return "source" and "target" as the exact display_name strings provided, respect
           source_node_id: srcId,
           target_node_id: tgtId,
           type: inferred.type as KB2EdgeType,
-          weight: 0.8,
+          weight: coWeight,
           evidence: inferred.evidence,
         });
         llmInferredCount++;
@@ -441,16 +451,25 @@ Return "source" and "target" as the exact display_name strings provided, respect
     { name: "Avg edges per entity", actual: avgEdgesPerEntity, target: 2, mode: "gte" },
   ], 70);
 
+  const edgeTypeDistribution: Record<string, number> = {};
+  for (const e of validEdges) {
+    edgeTypeDistribution[e.type] = (edgeTypeDistribution[e.type] ?? 0) + 1;
+  }
+
+  const mentionRefCount = Object.values(docMentions).reduce((sum, ids) => sum + ids.length, 0);
+
   const result = {
-    total_edges: validEdges.length,
     relationship_edges: validEdges.length - llmInferredCount,
-    llm_inferred_edges: llmInferredCount,
-    dropped_dangling: droppedCount,
+    cooccurrence_edges: llmInferredCount,
+    total_edges: validEdges.length,
+    mention_refs: mentionRefCount,
+    edge_type_distribution: edgeTypeDistribution,
+    dangling_edge_count: droppedCount,
+    connectivity_pct: connectivityPct,
     dropped_by_type_constraint: llmDropped + relDropped,
     flipped_by_type_constraint: llmFlipped + relFlipped,
     nodes_processed: nodes.length,
     unique_edge_types: uniqueEdgeTypes.size,
-    connectivity_pct: connectivityPct,
     doc_mentions: docMentions,
     judge_score: deterministicResult.overall_score,
     judge_pass: deterministicResult.pass,

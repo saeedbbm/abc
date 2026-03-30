@@ -272,7 +272,7 @@ export interface HumanPageCategory {
 }
 
 export const STANDARD_HUMAN_PAGES: HumanPageCategory[] = [
-  { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client_company"] },
+  { category: "company_overview", layer: "company", title: "Company Overview", description: "Mission, products, revenue model, history", relatedEntityTypes: ["client_company", "repository", "project", "team", "team_member"] },
   { category: "org_structure", layer: "company", title: "Org Structure", description: "Teams, reporting, on-call, cross-team dependencies", relatedEntityTypes: ["team", "team_member"] },
   { category: "onboarding", layer: "company", title: "Onboarding", description: "Getting started guide for new employees", relatedEntityTypes: ["team_member", "team", "repository", "environment"] },
   { category: "architecture_overview", layer: "engineering", title: "System Architecture", description: "High-level architecture, repository map, data flow, infrastructure", relatedEntityTypes: ["repository", "infrastructure", "cloud_resource", "database", "integration", "environment"] },
@@ -280,11 +280,11 @@ export const STANDARD_HUMAN_PAGES: HumanPageCategory[] = [
   { category: "hidden_conventions", layer: "engineering", title: "Hidden Conventions & Patterns", description: "Cross-cutting conventions discovered from repeated behavior — design patterns, architecture patterns, and team conventions that were never formally documented", relatedEntityTypes: ["decision", "team_member"] },
   { category: "processes", layer: "engineering", title: "Team Processes & Workflows", description: "Repeatable workflows, procedures, and practices", relatedEntityTypes: ["process", "team"] },
   { category: "environments_deploy", layer: "engineering", title: "Environments & Deployment", description: "Dev/staging/prod, CI/CD pipelines, deploy process", relatedEntityTypes: ["environment", "pipeline", "repository"] },
-  { category: "past_documented", layer: "engineering", title: "Past Projects (Documented)", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project", "team_member"] },
-  { category: "past_undocumented", layer: "engineering", title: "Past Projects (Discovered)", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"] },
-  { category: "ongoing_documented", layer: "engineering", title: "Ongoing Projects (Documented)", description: "Active projects with explicit documentation", relatedEntityTypes: ["project", "team_member"] },
-  { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Projects (Discovered)", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project", "team_member"] },
-  { category: "proposed_projects", layer: "engineering", title: "Proposed Projects", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project", "team_member"] },
+  { category: "past_documented", layer: "engineering", title: "Past Projects (Documented)", description: "Completed projects with explicit documentation", relatedEntityTypes: ["project"] },
+  { category: "past_undocumented", layer: "engineering", title: "Past Projects (Discovered)", description: "Completed projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project"] },
+  { category: "ongoing_documented", layer: "engineering", title: "Ongoing Projects (Documented)", description: "Active projects with explicit documentation", relatedEntityTypes: ["project"] },
+  { category: "ongoing_undocumented", layer: "engineering", title: "Ongoing Projects (Discovered)", description: "Active projects inferred from conversations, PRs, or code", relatedEntityTypes: ["project"] },
+  { category: "proposed_projects", layer: "engineering", title: "Proposed Projects", description: "Suggested projects from feedback or conversations", relatedEntityTypes: ["project"] },
   { category: "tech_stack", layer: "engineering", title: "Tech Stack & Libraries", description: "Languages, frameworks, key dependencies with versions", relatedEntityTypes: ["library", "repository"] },
   { category: "client_overview", layer: "marketing", title: "Client Overview", description: "Customer segments, key accounts, feedback themes", relatedEntityTypes: ["client_company", "client_person"] },
 ];

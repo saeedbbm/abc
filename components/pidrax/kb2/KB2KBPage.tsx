@@ -79,6 +79,71 @@ interface EntityPage {
   source_refs?: { source_type: string; doc_id: string; title: string; excerpt: string }[];
 }
 
+interface GraphNodeSummary {
+  display_name: string;
+  type: string;
+  truth_status?: string;
+  attributes?: Record<string, any>;
+  source_refs: {
+    source_type: string;
+    doc_id: string;
+    title: string;
+    section_heading?: string;
+    excerpt: string;
+  }[];
+}
+
+type ProjectBucketLabel =
+  | "Past Documented"
+  | "Past Undocumented"
+  | "Ongoing Documented"
+  | "Ongoing Undocumented"
+  | "Proposed";
+
+function classifyProjectBucket(node?: GraphNodeSummary): ProjectBucketLabel {
+  const disc = typeof node?.attributes?.discovery_category === "string"
+    ? node.attributes.discovery_category
+    : "";
+  const status = typeof node?.attributes?.status === "string"
+    ? node.attributes.status.toLowerCase()
+    : "";
+  const docLevel = typeof node?.attributes?.documentation_level === "string"
+    ? node.attributes.documentation_level.toLowerCase()
+    : "";
+  const hasConfluenceSource = (node?.source_refs ?? []).some((ref) => ref.source_type === "confluence");
+  const isDone = ["done", "completed", "closed", "past"].some((token) => status.includes(token));
+  const isProposed = status === "proposed" || status === "planned";
+  const effectiveDocLevel = docLevel || (hasConfluenceSource ? "documented" : "");
+  const isDocumented = effectiveDocLevel === "documented";
+  const isUndocumented = effectiveDocLevel === "undocumented";
+
+  if (disc === "proposed_project" || disc === "proposed_from_feedback" || isProposed) {
+    return "Proposed";
+  }
+  if (disc === "past_undocumented") return "Past Undocumented";
+  if (disc === "ongoing_undocumented") return "Ongoing Undocumented";
+  if (disc === "past_documented") return "Past Documented";
+  if (disc === "ongoing_documented") return "Ongoing Documented";
+
+  if (isDone) {
+    return isDocumented ? "Past Documented" : "Past Undocumented";
+  }
+  if (isUndocumented) return "Ongoing Undocumented";
+  if (isDocumented || node?.truth_status === "direct") return "Ongoing Documented";
+  return "Ongoing Undocumented";
+}
+
+function isPlaceholderHumanPage(page: HumanPage | null | undefined): boolean {
+  if (!page) return false;
+  if ((page.linked_entity_page_ids ?? []).length > 0) return false;
+  const paragraphs = page.paragraphs ?? [];
+  if (paragraphs.length === 0) return true;
+  return paragraphs.every((paragraph) => {
+    const body = paragraph.body?.trim() ?? "";
+    return /^No .* data has been discovered yet\./i.test(body);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -93,13 +158,16 @@ const LAYER_LABELS: Record<string, string> = {
 
 const ENTITY_TYPE_ORDER = [
   "team_member", "team", "client_company", "client_person", "repository", "integration", "infrastructure",
-  "cloud_resource", "library", "database", "environment", "project",
+  "cloud_resource", "library", "database", "environment", "decision", "process", "project",
   "ticket", "pull_request", "pipeline", "customer_feedback",
 ];
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   person: "People",
+  team_member: "Team Members",
   team: "Teams",
   client: "Clients",
+  client_company: "Client Companies",
+  client_person: "Client People",
   repository: "Repositories",
   integration: "Integrations",
   infrastructure: "Infrastructure",
@@ -107,6 +175,8 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   library: "Libraries",
   database: "Databases",
   environment: "Environments",
+  decision: "Decisions",
+  process: "Processes",
   project: "Projects",
   ticket: "Tickets",
   pull_request: "Pull Requests",
@@ -132,7 +202,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
   const [viewTab, setViewTab] = useState("human");
   const [sidebarMode, setSidebarMode] = useState<"human" | "ai">("human");
 
-  const [graphNodes, setGraphNodes] = useState<Record<string, { display_name: string; type: string; truth_status?: string; attributes?: Record<string, any>; source_refs: { source_type: string; doc_id: string; title: string; section_heading?: string; excerpt: string }[] }>>({});
+  const [graphNodes, setGraphNodes] = useState<Record<string, GraphNodeSummary>>({});
 
   const [rightPanelContext, setRightPanelContext] = useState<AutoContext | null>(null);
   const [rightPanelSources, setRightPanelSources] = useState<SourceRef[]>([]);
@@ -165,15 +235,17 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       } catch { /* ignore config errors */ }
     }
 
-    setHumanPages(hData.pages ?? []);
-    setEntityPages(eData.pages ?? []);
+    const humanPages = hData.pages ?? [];
+    const entityPages = eData.pages ?? [];
+    setHumanPages(humanPages);
+    setEntityPages(entityPages);
     const nodeMap: typeof graphNodes = {};
     for (const n of nData.nodes ?? []) {
       nodeMap[n.node_id] = { display_name: n.display_name, type: n.type, truth_status: n.truth_status, attributes: n.attributes, source_refs: n.source_refs ?? [] };
     }
     setGraphNodes(nodeMap);
-    if (hData.pages?.length > 0) {
-      const firstPage = hData.pages[0] as HumanPage;
+    if (humanPages.length > 0) {
+      const firstPage = humanPages.find((page: HumanPage) => !isPlaceholderHumanPage(page)) ?? humanPages[0];
       setSelectedPage(firstPage);
       setRightPanelContext({
         type: "human_page",
@@ -450,21 +522,7 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                   for (const label of PROJECT_SUB_GROUPS) subGroups[label] = [];
                   for (const ep of pages) {
                     const node = graphNodes[ep.node_id];
-                    const disc = node?.attributes?.discovery_category ?? "";
-                    const status = (node?.attributes?.status ?? "").toLowerCase();
-                    const isDone = ["done", "completed", "closed", "past"].some((s) => status.includes(s));
-
-                    if (disc === "proposed_project") {
-                      subGroups["Proposed"].push(ep);
-                    } else if (disc === "past_undocumented") {
-                      subGroups["Past Undocumented"].push(ep);
-                    } else if (disc === "ongoing_undocumented") {
-                      subGroups["Ongoing Undocumented"].push(ep);
-                    } else if (node?.truth_status === "inferred") {
-                      subGroups[isDone ? "Past Undocumented" : "Ongoing Undocumented"].push(ep);
-                    } else {
-                      subGroups[isDone ? "Past Documented" : "Ongoing Documented"].push(ep);
-                    }
+                    subGroups[classifyProjectBucket(node)].push(ep);
                   }
                   return (
                     <div key={t} className="mb-1">

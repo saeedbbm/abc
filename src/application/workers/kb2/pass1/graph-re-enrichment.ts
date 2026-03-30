@@ -6,6 +6,7 @@ import { structuredGenerate } from "@/src/application/lib/llm/structured-generat
 import type { KB2GraphNodeType, KB2GraphEdgeType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
+import { tokenSimilarity } from "@/src/application/workers/kb2/utils/text-similarity";
 
 const AppliesToSchema = z.object({
   applies_to: z.array(z.object({
@@ -15,6 +16,40 @@ const AppliesToSchema = z.object({
     confidence: z.enum(["high", "medium", "low"]),
   })),
 });
+
+const TYPE_PREFIXES = /^(Decision:\s*|Process:\s*|Project:\s*|PR\s*#?\s*|Ticket:\s*)/i;
+
+function stripTypePrefix(name: string): string {
+  return name.replace(TYPE_PREFIXES, "").trim();
+}
+
+function findNodeByName(
+  name: string,
+  nodeByName: Map<string, KB2GraphNodeType>,
+  candidates: KB2GraphNodeType[],
+): { node: KB2GraphNodeType | null; method: "exact_name" | "prefix_stripped" | "token_similarity" } {
+  const normalized = name.toLowerCase().trim();
+  const exact = nodeByName.get(normalized);
+  if (exact) return { node: exact, method: "exact_name" };
+
+  const stripped = stripTypePrefix(name).toLowerCase().trim();
+  if (stripped !== normalized) {
+    const strippedMatch = nodeByName.get(stripped);
+    if (strippedMatch) return { node: strippedMatch, method: "prefix_stripped" };
+  }
+
+  let bestNode: KB2GraphNodeType | null = null;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const sim = tokenSimilarity(stripped, candidate.display_name.toLowerCase().trim());
+    if (sim > bestScore && sim >= 0.7) {
+      bestScore = sim;
+      bestNode = candidate;
+    }
+  }
+  if (bestNode) return { node: bestNode, method: "token_similarity" };
+  return { node: null, method: "exact_name" };
+}
 
 export const graphReEnrichmentStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-graph-re-enrichment");
@@ -48,12 +83,17 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
   const nodeByName = new Map<string, KB2GraphNodeType>();
   for (const n of allNodes) nodeByName.set(n.display_name.toLowerCase().trim(), n);
 
+  const decisionNodes = allNodes.filter(n => n.type === "decision");
+
   const edgeSet = new Set(existingEdges.map((e) => `${e.source_node_id}|${e.target_node_id}|${e.type}`));
   const newEdges: KB2GraphEdgeType[] = [];
   let discoveryEdgesAdded = 0;
   let conventionEdgesAdded = 0;
   let appliesToEdgesAdded = 0;
   let llmCalls = 0;
+
+  const conventionWiring: Array<{ name: string; contains_created: number; contains_missed: string[]; proposed_by_created: boolean }> = [];
+  const appliesToResults: Array<{ convention: string; feature: string; relevance: string; confidence: string }> = [];
 
   await ctx.onProgress("Connecting discovery nodes to graph...", 10);
 
@@ -80,7 +120,9 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
         type: "RELATED_TO",
         weight: 0.7,
         evidence: `[re-enrichment] Discovery "${disc.display_name}" references "${target.display_name}"`,
-      });
+        source_step: "step-11",
+        match_method: "exact_name",
+      } as any);
       discoveryEdgesAdded++;
     }
   }
@@ -95,11 +137,16 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
   for (const conv of conventionNodes) {
     if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
     const attrs = conv.attributes as Record<string, any>;
+    let containsCreated = 0;
+    const containsMissed: string[] = [];
 
     const constituents = (attrs.constituent_decisions ?? []) as string[];
     for (const decName of constituents) {
-      const decNode = nodeByName.get(decName.toLowerCase().trim());
-      if (!decNode || decNode.node_id === conv.node_id) continue;
+      const { node: decNode, method } = findNodeByName(decName, nodeByName, decisionNodes);
+      if (!decNode || decNode.node_id === conv.node_id) {
+        containsMissed.push(decName);
+        continue;
+      }
       const key = `${conv.node_id}|${decNode.node_id}|CONTAINS`;
       if (edgeSet.has(key)) continue;
       edgeSet.add(key);
@@ -112,10 +159,14 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
         type: "CONTAINS",
         weight: 1.0,
         evidence: `[re-enrichment] Convention "${conv.display_name}" contains decision "${decNode.display_name}"`,
-      });
+        source_step: "step-11",
+        match_method: method,
+      } as any);
+      containsCreated++;
       conventionEdgesAdded++;
     }
 
+    let proposedByCreated = false;
     if (attrs.established_by) {
       const person = nodeByName.get(attrs.established_by.toLowerCase().trim());
       if (person && person.node_id !== conv.node_id) {
@@ -131,19 +182,24 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
             type: "PROPOSED_BY",
             weight: 1.0,
             evidence: `[re-enrichment] Convention "${conv.display_name}" established by "${person.display_name}"`,
-          });
+            source_step: "step-11",
+            match_method: "exact_name",
+          } as any);
           conventionEdgesAdded++;
+          proposedByCreated = true;
         }
       }
     }
+
+    conventionWiring.push({ name: conv.display_name, contains_created: containsCreated, contains_missed: containsMissed, proposed_by_created: proposedByCreated });
   }
 
   await ctx.onProgress(`Added ${conventionEdgesAdded} convention edges. Finding APPLIES_TO relationships...`, 50);
 
-  // 3. Connect conventions to proposed features via LLM
+  // 3. Connect conventions to proposed features via LLM (tightened filter)
   const proposedFeatures = allNodes.filter((n) => {
     const cat = (n.attributes as any)?.discovery_category ?? "";
-    return cat.startsWith("proposed_") || (n.attributes as any)?.status === "proposed";
+    return cat === "proposed_from_feedback" || cat === "proposed_project" || (n.type === "project" && (n.attributes as any)?.status === "proposed");
   });
 
   if (conventionNodes.length > 0 && proposedFeatures.length > 0) {
@@ -159,14 +215,14 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
       return `- "${f.display_name}" [${f.type}]: ${attrs.description ?? ""}`;
     }).join("\n");
 
-    const prompt = `CONVENTIONS:\n${convContext}\n\nPROPOSED FEATURES:\n${featureContext}\n\nFor each proposed feature, determine which conventions should apply when implementing it. Only include high-confidence matches.`;
+    const prompt = `CONVENTIONS:\n${convContext}\n\nPROPOSED FEATURES/PROJECTS:\n${featureContext}\n\nFor each proposed feature or project, determine which conventions should apply when implementing it. Only include high-confidence matches where the convention's pattern_rule is clearly relevant to the feature.`;
 
     try {
       const startMs = Date.now();
       let usageData: { promptTokens: number; completionTokens: number } | null = null;
       const result = await structuredGenerate({
         model,
-        system: "You match design conventions to proposed features. A convention APPLIES_TO a feature when the feature would need to follow that convention's pattern_rule during implementation.",
+        system: "You match design conventions to proposed features. A convention APPLIES_TO a feature when the feature would need to follow that convention's pattern_rule during implementation. Only include high-confidence matches. Do not match conventions to features just because they share a topic area.",
         prompt,
         schema: AppliesToSchema,
         logger,
@@ -196,8 +252,11 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
           type: "APPLIES_TO",
           weight: 0.9,
           evidence: `[re-enrichment] ${match.relevance}`,
-        });
+          source_step: "step-11",
+          match_method: "llm",
+        } as any);
         appliesToEdgesAdded++;
+        appliesToResults.push({ convention: match.convention_name, feature: match.feature_name, relevance: match.relevance, confidence: match.confidence });
       }
     } catch (err) {
       logger.log(`APPLIES_TO LLM call failed (non-fatal): ${err}`);
@@ -208,6 +267,11 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
     await tc.graph_edges.insertMany(newEdges);
   }
 
+  const edgeSummary: Record<string, number> = {};
+  for (const e of newEdges) {
+    edgeSummary[e.type] = (edgeSummary[e.type] || 0) + 1;
+  }
+
   await ctx.onProgress(`Graph re-enrichment complete: ${newEdges.length} new edges`, 100);
   return {
     discovery_edges_added: discoveryEdgesAdded,
@@ -215,5 +279,14 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
     applies_to_edges_added: appliesToEdgesAdded,
     total_new_edges: newEdges.length,
     llm_calls: llmCalls,
+    execution_id_debug: {
+      step9_exec_id: step9ExecId,
+      step10_exec_id: step10ExecId,
+      step10_node_count: step10Nodes.length,
+      step10_convention_count: conventionNodes.length,
+    },
+    convention_wiring: conventionWiring,
+    applies_to_results: appliesToResults,
+    edge_summary: { total: newEdges.length, by_type: edgeSummary },
   };
 };

@@ -2,11 +2,18 @@ import { randomUUID } from "crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getFastModel, calculateCostUsd } from "@/lib/ai-model";
-import { kb2GraphNodesCollection, kb2TicketsCollection } from "@/lib/mongodb";
+import { getTenantCollections } from "@/lib/mongodb";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import { PrefixLogger } from "@/lib/utils";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import { getCompanyConfig } from "@/src/application/lib/kb2/company-config";
+import { getLatestCompletedRunId, getLatestRunIdFromCollection } from "@/src/application/lib/kb2/run-scope";
+import {
+  buildBaselineRunFilter,
+  buildStateFilter,
+  isWorkspaceLikeState,
+  resolveActiveDemoState,
+} from "@/src/application/lib/kb2/demo-state";
 
 export const maxDuration = 120;
 
@@ -29,8 +36,10 @@ export async function POST(
   { params }: { params: Promise<{ companySlug: string }> },
 ) {
   const { companySlug } = await params;
+  const tc = getTenantCollections(companySlug);
   const config = await getCompanyConfig(companySlug);
   const logger = new PrefixLogger("kb2-ticket-gen");
+  const activeDemoState = await resolveActiveDemoState(tc, companySlug);
 
   try {
     const { feedback } = await request.json();
@@ -38,24 +47,40 @@ export async function POST(
       return Response.json({ error: "feedback text is required" }, { status: 400 });
     }
 
-    const nodes = (await kb2GraphNodesCollection
-      .find({})
+    const runId =
+      activeDemoState?.base_run_id
+      ?? await getLatestRunIdFromCollection(tc, companySlug, {
+        distinct: (field: string) => tc.graph_nodes.distinct(field, { demo_state_id: { $exists: false } }),
+      })
+      ?? await getLatestCompletedRunId(tc, companySlug);
+    const nodeFilter = isWorkspaceLikeState(activeDemoState)
+      ? buildStateFilter(activeDemoState.state_id)
+      : runId
+        ? buildBaselineRunFilter(runId)
+        : { demo_state_id: { $exists: false } };
+    const nodes = (await tc.graph_nodes
+      .find(nodeFilter)
       .sort({ _id: -1 })
       .limit(config?.pipeline_settings?.ticket_generation?.node_limit ?? 200)
       .toArray()) as unknown as KB2GraphNodeType[];
 
-    const people = nodes
+    const people = [...new Set(nodes
       .filter((n) => n.type === "team_member")
       .map((n) => `${n.display_name}${n.attributes?.role ? ` — ${n.attributes.role}` : ""}`)
-      .join("\n");
+    )].join("\n");
 
-    const systems = nodes
+    const systems = [...new Set(nodes
       .filter((n) => ["repository", "infrastructure", "integration", "database"].includes(n.type))
       .map((n) => `${n.display_name} [${n.type}]`)
-      .join("\n");
+    )].join("\n");
 
-    const existingTickets = await kb2TicketsCollection
-      .find({})
+    const ticketFilter = isWorkspaceLikeState(activeDemoState)
+      ? buildStateFilter(activeDemoState.state_id)
+      : runId
+        ? buildBaselineRunFilter(runId)
+        : { demo_state_id: { $exists: false } };
+    const existingTickets = await tc.tickets
+      .find(ticketFilter)
       .sort({ created_at: -1 })
       .limit(config?.pipeline_settings?.ticket_generation?.existing_tickets_limit ?? 50)
       .toArray();

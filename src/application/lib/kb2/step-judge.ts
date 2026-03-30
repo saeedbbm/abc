@@ -20,11 +20,15 @@ export interface JudgeIssue {
 }
 
 export interface JudgeResult {
+  [key: string]: unknown;
   overall_score: number;
   pass: boolean;
   sub_scores: SubScore[];
   issues: JudgeIssue[];
   recommendations: string[];
+  go_no_go?: "go" | "no-go";
+  blockers?: string[];
+  rerun_from_step?: number | null;
   judge_model?: string;
   cross_check_model?: string;
   agreement_rate?: number;
@@ -50,7 +54,7 @@ export interface CrossCheckDetails {
 const LLMJudgeResponseSchema = z.object({
   sub_scores: z.array(z.object({
     name: z.string(),
-    score: z.number().min(0).max(100),
+    score: z.number(),
     reason: z.string(),
   })),
   issues: z.array(z.object({
@@ -59,9 +63,45 @@ const LLMJudgeResponseSchema = z.object({
     entity: z.string().nullable(),
   })),
   recommendations: z.array(z.string()),
+  go_no_go: z.enum(["go", "no-go"]).optional(),
+  blockers: z.array(z.string()).optional(),
+  rerun_from_step: z.number().nullable().optional(),
 });
 
 type LLMJudgeResponse = z.infer<typeof LLMJudgeResponseSchema>;
+
+function normalizeLLMResponse(raw: unknown): LLMJudgeResponse {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    sub_scores: Array.isArray(r.sub_scores)
+      ? r.sub_scores.map((s: any) => ({
+          name: String(s?.name ?? "Unknown"),
+          score: Number(s?.score ?? 0),
+          reason: String(s?.reason ?? ""),
+        }))
+      : [],
+    issues: Array.isArray(r.issues)
+      ? r.issues.map((i: any) => ({
+          severity: (["low", "medium", "high"].includes(i?.severity) ? i.severity : "low") as "low" | "medium" | "high",
+          message: String(i?.message ?? ""),
+          entity: i?.entity != null ? String(i.entity) : null,
+        }))
+      : [],
+    recommendations: Array.isArray(r.recommendations)
+      ? r.recommendations.map((x: any) => String(x))
+      : [],
+    go_no_go: r.go_no_go === "go" || r.go_no_go === "no-go"
+      ? r.go_no_go
+      : undefined,
+    blockers: Array.isArray(r.blockers)
+      ? r.blockers.map((x: any) => String(x))
+      : [],
+    rerun_from_step:
+      typeof r.rerun_from_step === "number" || r.rerun_from_step === null
+        ? r.rerun_from_step as number | null
+        : undefined,
+  };
+}
 
 // ---- Deterministic Judge ----
 
@@ -132,6 +172,9 @@ export function buildDeterministicJudge(
     sub_scores,
     issues,
     recommendations: [],
+    go_no_go: overall_score >= passingScore ? "go" : "no-go",
+    blockers: issues.filter((issue) => issue.severity === "high").map((issue) => issue.message),
+    rerun_from_step: null,
     evaluated_at: new Date().toISOString(),
   };
 }
@@ -156,8 +199,9 @@ export async function runLLMJudge(opts: RunLLMJudgeOptions): Promise<JudgeResult
   let totalCost = 0;
 
   const start = Date.now();
+  let primaryUsage: { promptTokens: number; completionTokens: number } | null = null;
 
-  const primaryResult = await structuredGenerate<LLMJudgeResponse>({
+  const rawPrimary = await structuredGenerate<LLMJudgeResponse>({
     model: opts.model,
     system: opts.systemPrompt,
     prompt: opts.userPrompt,
@@ -167,10 +211,17 @@ export async function runLLMJudge(opts: RunLLMJudgeOptions): Promise<JudgeResult
       const cost = calculateCostUsd(opts.modelName, usage.promptTokens, usage.completionTokens);
       totalTokens += usage.promptTokens + usage.completionTokens;
       totalCost += cost;
-      opts.logLLMCall(opts.stepId, opts.modelName, opts.userPrompt.slice(0, 2000), JSON.stringify(primaryResult ?? {}).slice(0, 2000), usage.promptTokens, usage.completionTokens, cost, Date.now() - start);
+      primaryUsage = usage;
     },
     signal: opts.signal,
   });
+  const primaryResult = normalizeLLMResponse(rawPrimary);
+
+  if (primaryUsage) {
+    const u = primaryUsage;
+    const cost = calculateCostUsd(opts.modelName, u.promptTokens, u.completionTokens);
+    opts.logLLMCall(opts.stepId, opts.modelName, opts.userPrompt.slice(0, 2000), JSON.stringify(primaryResult).slice(0, 2000), u.promptTokens, u.completionTokens, cost, Date.now() - start);
+  }
 
   const primaryScoreMap: Record<string, number> = {};
   for (const s of primaryResult.sub_scores) {
@@ -182,7 +233,8 @@ export async function runLLMJudge(opts: RunLLMJudgeOptions): Promise<JudgeResult
   if (opts.crossCheckModel && opts.crossCheckModelName) {
     try {
       const ccStart = Date.now();
-      const ccResult = await structuredGenerate<LLMJudgeResponse>({
+      let ccUsage: { promptTokens: number; completionTokens: number } | null = null;
+      const rawCC = await structuredGenerate<LLMJudgeResponse>({
         model: opts.crossCheckModel,
         system: opts.systemPrompt,
         prompt: opts.userPrompt,
@@ -192,10 +244,17 @@ export async function runLLMJudge(opts: RunLLMJudgeOptions): Promise<JudgeResult
           const cost = calculateCostUsd(opts.crossCheckModelName!, usage.promptTokens, usage.completionTokens);
           totalTokens += usage.promptTokens + usage.completionTokens;
           totalCost += cost;
-          opts.logLLMCall(opts.stepId, opts.crossCheckModelName!, opts.userPrompt.slice(0, 2000), JSON.stringify(ccResult ?? {}).slice(0, 2000), usage.promptTokens, usage.completionTokens, cost, Date.now() - ccStart);
+          ccUsage = usage;
         },
         signal: opts.signal,
       });
+      const ccResult = normalizeLLMResponse(rawCC);
+
+      if (ccUsage) {
+        const u = ccUsage as { promptTokens: number; completionTokens: number };
+        const cost = calculateCostUsd(opts.crossCheckModelName!, u.promptTokens, u.completionTokens);
+        opts.logLLMCall(opts.stepId, opts.crossCheckModelName!, opts.userPrompt.slice(0, 2000), JSON.stringify(ccResult).slice(0, 2000), u.promptTokens, u.completionTokens, cost, Date.now() - ccStart);
+      }
 
       const ccScoreMap: Record<string, number> = {};
       for (const s of ccResult.sub_scores) {
@@ -246,8 +305,15 @@ export async function runLLMJudge(opts: RunLLMJudgeOptions): Promise<JudgeResult
     overall_score: primaryAvg,
     pass: primaryAvg >= 70,
     sub_scores: primaryResult.sub_scores.map((s) => ({ ...s, max: 100 })),
-    issues: primaryResult.issues,
+    issues: primaryResult.issues.map((issue) => ({
+      severity: issue.severity,
+      message: issue.message,
+      entity: issue.entity ?? null,
+    })),
     recommendations: primaryResult.recommendations,
+    go_no_go: primaryResult.go_no_go ?? (primaryAvg >= 70 ? "go" : "no-go"),
+    blockers: primaryResult.blockers,
+    rerun_from_step: primaryResult.rerun_from_step,
     judge_model: opts.modelName,
     cross_check_model: opts.crossCheckModelName,
     agreement_rate: crossCheckDetails
@@ -271,13 +337,32 @@ export function mergeJudgeResults(
   const overall_score = Math.round(
     (deterministic.overall_score * deterministicWeight + llm.overall_score * llmWeight) / 100,
   );
+  const hasActionableBlock = (result: JudgeResult): boolean => {
+    const blockerCount = (result.blockers ?? []).filter((item) => item.trim().length > 0).length;
+    return (
+      blockerCount > 0
+      || typeof result.rerun_from_step === "number"
+    );
+  };
+  const deterministicBlocks =
+    (deterministic.go_no_go === "no-go" || deterministic.pass === false)
+    && hasActionableBlock(deterministic);
+  const llmBlocks =
+    (llm.go_no_go === "no-go" || llm.pass === false)
+    && hasActionableBlock(llm);
+  const mergedGoNoGo: "go" | "no-go" =
+    deterministicBlocks || llmBlocks || overall_score < 70 ? "no-go" : "go";
+  const mergedPass = mergedGoNoGo === "go";
 
   return {
     overall_score,
-    pass: overall_score >= 70,
+    pass: mergedPass,
     sub_scores: [...deterministic.sub_scores, ...llm.sub_scores],
     issues: [...deterministic.issues, ...llm.issues],
     recommendations: [...deterministic.recommendations, ...llm.recommendations],
+    go_no_go: mergedGoNoGo,
+    blockers: [...(deterministic.blockers ?? []), ...(llm.blockers ?? [])],
+    rerun_from_step: llm.rerun_from_step ?? deterministic.rerun_from_step ?? null,
     judge_model: llm.judge_model,
     cross_check_model: llm.cross_check_model,
     agreement_rate: llm.agreement_rate,

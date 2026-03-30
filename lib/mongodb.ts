@@ -61,6 +61,7 @@ export const kb2LLMCallsCollection = db.collection("kb2_llm_calls");
 export const kb2TicketsCollection = db.collection("kb2_tickets");
 export const kb2HowtoCollection = db.collection("kb2_howto");
 export const kb2PeopleCollection = db.collection("kb2_people");
+export const kb2DemoStatesCollection = db.collection("kb2_demo_states");
 
 // Global collections (not tenant-scoped — shared across all companies)
 export const kb2CompanyConfigCollection = db.collection("kb2_company_config");
@@ -88,6 +89,7 @@ export interface TenantCollections {
   tickets: Collection;
   howto: Collection;
   people: Collection;
+  demo_states: Collection;
 }
 
 export function getTenantCollections(companySlug: string): TenantCollections {
@@ -109,5 +111,6 @@ export function getTenantCollections(companySlug: string): TenantCollections {
     tickets: tdb.collection("kb2_tickets"),
     howto: tdb.collection("kb2_howto"),
     people: tdb.collection("kb2_people"),
+    demo_states: tdb.collection("kb2_demo_states"),
   };
 }

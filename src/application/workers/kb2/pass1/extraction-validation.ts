@@ -7,6 +7,7 @@ import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import { PrefixLogger, normalizeForMatch } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
+import { tokenSimilarity } from "@/src/application/workers/kb2/utils/text-similarity";
 
 const PR_PATTERN = /PR\s*#(\d+)|pull\s*request\s*#?(\d+)|#(\d+)/gi;
 const TICKET_PATTERN = /\b([A-Z]{2,10}-\d+)\b/g;
@@ -399,27 +400,6 @@ function validateAndBackfillAttributes(
 // Duplicate cluster detection
 // ---------------------------------------------------------------------------
 
-function tokenize(s: string): Set<string> {
-  return new Set(
-    s.toLowerCase()
-      .replace(/[._@]/g, " ")
-      .replace(/[^a-z0-9\s\-]/g, "")
-      .split(/[\s\-]+/)
-      .filter((t) => t.length > 1),
-  );
-}
-
-function tokenSimilarity(a: string, b: string): number {
-  const tokA = tokenize(a);
-  const tokB = tokenize(b);
-  if (tokA.size === 0 || tokB.size === 0) return 0;
-  let overlap = 0;
-  for (const t of tokA) {
-    if (tokB.has(t)) overlap++;
-  }
-  return overlap / Math.max(tokA.size, tokB.size);
-}
-
 const SKIP_SHARED_REF_DUPE_TYPES = new Set([
   "team_member", "library", "infrastructure", "integration",
   "database", "environment", "cloud_resource",
@@ -562,14 +542,6 @@ function enrichDecisionLinks(
         }
       }
 
-      if (!attrs.decided_by) {
-        const person = related.find((r) => r.type === "team_member");
-        if (person) {
-          patch.decided_by = person.name;
-          decidedByFilled++;
-          issues.push({ node_id: dec.node_id, display_name: dec.display_name, field: "decided_by", action: "backfilled", value: person.name, reason: `Team member "${person.name}" mentioned in excerpts` });
-        }
-      }
     }
 
     if (Object.keys(patch).length > 0) {

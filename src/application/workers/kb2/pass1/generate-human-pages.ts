@@ -17,7 +17,11 @@ const PROPOSED_TICKET_CATEGORIES = new Set([
 const CATEGORIES_NEEDING_REASONING = new Set([
   "architecture_overview",
   "decision_index",
+  "hidden_conventions",
+  "decisions_tradeoffs",
 ]);
+
+const COMPANY_OVERVIEW_FALLBACK_TYPES = ["repository", "project", "team", "team_member"] as const;
 
 const GeneratedHumanPageSchema = z.object({
   paragraphs: z.array(z.object({
@@ -31,6 +35,28 @@ const GeneratedHumanPageSchema = z.object({
     })).describe("Which AI page items were used to write this paragraph"),
   })),
 });
+
+function summarizeHumanPageSample(page: KB2HumanPageType) {
+  return {
+    title: page.title,
+    category: page.category,
+    linked_entity_page_ids: page.linked_entity_page_ids.slice(0, 8),
+    paragraphs: page.paragraphs.slice(0, 2).map((paragraph) => ({
+      heading: paragraph.heading,
+      body: paragraph.body.slice(0, 500),
+      entity_refs: paragraph.entity_refs,
+      source_items_count: paragraph.source_items.length,
+    })),
+  };
+}
+
+function isPlaceholderHumanPage(page: KB2HumanPageType | null | undefined): boolean {
+  if (!page) return true;
+  if ((page.linked_entity_page_ids ?? []).length > 0) return false;
+  const paragraphs = page.paragraphs ?? [];
+  if (paragraphs.length === 0) return true;
+  return paragraphs.every((paragraph) => /^No .* data has been discovered yet\./i.test(paragraph.body?.trim() ?? ""));
+}
 
 export const generateHumanPagesStep: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-gen-human-pages");
@@ -54,7 +80,7 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
 
   const proposedTicketNodeIds = new Set(
     graphNodes
-      .filter((n) => PROPOSED_TICKET_CATEGORIES.has(n.attributes?.discovery_category))
+      .filter((n) => n.type === "ticket" && PROPOSED_TICKET_CATEGORIES.has(n.attributes?.discovery_category))
       .map((n) => n.node_id),
   );
   const filteredEntityPages = entityPages.filter(
@@ -75,8 +101,18 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
   for (const ep of entityPages) {
     entityPageByName.set(ep.title.toLowerCase(), ep);
   }
+  const entityPageById = new Map<string, KB2EntityPageType>();
+  for (const ep of entityPages) {
+    entityPageById.set(ep.page_id, ep);
+    entityPageById.set(ep.node_id, ep);
+  }
 
   const pages: KB2HumanPageType[] = [];
+  const pageSamples: ReturnType<typeof summarizeHumanPageSample>[] = [];
+  const criticalPageSamples: ReturnType<typeof summarizeHumanPageSample>[] = [];
+  let totalLinkedEntityPageIds = 0;
+  let validLinkedEntityPageIds = 0;
+  const validEntityPageIds = new Set(entityPages.map((page) => page.page_id));
   let totalLLMCalls = 0;
 
   await ctx.onProgress(`Generating ${humanPlans.length} human pages from AI pages...`, 5);
@@ -117,7 +153,21 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
         return node?.type === "team_member" || node?.attributes?.is_convention === true;
       });
     }
-    const cappedPages = filteredRelatedPages.slice(0, MAX_ENTITY_PAGES);
+    let cappedPages = filteredRelatedPages.slice(0, MAX_ENTITY_PAGES);
+
+    if (cappedPages.length === 0 && hpDef.category === "company_overview") {
+      const fallbackPages = filteredEntityPages
+        .filter((page) => COMPANY_OVERVIEW_FALLBACK_TYPES.includes(page.node_type as typeof COMPANY_OVERVIEW_FALLBACK_TYPES[number]))
+        .sort((a, b) => {
+          const typeDelta =
+            COMPANY_OVERVIEW_FALLBACK_TYPES.indexOf(a.node_type as typeof COMPANY_OVERVIEW_FALLBACK_TYPES[number]) -
+            COMPANY_OVERVIEW_FALLBACK_TYPES.indexOf(b.node_type as typeof COMPANY_OVERVIEW_FALLBACK_TYPES[number]);
+          if (typeDelta !== 0) return typeDelta;
+          return a.title.localeCompare(b.title);
+        })
+        .slice(0, MAX_ENTITY_PAGES);
+      cappedPages = fallbackPages;
+    }
 
     if (cappedPages.length === 0) {
       const page: KB2HumanPageType = {
@@ -131,6 +181,7 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
           heading: hpDef.title,
           body: `No ${hpDef.title.toLowerCase()} data has been discovered yet. This page will be populated when relevant information is ingested.`,
           entity_refs: [],
+          entity_node_ids: [],
           source_items: [],
         }],
         linked_entity_page_ids: [],
@@ -155,13 +206,23 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
+    const conventionCategoryPrompt = plan.category === "hidden_conventions"
+      ? `\nSPECIAL INSTRUCTIONS for Hidden Conventions page:
+- Focus on patterns, rules, and standards that are implicitly followed but not formally documented.
+- For each convention, explain: (1) What the rule/pattern is, (2) Who established it and how, (3) Where it is currently applied, (4) What evidence (decisions, PRs, discussions) supports its existence.
+- Highlight conventions that span multiple teams or services.
+- If a convention has constituent decisions, trace the evidence trail.
+- Flag conventions at risk of being lost (e.g. established by a single person, no documentation).
+`
+      : "";
+
     let humanPageSystemPrompt = `You generate human-readable concept hub pages for a company knowledge base.
 These pages synthesize information from AI entity pages into coherent, well-structured prose.
 
 Page: "${hpDef.title}"
 Layer: ${hpDef.layer}
 Purpose: ${hpDef.description}
-
+${conventionCategoryPrompt}
 Rules:
 - Write clear, professional prose paragraphs (not bullet lists).
 - Each paragraph should have a descriptive heading.
@@ -195,7 +256,7 @@ ${entityPagesContext}`,
       ctx.logLLMCall(stepId, modelName, `Human page: ${hpDef.title}`, JSON.stringify(result, null, 2).slice(0, 5000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
-    const linkedEntityPageIds = cappedPages.map((ep) => ep.node_id).filter(Boolean);
+    const linkedEntityPageIds = cappedPages.map((ep) => ep.page_id).filter(Boolean);
 
     const paragraphs = result.paragraphs.map((p) => {
       const sourceItems = (p.used_items ?? []).map((ui) => {
@@ -240,6 +301,20 @@ ${entityPagesContext}`,
     };
 
     pages.push(page);
+    totalLinkedEntityPageIds += page.linked_entity_page_ids.length;
+    validLinkedEntityPageIds += page.linked_entity_page_ids.filter((id) => validEntityPageIds.has(id)).length;
+    const sample = summarizeHumanPageSample(page);
+    if (pageSamples.length < 5) {
+      pageSamples.push(sample);
+    }
+    if (
+      ["hidden_conventions", "proposed_projects", "past_undocumented", "ongoing_undocumented"].includes(
+        page.category,
+      ) &&
+      criticalPageSamples.length < 6
+    ) {
+      criticalPageSamples.push(sample);
+    }
 
     if ((i + 1) % 3 === 0 || i === humanPlans.length - 1) {
       const pct = Math.round(5 + ((i + 1) / humanPlans.length) * 90);
@@ -251,6 +326,37 @@ ${entityPagesContext}`,
     await tc.human_pages.insertMany(pages);
   }
 
+  const companyOverviewPage = pages.find((page) => page.category === "company_overview") ?? null;
+  const pageTitlesByCategory = pages.reduce<Record<string, string[]>>((acc, page) => {
+    (acc[page.category] ??= []).push(page.title);
+    return acc;
+  }, {});
+  for (const titles of Object.values(pageTitlesByCategory)) {
+    titles.sort((a, b) => a.localeCompare(b));
+  }
+  const projectHubLinkStats = pages
+    .filter((page) => PROJECT_CATEGORIES.has(page.category))
+    .map((page) => {
+      const linkedPages = (page.linked_entity_page_ids ?? [])
+        .map((id) => entityPageById.get(id))
+        .filter(Boolean) as KB2EntityPageType[];
+      const byType = linkedPages.reduce<Record<string, number>>((acc, linkedPage) => {
+        acc[linkedPage.node_type] = (acc[linkedPage.node_type] ?? 0) + 1;
+        return acc;
+      }, {});
+      return {
+        category: page.category,
+        linked_total: linkedPages.length,
+        linked_project_count: byType.project ?? 0,
+        linked_team_member_count: byType.team_member ?? 0,
+        linked_other_count: linkedPages.length - (byType.project ?? 0) - (byType.team_member ?? 0),
+        linked_project_titles: linkedPages
+          .filter((linkedPage) => linkedPage.node_type === "project")
+          .map((linkedPage) => linkedPage.title)
+          .sort((a, b) => a.localeCompare(b)),
+      };
+    });
+
   await ctx.onProgress(`Generated ${pages.length} human pages`, 100);
   return {
     total_pages: pages.length,
@@ -259,5 +365,21 @@ ${entityPagesContext}`,
       acc[p.layer] = (acc[p.layer] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
+    page_samples: pageSamples,
+    critical_page_samples: criticalPageSamples,
+    critical_page_titles: criticalPageSamples.map((sample) => sample.title),
+    page_titles: pages.map((page) => page.title).sort((a, b) => a.localeCompare(b)),
+    page_titles_by_category: pageTitlesByCategory,
+    company_overview: {
+      exists: Boolean(companyOverviewPage),
+      placeholder: isPlaceholderHumanPage(companyOverviewPage),
+      linked_entity_page_count: companyOverviewPage?.linked_entity_page_ids.length ?? 0,
+    },
+    project_hub_link_stats: projectHubLinkStats,
+    linked_entity_page_id_stats: {
+      total: totalLinkedEntityPageIds,
+      valid: validLinkedEntityPageIds,
+      invalid: Math.max(0, totalLinkedEntityPageIds - validLinkedEntityPageIds),
+    },
   };
 };
