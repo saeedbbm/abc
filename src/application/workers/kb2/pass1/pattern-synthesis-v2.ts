@@ -6,6 +6,7 @@ import {
   getReasoningModel,
   getReasoningModelName,
 } from "@/lib/ai-model";
+import { cleanEntityTitle } from "@/src/application/lib/kb2/title-cleanup";
 import type { KB2PatternCandidate } from "@/src/application/lib/kb2/pass1-v2-artifacts";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
@@ -33,6 +34,8 @@ Rules:
 - Create a convention when the evidence shows a reusable team rule, implementation norm, or design convention.
 - Do not require a fixed number of decision entities if the repeated evidence itself is strong.
 - Repeated UI rules, layout choices, and implementation habits across multiple documents should normally become conventions when the same owner repeatedly drives them.
+- convention_name must be a concise canonical title suitable for an entity page heading, not a raw quote, sentence fragment, or truncated excerpt.
+- Preserve concrete implementation prescriptions in summary and pattern_rule when the evidence supports them, including exact colors, layout direction, breakpoints, thresholds, and loading behavior.
 `;
 
 function deriveConventionDocumentationLevel(
@@ -88,6 +91,7 @@ export const patternSynthesisStepV2: StepFunction = async (ctx) => {
 
   for (let i = 0; i < patternCandidates.length; i++) {
     const candidate = patternCandidates[i];
+    const fallbackConventionName = cleanEntityTitle(candidate.title, "decision");
     const relatedDecisions = decisionNodes
       .filter((node) => node.source_refs.some((ref) => candidate.evidence_refs.some((candidateRef) => candidateRef.title === ref.title)))
       .map((node) => node.display_name);
@@ -140,7 +144,7 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
           run_id: ctx.runId,
           execution_id: ctx.executionId,
           type: "decision",
-          display_name: candidate.title,
+          display_name: fallbackConventionName,
           aliases: [],
           attributes: {
             is_convention: true,
@@ -160,7 +164,7 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
         };
         conventionNodes.push(node);
         phase3Conventions.push({
-          convention_name: candidate.title,
+          convention_name: fallbackConventionName,
           established_by: candidate.owner_hint,
           pattern_rule: candidate.pattern_rule,
           constituent_decisions: relatedDecisions,
@@ -187,12 +191,16 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
       candidate.evidence_refs,
       result.convention.documentation_level,
     );
+    const cleanedConventionName = cleanEntityTitle(
+      result.convention.convention_name || fallbackConventionName,
+      "decision",
+    );
     const node: KB2GraphNodeType = {
       node_id: randomUUID(),
       run_id: ctx.runId,
       execution_id: ctx.executionId,
       type: "decision",
-      display_name: result.convention.convention_name,
+      display_name: cleanedConventionName,
       aliases: [],
       attributes: {
         is_convention: true,
@@ -212,7 +220,7 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
     };
     conventionNodes.push(node);
     phase3Conventions.push({
-      convention_name: result.convention.convention_name,
+      convention_name: cleanedConventionName,
       established_by: result.convention.established_by,
       pattern_rule: result.convention.pattern_rule,
       constituent_decisions: relatedDecisions,

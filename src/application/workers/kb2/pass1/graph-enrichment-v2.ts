@@ -1,30 +1,57 @@
 import { randomUUID } from "crypto";
-import { getTenantCollections } from "@/lib/mongodb";
-import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
 import {
-  buildEvidenceRefFromDoc,
-  getDocSourceUnits,
   type KB2Observation,
   type KB2PatternCandidate,
 } from "@/src/application/lib/kb2/pass1-v2-artifacts";
+import { cleanEntityTitle } from "@/src/application/lib/kb2/title-cleanup";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
-type PatternFamily = {
-  family_id: string;
-  title: string;
-  pattern_rule: string;
-};
+const PATTERN_DISCOVERY_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|better than|instead of|always|never|layout|navigation|sidebar|filter|pagination|load|loading|cache|button|ui|api|schema|responsive|mobile)\b/i;
+const PATTERN_STOPWORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "along",
+  "also",
+  "around",
+  "because",
+  "being",
+  "build",
+  "built",
+  "change",
+  "decision",
+  "default",
+  "doing",
+  "from",
+  "have",
+  "implementation",
+  "like",
+  "make",
+  "more",
+  "pattern",
+  "signal",
+  "standard",
+  "team",
+  "that",
+  "their",
+  "there",
+  "these",
+  "this",
+  "those",
+  "using",
+  "with",
+]);
 
 type PatternSignal = {
   owner: string;
-  family_id: string;
   title: string;
   pattern_rule: string;
   doc_id: string;
   source_unit_id: string;
   source_ref: KB2PatternCandidate["evidence_refs"][number];
   observation_id?: string;
+  tokens: string[];
 };
 
 function normalizeOwnerName(value: string): string {
@@ -43,18 +70,6 @@ function ownerHintFromObservation(observation: KB2Observation): string {
   ).trim());
 }
 
-function ownerHintFromUnit(doc: KB2ParsedDocument, unit: ReturnType<typeof getDocSourceUnits>[number]): string {
-  const unitMeta = (unit.metadata ?? {}) as Record<string, unknown>;
-  const docMeta = (doc.metadata ?? {}) as Record<string, unknown>;
-  return normalizeOwnerName(String(
-    unitMeta.comment_author ??
-    unitMeta.speaker ??
-    unitMeta.author ??
-    docMeta.author ??
-    "unknown",
-  ).trim());
-}
-
 function normalizeSignalText(value: string): string {
   return value
     .toLowerCase()
@@ -63,61 +78,74 @@ function normalizeSignalText(value: string): string {
     .trim();
 }
 
-function detectPatternFamilies(text: string): PatternFamily[] {
+function extractSignalTokens(text: string): string[] {
   const normalized = normalizeSignalText(text);
-  const families: PatternFamily[] = [];
-
-  const genderColorRule =
-    /\b(pink|blue)\b/.test(normalized) &&
-    /\b(gender|male|female|boy|boys|girl|girls)\b/.test(normalized);
-  const moneyColorRule =
-    /\bgreen\b/.test(normalized) &&
-    /\b(donate|donation|sponsor|money|financial|cta|button)\b/.test(normalized);
-  if (genderColorRule || moneyColorRule) {
-    families.push({
-      family_id: "semantic_color_ui",
-      title: "Semantic Color Coding for Pet UI",
-      pattern_rule: "Use semantically meaningful colors for gender cues and money-related calls to action in pet-facing UI.",
+  const seen = new Set<string>();
+  return normalized
+    .split(" ")
+    .filter((token) => token.length >= 4 && !PATTERN_STOPWORDS.has(token))
+    .filter((token) => {
+      if (seen.has(token)) return false;
+      seen.add(token);
+      return true;
     });
-  }
+}
 
-  const layoutRule =
-    (/\b(vertical|sidebar|side menu)\b/.test(normalized) &&
-      /\b(layout|menu|navigation|category|categories|selection|choose|choosing)\b/.test(normalized)) ||
-    /\bleft side\b/.test(normalized) ||
-    /\btabs across the top\b/.test(normalized) ||
-    (/\bchoosing\b/.test(normalized) && /\bcomparing\b/.test(normalized));
-  if (layoutRule) {
-    families.push({
-      family_id: "selection_layout_ui",
-      title: "Vertical Navigation for Pick-One Browse Flows",
-      pattern_rule: "Use a vertical sidebar or left-hand navigation for pick-one browse flows instead of top tabs or comparison-oriented layouts.",
-    });
-  }
+function isPatternLikeObservation(observation: KB2Observation): boolean {
+  if (observation.observation_kind === "pattern_signal") return true;
+  if (observation.observation_kind !== "decision_signal") return false;
+  const text = [observation.label, observation.reasoning, observation.evidence_excerpt]
+    .filter(Boolean)
+    .join("\n");
+  return PATTERN_DISCOVERY_RE.test(text);
+}
 
-  const clientSideStorageSignal =
-    /\b(client side|clientside|load all|load everything|single api call|on mount|in memory|filter locally|sort locally)\b/.test(normalized) ||
-    /\bno need for pagination\b/.test(normalized);
-  const browseListContext =
-    /\b(filter|filters|pagination|page size|prev next|one pet at a time|flip through|browser|browse|list|lists|category|categories)\b/.test(normalized);
-  const smallListContext =
-    /\b(30 40|could grow|might want|borderline|under 20|15 shifts|small list|small lists)\b/.test(normalized);
-  const implicitBrowsePattern =
-    /\b(prev next|one pet at a time|flip through)\b/.test(normalized) &&
-    /\b(browse|browser|pet|list)\b/.test(normalized);
-  const clientSideRule =
-    (clientSideStorageSignal && browseListContext) ||
-    (/\bpagination\b/.test(normalized) && smallListContext) ||
-    implicitBrowsePattern;
-  if (clientSideRule) {
-    families.push({
-      family_id: "client_side_browse",
-      title: "Client-side filtering for small lists, pagination for scalable lists",
-      pattern_rule: "For small browse lists, load data once and handle filtering or navigation client-side; reserve pagination for larger or growing lists.",
-    });
-  }
+function buildPatternSignalFromObservation(observation: KB2Observation): PatternSignal | null {
+  if (!isPatternLikeObservation(observation)) return null;
+  const owner = ownerHintFromObservation(observation);
+  if (!owner || owner.toLowerCase() === "unknown") return null;
 
-  return families;
+  const text = [observation.label, observation.reasoning, observation.evidence_excerpt]
+    .filter(Boolean)
+    .join("\n");
+  const tokens = extractSignalTokens(text);
+  if (tokens.length < 2) return null;
+
+  return {
+    owner,
+    title: cleanEntityTitle(
+      observation.label || observation.evidence_excerpt || "Implementation pattern",
+      "decision",
+    ),
+    pattern_rule: observation.evidence_excerpt?.trim() || observation.reasoning.trim(),
+    doc_id: observation.doc_id,
+    source_unit_id: observation.unit_id,
+    source_ref: observation.source_ref,
+    observation_id: observation.observation_id,
+    tokens,
+  };
+}
+
+function sharedTokenCount(left: string[], right: string[]): number {
+  const rightSet = new Set(right);
+  return left.filter((token) => rightSet.has(token)).length;
+}
+
+function clusterSimilarity(signal: PatternSignal, cluster: PatternSignal[]): number {
+  const clusterTokens = Array.from(new Set(cluster.flatMap((entry) => entry.tokens)));
+  if (clusterTokens.length === 0 || signal.tokens.length === 0) return 0;
+  const shared = sharedTokenCount(signal.tokens, clusterTokens);
+  const base = shared / Math.min(signal.tokens.length, clusterTokens.length);
+  const ownerMatch = cluster.some((entry) => entry.owner.toLowerCase() === signal.owner.toLowerCase());
+  return base + (ownerMatch ? 0.25 : 0);
+}
+
+function chooseRepresentativeSignal(cluster: PatternSignal[]): PatternSignal {
+  return [...cluster].sort((a, b) =>
+    scorePatternSignal(b) - scorePatternSignal(a) ||
+    a.title.length - b.title.length ||
+    a.title.localeCompare(b.title),
+  )[0] ?? cluster[0];
 }
 
 function scorePatternSignal(signal: PatternSignal): number {
@@ -157,92 +185,61 @@ function chooseClusterOwner(cluster: PatternSignal[]): string {
 
 export const graphEnrichmentStepV2: StepFunction = async (ctx) => {
   const logger = new PrefixLogger("kb2-graph-enrichment-v2");
-  const tc = getTenantCollections(ctx.companySlug);
 
   const step3Artifact = await ctx.getStepArtifact("pass1", 3);
   const observations = ((step3Artifact?.observations ?? []) as KB2Observation[])
     .filter((observation) =>
       observation.observation_kind === "decision_signal" ||
-      observation.observation_kind === "pattern_signal" ||
-      observation.observation_kind === "work_item_signal",
+      observation.observation_kind === "pattern_signal",
     );
 
-  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
-  const snapshot = await tc.input_snapshots.findOne(
-    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
-  );
-  const docs = ((snapshot?.parsed_documents ?? []) as KB2ParsedDocument[]) ?? [];
-
   await ctx.onProgress(
-    `Mining repeated patterns from ${observations.length} observations and ${docs.length} parsed documents...`,
+    `Mining repeated patterns from ${observations.length} observations...`,
     5,
   );
 
   const dedupedSignals = new Map<string, PatternSignal>();
 
   for (const observation of observations) {
-    const owner = ownerHintFromObservation(observation);
-    if (!owner || owner.toLowerCase() === "unknown") continue;
-    const text = [observation.label, observation.reasoning, observation.evidence_excerpt]
-      .filter(Boolean)
-      .join("\n");
-    for (const family of detectPatternFamilies(text)) {
-      const signal: PatternSignal = {
-        owner,
-        family_id: family.family_id,
-        title: family.title,
-        pattern_rule: family.pattern_rule,
-        doc_id: observation.doc_id,
-        source_unit_id: observation.unit_id,
-        source_ref: observation.source_ref,
-        observation_id: observation.observation_id,
-      };
-      dedupedSignals.set(
-        `${owner.toLowerCase()}::${family.family_id}::${observation.unit_id}`,
-        signal,
-      );
-    }
+    const signal = buildPatternSignalFromObservation(observation);
+    if (!signal) continue;
+    dedupedSignals.set(
+      `${signal.owner.toLowerCase()}::${signal.source_unit_id}::${signal.tokens.slice(0, 4).join(":")}`,
+      signal,
+    );
   }
 
-  for (const doc of docs) {
-    if (doc.provider === "customerFeedback") continue;
-    for (const unit of getDocSourceUnits(doc)) {
-      const owner = ownerHintFromUnit(doc, unit);
-      if (!owner || owner.toLowerCase() === "unknown") continue;
-      const text = `${unit.title}\n${unit.text}`;
-      if (text.trim().length < 20) continue;
-      for (const family of detectPatternFamilies(text)) {
-        const signal: PatternSignal = {
-          owner,
-          family_id: family.family_id,
-          title: family.title,
-          pattern_rule: family.pattern_rule,
-          doc_id: doc.sourceId,
-          source_unit_id: unit.unit_id,
-          source_ref: buildEvidenceRefFromDoc(doc, unit.text, unit),
-        };
-        dedupedSignals.set(
-          `${owner.toLowerCase()}::${family.family_id}::${unit.unit_id}`,
-          signal,
-        );
+  const clusters: PatternSignal[][] = [];
+  for (const signal of dedupedSignals.values()) {
+    let bestClusterIndex = -1;
+    let bestScore = 0;
+    for (let index = 0; index < clusters.length; index++) {
+      const cluster = clusters[index];
+      const clusterTokens = Array.from(new Set(cluster.flatMap((entry) => entry.tokens)));
+      const shared = sharedTokenCount(signal.tokens, clusterTokens);
+      const similarity = clusterSimilarity(signal, cluster);
+      const ownerMatch = cluster.some((entry) => entry.owner.toLowerCase() === signal.owner.toLowerCase());
+      const eligible = (ownerMatch && shared >= 2) || shared >= 3 || similarity >= 0.75;
+      if (!eligible) continue;
+      if (similarity > bestScore) {
+        bestScore = similarity;
+        bestClusterIndex = index;
       }
     }
-  }
-
-  const clusters = new Map<string, PatternSignal[]>();
-  for (const signal of dedupedSignals.values()) {
-    const clusterKey = signal.family_id;
-    const existing = clusters.get(clusterKey) ?? [];
-    existing.push(signal);
-    clusters.set(clusterKey, existing);
+    if (bestClusterIndex === -1) {
+      clusters.push([signal]);
+    } else {
+      clusters[bestClusterIndex].push(signal);
+    }
   }
 
   const patternCandidates: KB2PatternCandidate[] = [];
-  for (const [, cluster] of clusters) {
+  for (const cluster of clusters) {
     const distinctDocs = new Set(cluster.map((signal) => signal.doc_id));
     if (cluster.length < 2 || distinctDocs.size < 2) continue;
 
     const sortedCluster = [...cluster].sort((a, b) => a.source_ref.title.localeCompare(b.source_ref.title));
+    const representative = chooseRepresentativeSignal(sortedCluster);
     const canonicalOwner = chooseClusterOwner(sortedCluster);
     const observationIds = Array.from(
       new Set(sortedCluster.map((signal) => signal.observation_id).filter(Boolean)),
@@ -255,12 +252,15 @@ export const graphEnrichmentStepV2: StepFunction = async (ctx) => {
     patternCandidates.push({
       pattern_id: randomUUID(),
       owner_hint: canonicalOwner,
-      title: sortedCluster[0].title,
-      pattern_rule: sortedCluster[0].pattern_rule,
+      title: representative.title,
+      pattern_rule: representative.pattern_rule,
       evidence_refs: evidenceRefs,
       observation_ids: observationIds,
       source_unit_ids: unitIds,
-      confidence: distinctDocs.size >= 3 || evidenceRefs.length >= 3 ? "high" : "medium",
+      confidence:
+        distinctDocs.size >= 3 || evidenceRefs.length >= 4 || sortedCluster.length >= 4
+          ? "high"
+          : "medium",
     });
   }
 

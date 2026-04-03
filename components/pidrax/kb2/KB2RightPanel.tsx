@@ -46,6 +46,8 @@ interface RelatedEntityPage {
   page_id: string;
   title: string;
   node_type: string;
+  highlighted_section_names?: string[];
+  highlighted_item_texts?: string[];
   sections: {
     section_name: string;
     items: { text: string; confidence: string }[];
@@ -76,22 +78,31 @@ interface KB2RightPanelProps {
   relatedEntityPages: RelatedEntityPage[];
   defaultTab?: "sources" | "kb" | "chat";
   runId?: string;
+  emptySourceMessage?: string | null;
+  emptyKbMessage?: string | null;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SOURCE_ICONS: Record<string, string> = {
-  confluence: "📄",
-  jira: "🎫",
-  slack: "💬",
-  github: "🐙",
-  feedback: "📣",
+const SOURCE_LABELS: Record<string, string> = {
+  confluence: "Confluence",
+  jira: "Jira",
+  slack: "Slack",
+  github: "GitHub",
+  feedback: "Feedback",
+  notion: "Notion",
+  teams: "Teams",
+  bitbucket: "Bitbucket",
+  zendesk: "Zendesk",
+  intercom: "Intercom",
 };
 
-function sourceIcon(sourceType: string): string {
-  return SOURCE_ICONS[sourceType] ?? "📎";
+function sourceLabel(sourceType: string): string {
+  const normalized = (sourceType ?? "").trim().toLowerCase();
+  if (!normalized) return "Source";
+  return SOURCE_LABELS[normalized] ?? normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 const CONFIDENCE_COLORS: Record<string, string> = {
@@ -108,15 +119,20 @@ function SourcesTab({
   companySlug,
   sourceRefs,
   runId,
+  emptyMessage,
 }: {
   companySlug: string;
   sourceRefs: SourceRef[];
   runId?: string;
+  emptyMessage?: string | null;
 }) {
   const [openSet, setOpenSet] = useState<Set<number>>(new Set());
   const [fullDocs, setFullDocs] = useState<Record<string, { title: string; content: string; provider?: string } | null>>({});
   const [loadingDocs, setLoadingDocs] = useState<Set<string>>(new Set());
   const fetchedRef = useRef<Set<string>>(new Set());
+
+  const getCacheKey = (ref: SourceRef): string =>
+    `${runId ?? "latest"}:${ref.source_type ?? ""}:${ref.doc_id}`;
 
   const toggle = (idx: number) => {
     setOpenSet((prev) => {
@@ -131,8 +147,8 @@ function SourcesTab({
     for (const idx of openSet) {
       const ref = sourceRefs[idx];
       if (!ref?.doc_id) continue;
-      const cacheKey = `${ref.source_type ?? ""}:${ref.doc_id}`;
-      if (fetchedRef.current.has(cacheKey)) continue;
+      const cacheKey = getCacheKey(ref);
+      if (fullDocs[cacheKey] !== undefined || fetchedRef.current.has(cacheKey)) continue;
       fetchedRef.current.add(cacheKey);
 
       setLoadingDocs((prev) => new Set(prev).add(cacheKey));
@@ -164,12 +180,10 @@ function SourcesTab({
           });
         });
     }
-  }, [openSet, sourceRefs, companySlug]);
+  }, [openSet, sourceRefs, companySlug, runId, fullDocs]);
 
   useEffect(() => {
     setOpenSet(new Set());
-    fetchedRef.current.clear();
-    setFullDocs({});
   }, [sourceRefs]);
 
   const highlightExcerpt = (content: string, excerpt?: string, sectionHeading?: string): React.ReactNode => {
@@ -340,7 +354,7 @@ function SourcesTab({
   if (sourceRefs.length === 0) {
     return (
       <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-        Select an item to see its sources.
+        {emptyMessage ?? "Select an item to see its sources."}
       </div>
     );
   }
@@ -349,7 +363,7 @@ function SourcesTab({
     <div className="space-y-2">
       {sourceRefs.map((ref, idx) => {
         const isOpen = openSet.has(idx);
-        const cacheKey = `${ref.source_type ?? ""}:${ref.doc_id}`;
+        const cacheKey = getCacheKey(ref);
         const fullDoc = fullDocs[cacheKey];
         const isLoading = loadingDocs.has(cacheKey);
         return (
@@ -361,10 +375,10 @@ function SourcesTab({
             <div className="rounded-md border border-border transition-colors">
               <CollapsibleTrigger asChild>
                 <button className="flex items-start gap-2 w-full p-3 text-left hover:bg-muted/50 rounded-md">
-                  <span className="text-base leading-none mt-0.5">
-                    {sourceIcon(ref.source_type)}
-                  </span>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <p className="text-xs font-semibold">
+                      {sourceLabel(ref.source_type)}
+                    </p>
                     <p className="text-sm font-medium truncate">{ref.title}</p>
                     {ref.section_heading && (
                       <p className="text-xs text-muted-foreground truncate">
@@ -421,8 +435,10 @@ function SourcesTab({
 
 function KBPagesTab({
   relatedEntityPages,
+  emptyMessage,
 }: {
   relatedEntityPages: RelatedEntityPage[];
+  emptyMessage?: string | null;
 }) {
   const [openSet, setOpenSet] = useState<Set<string>>(new Set());
 
@@ -435,10 +451,27 @@ function KBPagesTab({
     });
   };
 
+  useEffect(() => {
+    setOpenSet(new Set());
+  }, [relatedEntityPages]);
+
+  const isItemHighlighted = (page: RelatedEntityPage, itemText: string): boolean => {
+    const highlightedTexts = page.highlighted_item_texts ?? [];
+    if (highlightedTexts.length === 0) return false;
+    const normalizedItemText = normalizeForMatch(itemText);
+    return highlightedTexts.some((highlightedText) => {
+      const normalizedHighlight = normalizeForMatch(highlightedText);
+      return (
+        normalizedItemText.includes(normalizedHighlight) ||
+        normalizedHighlight.includes(normalizedItemText)
+      );
+    });
+  };
+
   if (relatedEntityPages.length === 0) {
     return (
       <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-        No related pages.
+        {emptyMessage ?? "Select an item to see its AI page."}
       </div>
     );
   }
@@ -469,30 +502,41 @@ function KBPagesTab({
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="px-3 pb-3 space-y-3">
-                {page.sections.map((sec) => (
-                  <div key={sec.section_name}>
-                    <p className="text-xs font-semibold text-muted-foreground mb-1">
+                {page.sections.map((sec) => {
+                  const isSectionHighlighted = (page.highlighted_section_names ?? []).includes(
+                    sec.section_name,
+                  );
+                  return (
+                  <div
+                    key={sec.section_name}
+                    className={`rounded-md px-2 py-1.5 ${
+                      isSectionHighlighted ? "bg-primary/5 ring-1 ring-primary/20" : ""
+                    }`}
+                  >
+                    <p
+                      className={`text-xs font-semibold mb-1 ${
+                        isSectionHighlighted ? "text-primary" : "text-muted-foreground"
+                      }`}
+                    >
                       {sec.section_name}
                     </p>
                     <ul className="space-y-1">
                       {sec.items.map((item, i) => (
                         <li
                           key={i}
-                          className="text-xs flex items-start gap-1.5"
+                          className={`text-xs flex items-start gap-1.5 rounded px-1 py-0.5 ${
+                            isItemHighlighted(page, item.text)
+                              ? "bg-primary/10 text-primary"
+                              : ""
+                          }`}
                         >
-                          <span
-                            className={`shrink-0 ${
-                              CONFIDENCE_COLORS[item.confidence] ?? ""
-                            }`}
-                          >
-                            •
-                          </span>
+                          <span className="shrink-0 text-muted-foreground">•</span>
                           <span>{item.text}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
-                ))}
+                )})}
               </div>
             </CollapsibleContent>
           </div>
@@ -895,18 +939,12 @@ function KB2RightPanel({
   relatedEntityPages,
   defaultTab = "sources",
   runId,
+  emptySourceMessage,
+  emptyKbMessage,
 }: KB2RightPanelProps) {
   const [activeTab, setActiveTab] = useState(defaultTab);
-  const [chatSources, setChatSources] = useState<SourceRef[]>([]);
-  const [chatKbPages, setChatKbPages] = useState<RelatedEntityPage[]>([]);
-
-  const activeSources = sourceRefs.length > 0 ? sourceRefs : chatSources;
-  const activeKbPages = relatedEntityPages.length > 0 ? relatedEntityPages : chatKbPages;
-
-  const handleChatSources = useCallback((iSources: SourceRef[], kPages: RelatedEntityPage[]) => {
-    setChatSources(iSources);
-    setChatKbPages(kPages);
-  }, []);
+  const activeSources = sourceRefs;
+  const activeKbPages = relatedEntityPages;
 
   return (
     <Tabs
@@ -936,7 +974,7 @@ function KB2RightPanel({
             className="text-xs gap-1 data-[state=active]:bg-muted"
           >
             <BookOpen className="h-3.5 w-3.5" />
-            AI KB Pages
+            AI Page
             {activeKbPages.length > 0 && (
               <Badge
                 variant="secondary"
@@ -963,6 +1001,7 @@ function KB2RightPanel({
               companySlug={companySlug}
               sourceRefs={activeSources}
               runId={runId}
+              emptyMessage={emptySourceMessage}
             />
           </div>
         </ScrollArea>
@@ -971,13 +1010,13 @@ function KB2RightPanel({
       <TabsContent value="kb" className="flex-1 mt-0 min-h-0">
         <ScrollArea className="h-full">
           <div className="p-3">
-            <KBPagesTab relatedEntityPages={activeKbPages} />
+            <KBPagesTab relatedEntityPages={activeKbPages} emptyMessage={emptyKbMessage} />
           </div>
         </ScrollArea>
       </TabsContent>
 
       <TabsContent value="chat" className="flex-1 mt-0 min-h-0">
-        <ChatTab companySlug={companySlug} autoContext={autoContext} onSourcesReceived={handleChatSources} />
+        <ChatTab companySlug={companySlug} autoContext={autoContext} />
       </TabsContent>
     </Tabs>
   );

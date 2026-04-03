@@ -53,25 +53,20 @@ function buildHypothesisText(node: KB2GraphNodeType): string {
   ].join("\n");
 }
 
-function isColorConventionName(lowerName: string): boolean {
-  return (
-    lowerName.includes("semantic color coding") ||
-    lowerName.includes("color semantics") ||
-    lowerName.includes("ui color semantics")
-  );
-}
-
-function isClientSideConventionName(lowerName: string): boolean {
-  return (
-    lowerName.includes("client side data handling") ||
-    lowerName.includes("client side filtering") ||
-    lowerName.includes("client side navigation") ||
-    lowerName.includes("client-side filtering")
-  );
-}
-
-function isVerticalNavigationConventionName(lowerName: string): boolean {
-  return lowerName.includes("vertical sidebar navigation") || lowerName.includes("vertical navigation");
+function detectConventionFamily(node: KB2GraphNodeType): string | null {
+  const name = normalizeLookupText(node.display_name);
+  const rule = normalizeLookupText(String((node.attributes as Record<string, unknown>)?.pattern_rule ?? ""));
+  const combined = `${name} ${rule}`;
+  if (/\b(color|pink|blue|green|accent)\b/.test(combined) && /\b(ui|cta|button|card|gender|visual)\b/.test(combined)) {
+    return "color_ui";
+  }
+  if (/\b(vertical|sidebar|layout|navigation|tabs)\b/.test(combined) && /\b(selection|browse|choose|category|comparison)\b/.test(combined)) {
+    return "layout_selection";
+  }
+  if (/\b(client.side|load all|pagination|single.api|on mount|filter locally)\b/.test(combined) && /\b(browse|list|small|data)\b/.test(combined)) {
+    return "data_loading";
+  }
+  return null;
 }
 
 function scoreDiscoveryTarget(hypothesis: KB2GraphNodeType, target: KB2GraphNodeType): number {
@@ -147,61 +142,54 @@ function collectPeopleNames(node: KB2GraphNodeType): string[] {
 
 function buildSyntheticDecisionSpecs(convention: KB2GraphNodeType): Array<{ name: string; summary: string; refs: KB2GraphNodeType["source_refs"] }> {
   const refs = convention.source_refs ?? [];
-  const lowerName = normalizeLookupText(convention.display_name);
+  const family = detectConventionFamily(convention);
+  if (!family || refs.length === 0) return [];
 
-  if (isColorConventionName(lowerName)) {
-    const genderRefs = refs.filter((ref) => /\b(pink|blue)\b/i.test(ref.excerpt ?? ""));
-    const financialRefs = refs.filter((ref) => /\b(green)\b/i.test(ref.excerpt ?? "") && /\b(donate|donation|sponsor|money|financial)\b/i.test(ref.excerpt ?? ""));
+  const patternRule = String((convention.attributes as Record<string, unknown>)?.pattern_rule ?? "");
+  const conventionName = convention.display_name;
+
+  if (family === "color_ui") {
+    const colorGroups: Array<{ filter: RegExp; context: RegExp; label: string }> = [
+      { filter: /\b(pink|blue)\b/i, context: /\b(gender|male|female|boy|girl|card|pet)\b/i, label: "Gender Accent" },
+      { filter: /\b(green)\b/i, context: /\b(donate|donation|sponsor|money|financial|cta)\b/i, label: "Financial CTA Color" },
+    ];
     const specs: Array<{ name: string; summary: string; refs: KB2GraphNodeType["source_refs"] }> = [];
-    if (genderRefs.length > 0) {
-      specs.push({
-        name: "Pet Card Gender Accent Decision",
-        summary: "Use pink and blue accent treatments to encode pet gender cues on profile and browse UI.",
-        refs: genderRefs.slice(0, 3),
-      });
-    }
-    if (financialRefs.length > 0) {
-      specs.push({
-        name: "Financial CTA Color Decision",
-        summary: "Use green for donate or sponsor calls to action to signal financial intent.",
-        refs: financialRefs.slice(0, 3),
-      });
+    for (const group of colorGroups) {
+      const matching = refs.filter((ref) => group.filter.test(ref.excerpt ?? "") && group.context.test(ref.excerpt ?? ""));
+      if (matching.length > 0) {
+        specs.push({
+          name: `${group.label} Decision — ${conventionName}`,
+          summary: `Supporting decision for convention "${conventionName}": ${patternRule || "color usage pattern"}`.slice(0, 200),
+          refs: matching.slice(0, 3),
+        });
+      }
     }
     return specs;
   }
 
-  if (isVerticalNavigationConventionName(lowerName)) {
-    return [{
-      name: "Vertical Sidebar Layout Decision",
-      summary: "Single-selection browse flows should use left-side or vertical navigation instead of top tabs.",
-      refs: refs.slice(0, 4),
-    }];
-  }
-
-  if (isClientSideConventionName(lowerName)) {
-    return [{
-      name: "Load Small Lists Client-Side Decision",
-      summary: "For small browse lists, load data once and navigate or filter locally; add pagination only when lists grow.",
-      refs: refs.slice(0, 4),
-    }];
-  }
-
-  return [];
+  return [{
+    name: `Supporting Decision — ${conventionName}`,
+    summary: `Supporting decision for convention "${conventionName}": ${patternRule || convention.display_name}`.slice(0, 200),
+    refs: refs.slice(0, 4),
+  }];
 }
 
 function scoreConventionFit(hypothesis: KB2GraphNodeType, convention: KB2GraphNodeType): number {
-  const text = normalizeLookupText(buildHypothesisText(hypothesis));
-  const conventionName = normalizeLookupText(convention.display_name);
+  const hypothesisText = normalizeLookupText(buildHypothesisText(hypothesis));
+  const conventionText = normalizeLookupText(buildHypothesisText(convention));
 
-  if (isColorConventionName(conventionName)) {
-    return /\b(donation|donate|gift|button|cta|profile|card|pet|visual|form|submit|sponsor|money)\b/.test(text) ? 2 : 0;
+  const conventionTokens = conventionText
+    .split(" ")
+    .filter((t) => t.length >= 4 && !["this", "that", "with", "from", "have", "been", "should", "could", "would"].includes(t));
+
+  const uniqueTokens = [...new Set(conventionTokens)];
+  let matches = 0;
+  for (const token of uniqueTokens) {
+    if (hypothesisText.includes(token)) matches++;
   }
-  if (isClientSideConventionName(conventionName)) {
-    return /\b(supply|tracking|orders|browser|portal|volunteer|hours|events|list|pagination|filter)\b/.test(text) ? 2 : 0;
-  }
-  if (isVerticalNavigationConventionName(conventionName)) {
-    return /\b(navigation|browse|category|categories|chooser|mobile|selection|sidebar|events)\b/.test(text) ? 2 : 0;
-  }
+
+  if (matches >= 3) return 2;
+  if (matches >= 1) return 1;
   return 0;
 }
 

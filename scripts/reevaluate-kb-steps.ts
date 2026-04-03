@@ -53,7 +53,7 @@ async function getLatestCompletedStepExecutionId(
 async function main(): Promise<void> {
   const companySlug = process.argv[2] || "pawfinder2";
   const requestedRunId = process.argv[3];
-  const stepNumbers = (process.argv[4] || "12,13,14,15")
+  const stepNumbers = (process.argv[4] || "8,14,15,16,18")
     .split(",")
     .map((value) => Number(value.trim()))
     .filter((value) => Number.isFinite(value) && value > 0);

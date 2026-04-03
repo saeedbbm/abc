@@ -115,10 +115,10 @@ export function KB2ChatPage({ companySlug }: { companySlug: string }) {
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center">
                     {[
-                      "Who owns the Checkout service?",
-                      "What databases do we use?",
-                      "What are the open decisions?",
-                      "How does deployment work?",
+                      "What conventions should I follow for Toy Donation?",
+                      "What customer evidence supports Toy Donation, and what should the MVP include?",
+                      "What owners and dependencies does Toy Donation touch?",
+                      "Why does Toy Donation matter and what makes it feasible?",
                     ].map((prompt) => (
                       <Button
                         key={prompt}

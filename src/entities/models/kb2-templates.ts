@@ -236,7 +236,7 @@ export const ENTITY_PAGE_TEMPLATES: Partial<Record<KB2NodeType, KB2PageTemplate>
   decision: {
     description: "Entity page for an architecture decision, technology choice, or design tradeoff.",
     includeRules: "The choice made, why, what was rejected, and the consequences.",
-    excludeRules: "Implementation details of the chosen option. Link to project/repo pages.",
+    excludeRules: "Low-level code snippets and file-by-file diffs. For conventions, DO include the concrete implementation prescriptions of the chosen pattern such as colors, layout direction, data-loading thresholds, component behavior, and other reusable rules.",
     sections: [
       { name: "Identity", intent: "Decision title, status (decided/pending/superseded), date, scope", requirement: "MUST", maxBullets: 5 },
       { name: "Context", intent: "What problem or constraint led to this decision", requirement: "MUST", maxBullets: 4 },

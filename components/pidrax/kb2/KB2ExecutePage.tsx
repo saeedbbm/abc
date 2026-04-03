@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { KB2RightPanel, SourceRef } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
+import { LeftSidebarLayout } from "./LeftSidebarLayout";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1280,64 +1281,66 @@ export function KB2ExecutePage({ companySlug }: { companySlug: string }) {
   })();
 
   return (
-    <div className="flex h-full flex-1 min-w-0">
-      {/* Left sidebar */}
-      <div className="w-64 shrink-0 border-r flex flex-col">
-        <div className="p-2 border-b">
-          <Tabs value={sidebarTab} onValueChange={(v) => setSidebarTab(v as SidebarTab)}>
-            <TabsList className="w-full h-auto grid grid-cols-2 gap-1">
-              <TabsTrigger value="store" className="text-[10px] h-7 gap-1">
-                <Store className="h-3 w-3" />Store
-              </TabsTrigger>
-              <TabsTrigger value="installed" className="text-[10px] h-7 gap-1">
-                <Settings2 className="h-3 w-3" />Installed
-                {installedAgents.length > 0 && (
-                  <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{installedAgents.length}</Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="ready" className="text-[9px] h-7 gap-1">
-                <Play className="h-3 w-3" />
-                <span className="leading-tight">Ready to implement</span>
-                {howtos.length > 0 && (
-                  <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{howtos.length}</Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="runs" className="text-[10px] h-7 gap-1">
-                <Terminal className="h-3 w-3" />Runs
-                {runs.filter((r) => r.status === "running").length > 0 && (
-                  <Badge className="text-[8px] h-3.5 px-1 ml-0.5 bg-yellow-500">{runs.filter((r) => r.status === "running").length}</Badge>
-                )}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+    <LeftSidebarLayout
+      autoSaveId="execute-left"
+      leftSidebar={
+        <div className="h-full border-r flex flex-col">
+          <div className="p-2 border-b">
+            <Tabs value={sidebarTab} onValueChange={(v) => setSidebarTab(v as SidebarTab)}>
+              <TabsList className="w-full h-auto grid grid-cols-2 gap-1">
+                <TabsTrigger value="store" className="text-[10px] h-7 gap-1">
+                  <Store className="h-3 w-3" />Store
+                </TabsTrigger>
+                <TabsTrigger value="installed" className="text-[10px] h-7 gap-1">
+                  <Settings2 className="h-3 w-3" />Installed
+                  {installedAgents.length > 0 && (
+                    <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{installedAgents.length}</Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="ready" className="text-[9px] h-7 gap-1">
+                  <Play className="h-3 w-3" />
+                  <span className="leading-tight">Ready to implement</span>
+                  {howtos.length > 0 && (
+                    <Badge variant="secondary" className="text-[8px] h-3.5 px-1 ml-0.5">{howtos.length}</Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="runs" className="text-[10px] h-7 gap-1">
+                  <Terminal className="h-3 w-3" />Runs
+                  {runs.filter((r) => r.status === "running").length > 0 && (
+                    <Badge className="text-[8px] h-3.5 px-1 ml-0.5 bg-yellow-500">{runs.filter((r) => r.status === "running").length}</Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          {sidebarContent}
         </div>
-        {sidebarContent}
-      </div>
-
-      {/* Main + Right panel */}
-      <SplitLayout
-        autoSaveId="execute"
-        mainContent={<div className="h-full overflow-hidden">{mainContent}</div>}
-        rightPanel={
-          <KB2RightPanel
-            companySlug={companySlug}
-            autoContext={
-              selectedRun && sidebarTab === "runs"
-                ? { type: "howto" as const, id: selectedRun.agentId, title: `${selectedRun.agentName} Run` }
-                : selectedReadyHowto && sidebarTab === "ready"
-                  ? { type: "howto" as const, id: selectedReadyHowto.howto_id, title: selectedReadyHowto.title }
-                : selectedInstalledAgent && sidebarTab === "installed"
-                  ? { type: "howto" as const, id: selectedInstalledAgent.id, title: selectedInstalledAgent.name }
-                  : selectedStoreAgent && sidebarTab === "store"
-                    ? { type: "howto" as const, id: selectedStoreAgent.id, title: selectedStoreAgent.name }
-                    : null
-            }
-            sourceRefs={sidebarTab === "ready" ? getReadyItemSourceRefs(selectedReadyHowto) : []}
-            relatedEntityPages={[]}
-            defaultTab={sidebarTab === "ready" ? "sources" : "chat"}
-          />
-        }
-      />
-    </div>
+      }
+      mainContent={
+        <SplitLayout
+          autoSaveId="execute"
+          mainContent={<div className="h-full overflow-hidden">{mainContent}</div>}
+          rightPanel={
+            <KB2RightPanel
+              companySlug={companySlug}
+              autoContext={
+                selectedRun && sidebarTab === "runs"
+                  ? { type: "howto" as const, id: selectedRun.agentId, title: `${selectedRun.agentName} Run` }
+                  : selectedReadyHowto && sidebarTab === "ready"
+                    ? { type: "howto" as const, id: selectedReadyHowto.howto_id, title: selectedReadyHowto.title }
+                  : selectedInstalledAgent && sidebarTab === "installed"
+                    ? { type: "howto" as const, id: selectedInstalledAgent.id, title: selectedInstalledAgent.name }
+                    : selectedStoreAgent && sidebarTab === "store"
+                      ? { type: "howto" as const, id: selectedStoreAgent.id, title: selectedStoreAgent.name }
+                      : null
+              }
+              sourceRefs={sidebarTab === "ready" ? getReadyItemSourceRefs(selectedReadyHowto) : []}
+              relatedEntityPages={[]}
+              defaultTab={sidebarTab === "ready" ? "sources" : "chat"}
+            />
+          }
+        />
+      }
+    />
   );
 }

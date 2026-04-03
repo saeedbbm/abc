@@ -5,6 +5,9 @@ import {
   STANDARD_HUMAN_PAGES,
 } from "@/src/entities/models/kb2-templates";
 import { getHumanPages } from "@/src/application/lib/kb2/company-config";
+import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
+import { getNodeAttributeOwnerNames } from "@/src/application/lib/kb2/owner-resolution";
+import { cleanTicketTitle } from "@/src/application/lib/kb2/title-cleanup";
 import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 import { PrefixLogger } from "@/lib/utils";
@@ -57,7 +60,7 @@ const EXCLUDED_ENTITY_PAGE_TYPES = new Set([
 function isProposedTicketNode(node: KB2GraphNodeType): boolean {
   const cat = node.attributes?.discovery_category;
   return (
-    (node.type === "ticket" || node.type === "customer_feedback") &&
+    (node.type === "ticket" || node.type === "customer_feedback" || node.type === "project") &&
     TICKET_DISCOVERY_CATEGORIES.has(cat)
   );
 }
@@ -157,7 +160,7 @@ function dedupeNodesForPlanning(nodes: KB2GraphNodeType[]): KB2GraphNodeType[] {
 }
 
 function shouldPlanEntityPage(node: KB2GraphNodeType): boolean {
-  if (isProposedTicketNode(node)) return false;
+  if (isProposedTicketNode(node) && node.type !== "project") return false;
   if (EXCLUDED_ENTITY_PAGE_TYPES.has(node.type)) return false;
   return node.type in ENTITY_PAGE_TEMPLATES;
 }
@@ -171,7 +174,7 @@ function getEntityPagePriority(node: KB2GraphNodeType): "high" | "medium" | "low
 
 function getEntityPageReason(node: KB2GraphNodeType, projectCategory: string | null): string {
   if (node.attributes?.is_convention === true) {
-    return "Cross-cutting convention or benchmark-critical decision";
+    return "Cross-cutting convention or high-signal decision";
   }
   if (node.type === "project") {
     return projectCategory ? `Project synthesis page (${projectCategory})` : "Project synthesis page";
@@ -308,6 +311,114 @@ function mergeStringArrays(...groups: unknown[][]): string[] {
   return merged;
 }
 
+function readExistingAssignees(existing?: Record<string, unknown>): string[] {
+  const assignees = Array.isArray(existing?.assignees) ? existing.assignees : [];
+  return assignees
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim());
+}
+
+function readExistingOwnerName(existing?: Record<string, unknown>): string[] {
+  return typeof existing?.owner_name === "string" && existing.owner_name.trim().length > 0
+    ? [existing.owner_name.trim()]
+    : [];
+}
+
+function readExistingString(existing: Record<string, unknown> | undefined, key: string): string {
+  const value = existing?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
+}
+
+function readExistingSourceRefs(existing?: Record<string, unknown>): Array<Record<string, unknown>> {
+  return Array.isArray(existing?.source_refs)
+    ? existing.source_refs.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"))
+    : [];
+}
+
+function normalizeTicketPriority(value: unknown): "P0" | "P1" | "P2" | "P3" {
+  if (typeof value !== "string" || value.trim().length === 0) return "P2";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "p0" || normalized === "critical" || normalized === "highest" || normalized === "blocker") {
+    return "P0";
+  }
+  if (normalized === "p1" || normalized === "high") return "P1";
+  if (normalized === "p2" || normalized === "medium") return "P2";
+  if (normalized === "p3" || normalized === "low" || normalized === "lowest") return "P3";
+  return "P2";
+}
+
+interface JiraTicketSnapshotMetadata {
+  ticket_key: string;
+  summary?: string;
+  description?: string;
+  issue_type?: string;
+  raw_status?: string;
+  priority?: string;
+  assignee?: string;
+  reporter?: string;
+  created_at?: string;
+  resolved_at?: string;
+  sprint?: string;
+}
+
+function extractJiraDescription(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const match = normalized.match(/## Description\n([\s\S]*?)(?=\n## |\n# |$)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+function buildJiraSnapshotTicketMap(docs: KB2ParsedDocument[]): Map<string, JiraTicketSnapshotMetadata> {
+  const out = new Map<string, JiraTicketSnapshotMetadata>();
+  for (const doc of docs) {
+    if (doc.provider !== "jira") continue;
+    const attrs = (doc.metadata ?? {}) as Record<string, unknown>;
+    const key =
+      typeof attrs.key === "string" && attrs.key.trim().length > 0
+        ? attrs.key.trim().toUpperCase()
+        : "";
+    if (!key) continue;
+    out.set(key, {
+      ticket_key: key,
+      summary: doc.title.replace(/^[A-Z]+-\d+:\s*/i, "").trim() || doc.title,
+      description: extractJiraDescription(doc.content),
+      issue_type:
+        typeof attrs.issue_type === "string" ? attrs.issue_type
+          : typeof attrs.issueType === "string" ? attrs.issueType
+            : typeof attrs.type === "string" ? attrs.type
+              : undefined,
+      raw_status: typeof attrs.status === "string" ? attrs.status : undefined,
+      priority: typeof attrs.priority === "string" ? attrs.priority : undefined,
+      assignee: typeof attrs.assignee === "string" ? attrs.assignee : undefined,
+      reporter: typeof attrs.reporter === "string" ? attrs.reporter : undefined,
+      created_at: typeof attrs.created === "string" ? attrs.created : undefined,
+      resolved_at: typeof attrs.resolved === "string" ? attrs.resolved : undefined,
+      sprint: typeof attrs.sprint === "string" ? attrs.sprint : undefined,
+    });
+  }
+  return out;
+}
+
+function getRelatedEntityOwnerNames(
+  node: KB2GraphNodeType,
+  nodeByPlanningName: Map<string, KB2GraphNodeType>,
+): string[] {
+  const relatedNames = Array.isArray(node.attributes?.related_entities)
+    ? node.attributes.related_entities
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
+
+  return mergeStringArrays(
+    ...relatedNames.map((name) => {
+      const relatedNode = nodeByPlanningName.get(normalizePlanningKey(name));
+      if (!relatedNode || relatedNode.node_id === node.node_id) return [];
+      return getNodeAttributeOwnerNames(relatedNode, {
+        includeReporterFallback: inferTicketSourceFromNode(relatedNode) === "jira",
+      });
+    }),
+  );
+}
+
 function mergeComments(...groups: unknown[][]): Array<Record<string, unknown>> {
   const seen = new Set<string>();
   const merged: Array<Record<string, unknown>> = [];
@@ -354,6 +465,13 @@ async function collapseDuplicateTicketsForRun(
       linked_entity_ids: mergeStringArrays(...group.map((ticket) => ticket.linked_entity_ids as unknown[] ?? [])),
       linked_entity_names: mergeStringArrays(...group.map((ticket) => ticket.linked_entity_names as unknown[] ?? [])),
       assignees: mergeStringArrays(...group.map((ticket) => ticket.assignees as unknown[] ?? [])),
+      owner_name:
+        mergeStringArrays(
+          ...group.map((ticket) => ticket.assignees as unknown[] ?? []),
+          ...group.map((ticket) =>
+            typeof ticket.owner_name === "string" ? [ticket.owner_name] : [],
+          ),
+        )[0] ?? "",
       labels: mergeStringArrays(...group.map((ticket) => ticket.labels as unknown[] ?? [])),
       subtask_ids: mergeStringArrays(...group.map((ticket) => ticket.subtask_ids as unknown[] ?? [])),
       comments: mergeComments(...group.map((ticket) => ticket.comments as unknown[] ?? [])),
@@ -386,30 +504,114 @@ function buildSyncedTicketPatch(
   runId: string,
   existing?: Record<string, unknown>,
   demoStateId?: string,
+  nodeByPlanningName?: Map<string, KB2GraphNodeType>,
+  jiraSnapshotByKey?: Map<string, JiraTicketSnapshotMetadata>,
 ): Record<string, unknown> {
+  const source = inferTicketSourceFromNode(node);
   const workflowState = inferTicketWorkflowStateFromNode(node);
+  const ticketKey = (
+    getJiraTicketKeyFromNode(node) ??
+    readExistingString(existing, "ticket_key")
+  ).trim();
+  const snapshotMeta = ticketKey ? jiraSnapshotByKey?.get(ticketKey.toUpperCase()) : undefined;
   const description = typeof node.attributes?.description === "string" && node.attributes.description.trim().length > 0
     ? node.attributes.description
-    : typeof existing?.description === "string"
-      ? existing.description
+    : typeof snapshotMeta?.description === "string" && snapshotMeta.description.trim().length > 0
+      ? snapshotMeta.description.trim()
+      : typeof existing?.description === "string"
+        ? existing.description
+        : "";
+  const priority = normalizeTicketPriority(
+    typeof node.attributes?.priority === "string" && node.attributes.priority.trim().length > 0
+      ? node.attributes.priority
+      : typeof snapshotMeta?.priority === "string" && snapshotMeta.priority.trim().length > 0
+        ? snapshotMeta.priority
+        : typeof existing?.priority === "string"
+          ? existing.priority
+          : "P2",
+  );
+  const summary = typeof node.attributes?.summary === "string" && node.attributes.summary.trim().length > 0
+    ? node.attributes.summary.trim()
+    : typeof snapshotMeta?.summary === "string" && snapshotMeta.summary.trim().length > 0
+      ? snapshotMeta.summary.trim()
       : "";
-  const priority = typeof node.attributes?.priority === "string" && node.attributes.priority.trim().length > 0
-    ? node.attributes.priority
-    : typeof existing?.priority === "string"
-      ? existing.priority
-      : "P2";
+  const issueType = typeof node.attributes?.issue_type === "string" && node.attributes.issue_type.trim().length > 0
+    ? node.attributes.issue_type.trim()
+    : typeof snapshotMeta?.issue_type === "string" && snapshotMeta.issue_type.trim().length > 0
+      ? snapshotMeta.issue_type.trim()
+      : readExistingString(existing, "issue_type");
+  const rawStatus = typeof node.attributes?.raw_status === "string" && node.attributes.raw_status.trim().length > 0
+    ? node.attributes.raw_status.trim()
+    : typeof node.attributes?.status === "string" && node.attributes.status.trim().length > 0
+      ? node.attributes.status.trim()
+      : typeof snapshotMeta?.raw_status === "string" && snapshotMeta.raw_status.trim().length > 0
+        ? snapshotMeta.raw_status.trim()
+        : readExistingString(existing, "raw_status");
+  const createdAt = typeof node.attributes?.created_at === "string" && node.attributes.created_at.trim().length > 0
+    ? node.attributes.created_at.trim()
+    : typeof snapshotMeta?.created_at === "string" && snapshotMeta.created_at.trim().length > 0
+      ? snapshotMeta.created_at.trim()
+      : readExistingString(existing, "created_at") || new Date().toISOString();
+  const resolvedAt = typeof node.attributes?.resolved_at === "string" && node.attributes.resolved_at.trim().length > 0
+    ? node.attributes.resolved_at.trim()
+    : typeof snapshotMeta?.resolved_at === "string" && snapshotMeta.resolved_at.trim().length > 0
+      ? snapshotMeta.resolved_at.trim()
+      : readExistingString(existing, "resolved_at");
+  const sprint = typeof node.attributes?.sprint === "string" && node.attributes.sprint.trim().length > 0
+    ? node.attributes.sprint.trim()
+    : typeof snapshotMeta?.sprint === "string" && snapshotMeta.sprint.trim().length > 0
+      ? snapshotMeta.sprint.trim()
+      : readExistingString(existing, "sprint");
+  const reporter = typeof node.attributes?.reporter === "string" && node.attributes.reporter.trim().length > 0
+    ? node.attributes.reporter.trim()
+    : typeof snapshotMeta?.reporter === "string" && snapshotMeta.reporter.trim().length > 0
+      ? snapshotMeta.reporter.trim()
+    : source === "jira"
+      ? readExistingString(existing, "reporter")
+      : readExistingString(existing, "reporter") || "Pidrax";
+  const relatedEntityOwners = nodeByPlanningName
+    ? getRelatedEntityOwnerNames(node, nodeByPlanningName)
+    : [];
+  const directAssignees = getNodeAttributeOwnerNames(node, {
+    includeReporterFallback: false,
+  });
+  const assignees = mergeStringArrays(
+    directAssignees,
+    source === "jira" && !directAssignees.length && snapshotMeta?.assignee ? [snapshotMeta.assignee] : [],
+    source === "jira" ? [] : relatedEntityOwners,
+    directAssignees.length === 0 ? readExistingAssignees(existing) : [],
+  );
+  const ownerName = directAssignees[0] ?? assignees[0] ?? readExistingOwnerName(existing)[0] ?? "";
+  const rawTitle = summary || readExistingString(existing, "title") || node.display_name;
+  const titleSeed =
+    source === "jira" && ticketKey && !rawTitle.toUpperCase().startsWith(ticketKey.toUpperCase())
+      ? `${ticketKey}: ${rawTitle}`
+      : rawTitle;
+  const sourceRefs = Array.isArray(node.source_refs) && node.source_refs.length > 0
+    ? node.source_refs
+    : readExistingSourceRefs(existing);
   return {
     run_id: runId,
     ...(demoStateId ? { demo_state_id: demoStateId } : {}),
     sync_key: getTicketSyncKeyFromNode(node),
-    source: inferTicketSourceFromNode(node),
-    title: node.display_name,
+    source,
+    title: cleanTicketTitle(titleSeed),
     description,
     priority,
     workflow_state: workflowState,
+    assignees,
+    owner_name: ownerName,
+    reporter,
+    ...(ticketKey ? { ticket_key: ticketKey } : {}),
+    ...(issueType ? { issue_type: issueType } : {}),
+    ...(rawStatus ? { raw_status: rawStatus } : {}),
     linked_entity_ids: [node.node_id],
     linked_entity_names: [node.display_name],
-    status: workflowState === "done" ? "closed" : "open",
+    ...(sourceRefs.length > 0 ? { source_refs: sourceRefs } : {}),
+    status: rawStatus || (workflowState === "done" ? "Closed" : "Open"),
+    created_at: createdAt,
+    ...(resolvedAt ? { resolved_at: resolvedAt } : {}),
+    ...(sprint ? { sprint } : {}),
     updated_at: new Date().toISOString(),
   };
 }
@@ -426,6 +628,18 @@ export async function syncGraphNodesToTickets(
   if (ticketNodes.length === 0) return { synced: 0, skipped: 0 };
 
   const incomingByKey = new Map<string, KB2GraphNodeType>();
+  const nodeByPlanningName = new Map(
+    nodes.map((node) => [normalizePlanningKey(node.display_name), node]),
+  );
+  const latestSnapshot = await tc.input_snapshots.findOne(
+    demoStateId
+      ? { demo_state_id: demoStateId }
+      : { run_id: runId, demo_state_id: { $exists: false } },
+    { sort: { created_at: -1 } },
+  ) as { parsed_documents?: KB2ParsedDocument[] } | null;
+  const jiraSnapshotByKey = buildJiraSnapshotTicketMap(
+    (latestSnapshot?.parsed_documents ?? []) as KB2ParsedDocument[],
+  );
   let skipped = 0;
   for (const node of ticketNodes) {
     const key = getTicketSyncKeyFromNode(node);
@@ -445,7 +659,14 @@ export async function syncGraphNodesToTickets(
   let synced = 0;
   for (const [key, node] of incomingByKey.entries()) {
     const existing = existingByKey.get(key);
-    const patch = buildSyncedTicketPatch(node, runId, existing, demoStateId);
+    const patch = buildSyncedTicketPatch(
+      node,
+      runId,
+      existing,
+      demoStateId,
+      nodeByPlanningName,
+      jiraSnapshotByKey,
+    );
     if (existing && typeof existing.ticket_id === "string" && existing.ticket_id.trim().length > 0) {
       await tc.tickets.updateOne(
         demoStateId
@@ -460,19 +681,27 @@ export async function syncGraphNodesToTickets(
         source: patch.source,
         title: patch.title,
         description: patch.description,
-        assignees: [],
+        assignees: patch.assignees ?? [],
+        owner_name: patch.owner_name ?? "",
+        reporter: patch.reporter ?? "",
+        ...(patch.ticket_key ? { ticket_key: patch.ticket_key } : {}),
+        ...(patch.issue_type ? { issue_type: patch.issue_type } : {}),
+        ...(patch.raw_status ? { raw_status: patch.raw_status } : {}),
         labels: [],
         status: patch.status,
         priority: patch.priority,
         workflow_state: patch.workflow_state,
         linked_entity_ids: patch.linked_entity_ids,
         linked_entity_names: patch.linked_entity_names,
+        ...(Array.isArray(patch.source_refs) && patch.source_refs.length > 0 ? { source_refs: patch.source_refs } : {}),
         parent_ticket_id: null,
         subtask_ids: [],
         comments: [],
         sync_key: patch.sync_key,
         ...(demoStateId ? { demo_state_id: demoStateId } : {}),
-        created_at: new Date().toISOString(),
+        created_at: typeof patch.created_at === "string" ? patch.created_at : new Date().toISOString(),
+        ...(patch.resolved_at ? { resolved_at: patch.resolved_at } : {}),
+        ...(patch.sprint ? { sprint: patch.sprint } : {}),
         updated_at: patch.updated_at,
       });
     }
@@ -663,7 +892,7 @@ function softCoverageAssertions(
     (n) => n.attributes?.discovery_category === "proposed_from_feedback",
   );
   for (const fn of feedbackFeatureNodes) {
-    if (!entityPlanNodeIds.has(fn.node_id) && !isProposedTicketNode(fn)) {
+    if (!entityPlanNodeIds.has(fn.node_id)) {
       logger.log(
         `Proposed feature from feedback "${fn.display_name}" (${fn.node_id}) has no entity page plan`,
       );

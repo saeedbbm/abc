@@ -530,16 +530,27 @@ Critical page samples: ${JSON.stringify(a.critical_page_samples ?? a.page_sample
     },
   },
   "Generate How-To Guides": {
-    systemPrompt: `You are evaluating generated how-to guides. Assess: actionability, completeness of steps, and clarity.
+    systemPrompt: `You are evaluating generated how-to guides. Assess: actionability, evidence grounding, convention application, and completeness of steps.
 
-Return sub_scores for "Actionability" (0-100), "Step completeness" (0-100), "Clarity" (0-100). Report issues and recommendations.`,
+Return sub_scores for "Actionability" (0-100), "Evidence grounding" (0-100), "Convention application" (0-100), and "Step completeness" (0-100). Report issues and recommendations.`,
     buildUserPrompt: (a) => {
       return `Generated ${a.total_howtos ?? a.total_pages ?? "?"} how-to guides using ${a.llm_calls ?? "?"} LLM calls.
 
 Target nodes: ${JSON.stringify(a.target_nodes ?? []).slice(0, 400)}
+Target count: ${a.target_node_count ?? "?"}
 How-to titles: ${JSON.stringify(a.howto_titles ?? []).slice(0, 400)}
-How-to samples: ${JSON.stringify(a.howto_samples ?? []).slice(0, 6000)}
-Convention compliance: ${JSON.stringify(a.compliance_results ?? []).slice(0, 1200)}`;
+Direct technical source count: ${a.direct_technical_source_count ?? "?"}
+Convention constraints total: ${a.convention_constraints_total ?? "?"}
+Convention refs total: ${a.convention_refs_total ?? "?"}
+Convention reference coverage pct: ${a.convention_reference_coverage_pct ?? "?"}
+Implementation reference count: ${a.implementation_reference_count ?? "?"}
+Implementation reference opportunities: ${a.implementation_reference_opportunities ?? "?"}
+Implementation step count: ${a.implementation_step_count ?? "?"}
+Steps with source refs: ${a.steps_with_source_refs ?? "?"}
+Step evidence coverage pct: ${a.step_evidence_coverage_pct ?? "?"}
+Source artifact titles used: ${JSON.stringify(a.source_artifact_titles_used ?? []).slice(0, 3000)}
+How-to samples: ${JSON.stringify(a.howto_samples ?? []).slice(0, 24000)}
+Convention compliance: ${JSON.stringify(a.compliance_results ?? []).slice(0, 4000)}`;
     },
   },
   "Extract Claims": {
@@ -739,6 +750,31 @@ function extractMetricFromArtifact(artifact: Record<string, unknown>, key: strin
       });
       return hasContext ? 1 : 0;
     }
+    case "howto_count_positive_when_proposed_work_exists": {
+      const targetCount = Number(
+        artifact.target_node_count ??
+        (Array.isArray(artifact.target_nodes) ? artifact.target_nodes.length : 0),
+      );
+      if (targetCount <= 0) return null;
+      return Number(artifact.total_howtos ?? artifact.total_pages ?? 0);
+    }
+    case "direct_technical_source_count_positive":
+      return Number(artifact.direct_technical_source_count ?? 0);
+    case "convention_reference_coverage_pct": {
+      const total = Number(artifact.convention_constraints_total ?? 0);
+      if (total <= 0) return null;
+      return Number(artifact.convention_reference_coverage_pct ?? 0);
+    }
+    case "step_evidence_coverage_pct": {
+      const totalSteps = Number(artifact.implementation_step_count ?? 0);
+      if (totalSteps <= 0) return null;
+      return Number(artifact.step_evidence_coverage_pct ?? 0);
+    }
+    case "implementation_reference_count_positive": {
+      const opportunities = Number(artifact.implementation_reference_opportunities ?? 0);
+      if (opportunities <= 0) return null;
+      return Number(artifact.implementation_reference_count ?? 0);
+    }
     case "repository_pages_generated_when_planned": {
       const plannedCount = Number(artifact.planned_repository_page_count ?? 0);
       if (plannedCount === 0) return 1;
@@ -810,6 +846,10 @@ function deriveSampleKey(sampledKey: string, artifact: Record<string, unknown>):
     sampled_merges_have_evidence: ["merges"],
     sampled_false_merge_rate_low: ["kept_separate"],
     sampled_conventions_have_owner_and_evidence: ["phase3_conventions", "conventions"],
+    sampled_howtos_reference_real_entities: ["howto_samples"],
+    sampled_howtos_name_ownered_conventions: ["howto_samples"],
+    sampled_howtos_include_kb_specific_prescriptions: ["howto_samples"],
+    sampled_howtos_cite_real_artifacts: ["howto_samples"],
   };
   for (const candidate of preferredSamples[sampledKey] ?? []) {
     if (Array.isArray(artifact[candidate])) return candidate;
@@ -927,7 +967,7 @@ export async function evaluateStep(
     const contract = `You are evaluating Step ${stepGoal.step_number}: ${stepGoal.step_name}.
 
 OVERALL PIPELINE GOAL:
-${goalText.slice(0, 2000)}
+${goalText}
 
 THIS STEP'S CONTRACT:
 Purpose: ${stepGoal.purpose}
@@ -979,7 +1019,7 @@ BENCHMARK OVERLAY (evaluation only):
 Use this only to judge benchmark fit for this dataset. Do NOT treat it as a generation answer key.
 
 BENCHMARK GLOBAL CONTEXT:
-${benchmarkGlobalText.slice(0, 2500)}
+${benchmarkGlobalText}
 
 STEP-SPECIFIC BENCHMARK FOCUS:
 ${benchmarkFocus || "- None provided"}

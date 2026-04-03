@@ -1,0 +1,236 @@
+================================================================================
+HOW-TO PATTERN SPEC — TOY DONATION FEATURE
+================================================================================
+
+Project:      Toy Donation Feature (Proposed)
+Origin:       3 customer feedback submissions requesting toy donations to
+              specific shelter pets (Lisa M. 2024-06-03, David Chen 2024-11-19,
+              Rachel Torres 2025-03-22)
+Status:       Proposed — no backlog item, no PR, no Slack discussion exists
+
+This is the primary synthesis test. All three hidden conventions (Kim's colors,
+Tim's layout, Matt's browse) converge here. The how-to must demonstrate that
+the system discovered these patterns and can apply them to a new feature.
+
+Scoring: count how many MUST patterns appear with the specific detail noted.
+         SHOULD patterns are expected but less critical. MAY patterns are
+         relevant if the plan goes deep enough.
+
+
+================================================================================
+MUST — Absence of these means the how-to is failing
+================================================================================
+
+COLOR-1   Pink accent for female pets
+          What to check: mentions pink for female pets on the pet selection
+          cards. Bonus: specifies it's on the gender indicator / photo frame
+          border, not the whole card.
+
+COLOR-2   Blue accent for male pets
+          What to check: mentions blue for male pets. Same specificity as
+          COLOR-1.
+
+COLOR-3   Green for financial CTAs only
+          What to check: states the purchase/donate CTA button is green.
+          Bonus: distinguishes that intermediate selection buttons (toy
+          preset amounts) should be gray/neutral, green is only for the
+          final action.
+
+COLOR-6   Neutral blue for non-financial action buttons
+          What to check: buttons like "View Toy Details" or "See Toys"
+          should be blue, not green. The plan should distinguish financial
+          from non-financial buttons.
+
+NAV-1     Vertical left sidebar for selection
+          What to check: pet selection interface uses a vertical sidebar or
+          list on the left. Attributes to Tim. Bonus: explains the reasoning
+          (user is choosing, not comparing).
+
+API-2     No pagination for small lists (under ~20 items)
+          What to check: pet list (8-15 pets per shelter) loads in full on
+          mount, stored in component state, client-side browsing. Attributes
+          to Matt. Bonus: cites specific numbers and source PRs.
+
+NAV-6     Single column for forms
+          What to check: the checkout/payment form is single-column layout.
+          Attributes to Tim. Bonus: mentions reasoning (two-column forms are
+          harder to scan).
+
+COLOR-4   White background for payment sections
+          What to check: payment/checkout area uses a clean white background.
+          Attributes to Kim.
+
+DATA-3    Existing pet API endpoints
+          What to check: plan mentions reusing existing pet endpoints rather
+          than building new ones for the pet list.
+
+
+================================================================================
+SHOULD — Expected when the plan has good evidence coverage
+================================================================================
+
+IMG-1     Lazy loading for pet photos
+          What to check: pet cards in the toy donation flow use lazy loading
+          for images.
+
+IMG-2     Skeleton loading states
+          What to check: loading states show skeleton placeholders while
+          data loads.
+
+IMG-3     Species-specific image fallback
+          What to check: pet photos have an onError fallback showing a
+          species-specific silhouette.
+
+GRID-1    Responsive grid breakpoints
+          What to check: the pet card grid follows 3 cols desktop, 2 tablet,
+          1 mobile.
+
+COMP-1    React.memo + useCallback for card grids
+          What to check: pet card grid uses memoization to prevent full-list
+          re-renders on button clicks.
+
+COMP-4    200ms CSS fade transition
+          What to check: switching between pets in the selection view uses
+          a CSS fade transition.
+
+NAV-3     Scrollable sidebar with max-height
+          What to check: the pet selection sidebar uses max-height with
+          overflow-y scroll.
+
+NAV-4     1/3 left panel, 2/3 content split
+          What to check: layout follows 1/3 sidebar, 2/3 content area.
+
+API-1     Response envelope { data, meta }
+          What to check: new toy donation API endpoints use the standard
+          response envelope via the middleware.
+
+API-7     Stay on /api/v1
+          What to check: new endpoints go under /api/v1.
+
+API-4     Parse DB strings into structured objects
+          What to check: toy data (categories, sizes, etc.) is structured
+          in the service layer, not passed as raw strings.
+
+API-5     ISO 8601 for all dates
+          What to check: order timestamps use ISO 8601.
+
+FILE-1    CSS Modules with camelCase
+          What to check: mentions using CSS Modules for the new components.
+
+COMP-3    Shared Toast component
+          What to check: donation confirmation / error feedback uses the
+          shared Toast component.
+
+COLOR-5   Blues and grays for non-financial pages
+          What to check: browsing/selection parts of the flow (before
+          checkout) use standard blues and grays, not green.
+
+API-3     Cursor-based pagination for larger lists
+          What to check: if toy inventory grows large, mentions cursor-based
+          pagination as the fallback strategy.
+
+PROC-1    Matt reviews backend, Tim reviews frontend
+          What to check: testing plan or process section mentions the review
+          assignment.
+
+DATA-4    15-minute sync cycle
+          What to check: notes that pet availability may be up to 15 minutes
+          stale due to the sync cycle.
+
+DATA-1    Pet data fields
+          What to check: references available pet fields (species, gender,
+          age, photos, availability) for filtering or display.
+
+
+================================================================================
+MAY — Relevant if the plan is thorough
+================================================================================
+
+GRID-2    44px minimum touch targets
+          What to check: mobile touch targets are at least 44px.
+
+GRID-3    Bottom nav bar on mobile
+          What to check: accounts for bottom nav padding on mobile.
+
+GRID-4    Hamburger menu at 768px
+          What to check: acknowledges the hamburger nav at 768px breakpoint.
+
+COMP-2    Promise.all for parallel API calls
+          What to check: if loading toy list + pet list in parallel, uses
+          Promise.all.
+
+NAV-5     Light yellow for differing values
+          What to check: if toy comparison is needed, uses light yellow
+          highlighting.
+
+API-6     Idempotent DELETE
+          What to check: if there's a "remove from cart" or "cancel
+          donation" action, DELETE is idempotent.
+
+API-8     Validate uniqueness before insert
+          What to check: order creation validates before insert, returns 409.
+
+API-9     Capacity check with 422
+          What to check: if a toy has limited stock, checks capacity before
+          processing.
+
+FILE-2    Shared components in shared folder
+          What to check: new reusable components (ToyCard) go to shared.
+
+FILE-3    Page folder structure
+          What to check: follows the page folder convention
+          (src/pages/ToyDonation/...).
+
+FILE-4    API file structure
+          What to check: follows controller + routes + model convention.
+
+FILE-5    Migrations in /db/migrations
+          What to check: mentions creating a migration for toy/donation
+          tables.
+
+TEST-1    Vitest + RTL for frontend
+          What to check: testing plan names Vitest and RTL.
+
+TEST-2    Jest for backend
+          What to check: testing plan names Jest.
+
+TEST-3    Playwright E2E
+          What to check: E2E tests with Playwright, acknowledges potential
+          flakiness.
+
+PROC-2    PR description requirements
+          What to check: mentions what PR descriptions should include.
+
+PROC-3    Squash merge, auto-deploy
+          What to check: mentions the merge/deploy workflow.
+
+PROC-4    Large table migrations reviewed by Matt
+          What to check: if toy/donation tables could grow large, migration
+          needs Matt's review.
+
+DATA-2    12 shelters across 3 states
+          What to check: references the small scale (12 shelters) as context
+          for data loading decisions.
+
+NAV-2     Horizontal columns for comparison
+          What to check: if toy comparison is mentioned, uses horizontal
+          layout.
+
+
+================================================================================
+SCORING GUIDE
+================================================================================
+
+MUST patterns (9):     Each worth 3 points.   Max = 27
+SHOULD patterns (20):  Each worth 2 points.   Max = 40
+MAY patterns (19):     Each worth 1 point.    Max = 19
+
+Total possible: 86 points
+
+Rating:
+  70+  Excellent — plan is genuinely KB-derived with concrete details
+  50-69  Good — hits the key conventions but missing secondary patterns
+  30-49  Mediocre — mentions conventions by name but lacks specifics
+  15-29  Poor — mostly generic with a few convention names sprinkled in
+  <15   Failing — could have been written without any KB at all
+================================================================================

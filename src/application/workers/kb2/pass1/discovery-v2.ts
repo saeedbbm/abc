@@ -48,6 +48,8 @@ const FEEDBACK_DISCOVERY_PROMPT = `You cluster customer feedback submissions int
 Rules:
 - Group multiple submissions that ask for the same capability into one discovery.
 - Prefer product-level names such as "X Feature" or "Y Page" when the request is feature-shaped.
+- Feature names must be short (max 5 words), specific, and human-readable. Good: "Dark Mode Toggle". Bad: "Feature for Allowing Users to Switch Between Light and Dark Display Modes".
+- Descriptions: 1-2 sentences of plain English. What the feature does and why users want it. No filler ("This project involves...").
 - Ignore generic praise or one-off bug reports unless they clearly describe a reusable feature or ticket-sized request.
 - Customer feedback themes should usually become project discoveries, not a pile of disconnected tickets.
 - Only emit a discovery when the request is supported by at least 2 submissions, or by 1 unusually specific submission with clear scope.
@@ -305,7 +307,6 @@ function normalizeProjectSurfaceLabel(text: string): string {
     .replace(/^standardi[sz]e\s+(.+)$/i, (_match, body: string) => `${body} standardization`)
     .replace(/^(?:[a-z]+\s+)?api response format standardization$/i, "api response standardization")
     .replace(/^(?:[a-z]+\s+)?api response standardization$/i, "api response standardization")
-    .replace(/^mobile navigation$/i, "mobile responsiveness")
     .replace(/^improv(?:e|ing)\s+(.+)$/i, (_match, body: string) => `${body} improvements`)
     .replace(/^(.+?)\s+to\s+(.+)$/i, (_m, left: string, right: string) => `${left} for ${right}`)
     .replace(/\s+browser page$/i, " browser")

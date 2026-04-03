@@ -53,8 +53,9 @@ import {
   Users,
   Eye,
 } from "lucide-react";
-import { KB2RightPanel } from "./KB2RightPanel";
+import { KB2RightPanel, SourceRef, RelatedEntityPage } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
+import { LeftSidebarLayout } from "./LeftSidebarLayout";
 
 interface VerifyCard {
   card_id: string;
@@ -97,6 +98,17 @@ interface GraphNode {
   type: string;
 }
 
+interface EntityPage {
+  page_id: string;
+  node_id: string;
+  title: string;
+  node_type: string;
+  sections: {
+    section_name: string;
+    items: { text: string; confidence: string }[];
+  }[];
+}
+
 interface DraftCard {
   id: string;
   title: string;
@@ -125,8 +137,12 @@ const STATUS_ICONS: Record<string, string> = { open: "⏳", validated: "✅", re
 export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
   const [cards, setCards] = useState<VerifyCard[]>([]);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [entityPages, setEntityPages] = useState<EntityPage[]>([]);
   const [personFilter, setPersonFilter] = useState<string>("all");
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [selectedContentKey, setSelectedContentKey] = useState<string | null>(null);
+  const [rightPanelSources, setRightPanelSources] = useState<SourceRef[]>([]);
+  const [rightPanelRelated, setRightPanelRelated] = useState<RelatedEntityPage[]>([]);
   const [expandedSeverities, setExpandedSeverities] = useState<Set<string>>(new Set(SEVERITY_ORDER));
   const [commentText, setCommentText] = useState("");
   const [ownerInput, setOwnerInput] = useState("");
@@ -146,14 +162,75 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
 
   const selectedCard = cards.find((c) => c.card_id === selectedCardId) ?? null;
 
+  const buildRelatedEntityPage = (
+    page: EntityPage,
+    options?: {
+      highlightedSectionNames?: string[];
+      highlightedItemTexts?: string[];
+    },
+  ): RelatedEntityPage => ({
+    page_id: page.page_id,
+    title: page.title,
+    node_type: page.node_type,
+    highlighted_section_names: options?.highlightedSectionNames,
+    highlighted_item_texts: options?.highlightedItemTexts,
+    sections: page.sections.map((section) => ({
+      section_name: section.section_name,
+      items: section.items.map((item) => ({
+        text: item.text,
+        confidence: item.confidence,
+      })),
+    })),
+  });
+
+  const mergeRelatedEntityPages = (pages: RelatedEntityPage[]): RelatedEntityPage[] => {
+    const merged = new Map<string, RelatedEntityPage>();
+    for (const page of pages) {
+      const existing = merged.get(page.page_id);
+      if (!existing) {
+        merged.set(page.page_id, {
+          ...page,
+          highlighted_section_names: [...(page.highlighted_section_names ?? [])],
+          highlighted_item_texts: [...(page.highlighted_item_texts ?? [])],
+        });
+        continue;
+      }
+      merged.set(page.page_id, {
+        ...existing,
+        highlighted_section_names: [
+          ...new Set([
+            ...(existing.highlighted_section_names ?? []),
+            ...(page.highlighted_section_names ?? []),
+          ]),
+        ],
+        highlighted_item_texts: [
+          ...new Set([
+            ...(existing.highlighted_item_texts ?? []),
+            ...(page.highlighted_item_texts ?? []),
+          ]),
+        ],
+      });
+    }
+    return Array.from(merged.values());
+  };
+
+  const clearRightPanelSelection = () => {
+    setSelectedContentKey(null);
+    setRightPanelSources([]);
+    setRightPanelRelated([]);
+  };
+
   const fetchData = useCallback(async () => {
-    const [cRes, nRes] = await Promise.all([
+    const [cRes, nRes, eRes] = await Promise.all([
       fetch(`/api/${companySlug}/kb2?type=verify_cards`),
       fetch(`/api/${companySlug}/kb2?type=graph_nodes`),
+      fetch(`/api/${companySlug}/kb2?type=entity_pages`),
     ]);
     const cData = await cRes.json();
     const nData = await nRes.json();
+    const eData = await eRes.json();
     setCards(cData.cards ?? []);
+    setEntityPages(eData.pages ?? []);
     const allNodes: GraphNode[] = nData.nodes ?? [];
     const seen = new Set<string>();
     setNodes(allNodes.filter((n) => {
@@ -164,6 +241,16 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
   }, [companySlug]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    clearRightPanelSelection();
+    setSelectedCardId(null);
+    setCommentText("");
+    setOwnerInput("");
+    setModifyText("");
+    setDraftCards([]);
+    setReviewers([]);
+  }, [sidebarTab]);
 
   useEffect(() => {
     fetch(`/api/${companySlug}/kb2?type=people`)
@@ -197,6 +284,7 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
 
   const selectCard = (cardId: string) => {
     setSelectedCardId(cardId);
+    clearRightPanelSelection();
     setCommentText("");
     setOwnerInput("");
     setModifyText("");
@@ -206,6 +294,68 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
     setReviewers([]);
     setAddingReviewer(false);
     setReviewerToAdd("");
+  };
+
+  const relatedPagesForCard = (
+    card: VerifyCard,
+    options?: {
+      highlightedSectionNames?: string[];
+      highlightedItemTexts?: string[];
+    },
+  ): RelatedEntityPage[] => {
+    const pages: RelatedEntityPage[] = [];
+    for (const occurrence of card.page_occurrences ?? []) {
+      const page = entityPages.find(
+        (entityPage) =>
+          entityPage.page_id === occurrence.page_id ||
+          entityPage.node_id === occurrence.page_id,
+      );
+      if (!page) continue;
+      pages.push(
+        buildRelatedEntityPage(page, {
+          highlightedSectionNames: occurrence.section
+            ? [occurrence.section, ...(options?.highlightedSectionNames ?? [])]
+            : options?.highlightedSectionNames,
+          highlightedItemTexts: options?.highlightedItemTexts,
+        }),
+      );
+    }
+    for (const entity of card.affected_entities ?? []) {
+      const normalizedName = entity.entity_name.trim().toLowerCase();
+      if (!normalizedName) continue;
+      const matches = entityPages.filter(
+        (page) =>
+          page.title.toLowerCase() === normalizedName ||
+          page.title.toLowerCase().includes(normalizedName) ||
+          normalizedName.includes(page.title.toLowerCase()),
+      );
+      for (const match of matches) {
+        pages.push(
+          buildRelatedEntityPage(match, {
+            highlightedSectionNames: options?.highlightedSectionNames,
+            highlightedItemTexts: [
+              entity.entity_name,
+              ...(options?.highlightedItemTexts ?? []),
+            ],
+          }),
+        );
+      }
+    }
+    return mergeRelatedEntityPages(pages);
+  };
+
+  const selectCardContent = (
+    contentKey: string,
+    sources: SourceRef[],
+    relatedPages: RelatedEntityPage[],
+  ) => {
+    if (selectedContentKey === contentKey) {
+      clearRightPanelSelection();
+      return;
+    }
+    setSelectedContentKey(contentKey);
+    setRightPanelSources(sources);
+    setRightPanelRelated(relatedPages);
   };
 
   const filteredCards = personFilter === "all" ? cards : cards.filter((c) => c.assigned_to.includes(personFilter));
@@ -230,6 +380,7 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
     setCommentText("");
     await fetchData();
     setSelectedCardId(null);
+    clearRightPanelSelection();
   };
 
   const handleAddComment = async () => {
@@ -384,250 +535,374 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-1 min-w-0 overflow-hidden">
-        {/* Left sidebar */}
-        <div className="w-64 shrink-0 border-r flex flex-col">
-          <div className="p-3 border-b space-y-2">
-            <h2 className="text-sm font-medium">Verification Queue</h2>
-            <div className="flex rounded-md bg-muted p-0.5">
-              <button
-                onClick={() => setSidebarTab("queue")}
-                className={`flex-1 text-xs font-medium py-1 px-2 rounded-sm transition-colors ${
-                  sidebarTab === "queue"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Queue
-                <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{openCards.length}</Badge>
-              </button>
-              <button
-                onClick={() => setSidebarTab("verified")}
-                className={`flex-1 text-xs font-medium py-1 px-2 rounded-sm transition-colors ${
-                  sidebarTab === "verified"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Verified
-                <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{verifiedCards.length}</Badge>
-              </button>
+      <LeftSidebarLayout
+        autoSaveId="verify-left"
+        leftSidebar={
+          <div className="h-full border-r flex flex-col">
+            <div className="p-3 border-b space-y-2">
+              <h2 className="text-sm font-medium">Verification Queue</h2>
+              <div className="flex rounded-md bg-muted p-0.5">
+                <button
+                  onClick={() => setSidebarTab("queue")}
+                  className={`flex-1 text-xs font-medium py-1 px-2 rounded-sm transition-colors ${
+                    sidebarTab === "queue"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Queue
+                  <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{openCards.length}</Badge>
+                </button>
+                <button
+                  onClick={() => setSidebarTab("verified")}
+                  className={`flex-1 text-xs font-medium py-1 px-2 rounded-sm transition-colors ${
+                    sidebarTab === "verified"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Verified
+                  <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{verifiedCards.length}</Badge>
+                </button>
+              </div>
+              <Select value={personFilter} onValueChange={setPersonFilter}>
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue placeholder="Filter by person..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All ({cards.length})</SelectItem>
+                  {nodes.map((node) => (
+                    <SelectItem key={node.node_id} value={node.display_name}>{node.display_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Select value={personFilter} onValueChange={setPersonFilter}>
-              <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Filter by person..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All ({cards.length})</SelectItem>
-                {nodes.map((node) => (
-                  <SelectItem key={node.node_id} value={node.display_name}>{node.display_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
 
-          <ScrollArea className="flex-1">
-            {sidebarTab === "queue" ? (
-              <div className="p-2">
-                {SEVERITY_ORDER.map((sev) => {
-                  const sevCards = cardsBySeverity[sev] ?? [];
-                  const cfg = SEVERITY_CONFIG[sev];
-                  const isExpanded = expandedSeverities.has(sev);
-                  return (
-                    <div key={sev} className="mb-1">
-                      <button
-                        onClick={() => toggleSeverity(sev)}
-                        className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
-                      >
-                        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${cfg.pillClass}`}>
-                          {sev} {cfg.label}
-                        </span>
-                        <Badge variant="secondary" className="ml-auto text-[10px]">{sevCards.length}</Badge>
-                      </button>
-                      {isExpanded && (
-                        <div className="ml-2 space-y-0.5 mt-0.5">
-                          {sevCards.length === 0 ? (
-                            <div className="text-[10px] text-muted-foreground px-2 py-1">No cards</div>
-                          ) : (
-                            sevCards.map((card) => (
-                              <Tooltip key={card.card_id}>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    onClick={() => selectCard(card.card_id)}
-                                    className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                                      selectedCardId === card.card_id
-                                        ? "bg-accent font-medium"
-                                        : "hover:bg-accent/50"
-                                    }`}
-                                  >
-                                    <span className={`w-2 h-2 rounded-full shrink-0 ${cfg.bgColor}`} />
-                                    <span className="text-xs truncate flex-1">{card.title}</span>
-                                    <span className="text-[10px] shrink-0">{STATUS_ICONS[card.status] ?? ""}</span>
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="max-w-xs">
-                                  <p className="text-xs">{card.title}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="p-2 space-y-0.5">
-                {verifiedCards.length === 0 ? (
-                  <div className="text-xs text-muted-foreground px-2 py-4 text-center">No verified items yet.</div>
-                ) : (
-                  verifiedCards.map((card) => {
-                    const cfg = SEVERITY_CONFIG[card.severity];
-                    const isValidated = card.status === "validated";
+            <ScrollArea className="flex-1">
+              {sidebarTab === "queue" ? (
+                <div className="p-2">
+                  {SEVERITY_ORDER.map((sev) => {
+                    const sevCards = cardsBySeverity[sev] ?? [];
+                    const cfg = SEVERITY_CONFIG[sev];
+                    const isExpanded = expandedSeverities.has(sev);
                     return (
-                      <Tooltip key={card.card_id}>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => selectCard(card.card_id)}
-                            className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                              selectedCardId === card.card_id
-                                ? "bg-accent font-medium"
-                                : "hover:bg-accent/50"
-                            }`}
-                          >
-                            {isValidated
-                              ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
-                              : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                            }
-                            <span className="text-xs truncate flex-1">{card.title}</span>
-                            <span className={`w-2 h-2 rounded-full shrink-0 ${cfg?.bgColor ?? "bg-gray-400"}`} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-xs">
-                          <p className="text-xs">{card.title}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            {isValidated ? "Validated" : "Rejected"} · {card.severity}
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
+                      <div key={sev} className="mb-1">
+                        <button
+                          onClick={() => toggleSeverity(sev)}
+                          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
+                        >
+                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${cfg.pillClass}`}>
+                            {sev} {cfg.label}
+                          </span>
+                          <Badge variant="secondary" className="ml-auto text-[10px]">{sevCards.length}</Badge>
+                        </button>
+                        {isExpanded && (
+                          <div className="ml-2 space-y-0.5 mt-0.5">
+                            {sevCards.length === 0 ? (
+                              <div className="text-[10px] text-muted-foreground px-2 py-1">No cards</div>
+                            ) : (
+                              sevCards.map((card) => (
+                                <Tooltip key={card.card_id}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => selectCard(card.card_id)}
+                                      className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                                        selectedCardId === card.card_id
+                                          ? "bg-accent font-medium"
+                                          : "hover:bg-accent/50"
+                                      }`}
+                                    >
+                                      <span className={`w-2 h-2 rounded-full shrink-0 ${cfg.bgColor}`} />
+                                      <span className="text-xs truncate flex-1">{card.title}</span>
+                                      <span className="text-[10px] shrink-0">{STATUS_ICONS[card.status] ?? ""}</span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="max-w-xs">
+                                    <p className="text-xs">{card.title}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
-                  })
-                )}
-              </div>
-            )}
-          </ScrollArea>
-        </div>
-
-        {/* Middle + Right */}
-        <SplitLayout
-          autoSaveId="verify"
-          mainContent={
+                  })}
+                </div>
+              ) : (
+                <div className="p-2 space-y-0.5">
+                  {verifiedCards.length === 0 ? (
+                    <div className="text-xs text-muted-foreground px-2 py-4 text-center">No verified items yet.</div>
+                  ) : (
+                    verifiedCards.map((card) => {
+                      const cfg = SEVERITY_CONFIG[card.severity];
+                      const isValidated = card.status === "validated";
+                      return (
+                        <Tooltip key={card.card_id}>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => selectCard(card.card_id)}
+                              className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                                selectedCardId === card.card_id
+                                  ? "bg-accent font-medium"
+                                  : "hover:bg-accent/50"
+                              }`}
+                            >
+                              {isValidated
+                                ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                                : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                              }
+                              <span className="text-xs truncate flex-1">{card.title}</span>
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${cfg?.bgColor ?? "bg-gray-400"}`} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            <p className="text-xs">{card.title}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {isValidated ? "Validated" : "Rejected"} · {card.severity}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        }
+        mainContent={
+          <SplitLayout
+            autoSaveId="verify"
+            mainContent={
             selectedCard ? (
               <ScrollArea className="h-full">
                 <div className="max-w-2xl mx-auto p-6">
-                  {/* Title + badges */}
-                  <h2 className="text-xl font-semibold mb-3">{selectedCard.title}</h2>
-                  <div className="flex items-center gap-2 mb-4 flex-wrap">
-                    <Badge>{selectedCard.card_type}</Badge>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${SEVERITY_CONFIG[selectedCard.severity]?.pillClass ?? ""}`}>
-                      {selectedCard.severity} — {SEVERITY_CONFIG[selectedCard.severity]?.label}
-                    </span>
-                    <Badge variant="outline">{selectedCard.status}</Badge>
-                    {selectedCard.assigned_to.length > 0 && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        Assigned: {selectedCard.assigned_to.join(", ")}
-                      </Badge>
-                    )}
+                  {/* Title + severity */}
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-lg font-semibold leading-snug">{selectedCard.title}</h2>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${SEVERITY_CONFIG[selectedCard.severity]?.pillClass ?? ""}`}>
+                          {SEVERITY_CONFIG[selectedCard.severity]?.label}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{selectedCard.card_type.replace(/_/g, " ")}</span>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">{selectedCard.status}</Badge>
                   </div>
 
-                  {/* Problem Explanation */}
-                  <div className="mb-4 p-4 rounded-lg bg-muted/40 border">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Problem</p>
-                    <p className="text-sm leading-relaxed">{selectedCard.problem_explanation || selectedCard.description || selectedCard.explanation}</p>
+                  {/* What happened */}
+                  <div
+                    className={`mb-5 rounded-md px-2 py-2 cursor-pointer transition-colors ${
+                      selectedContentKey === "summary"
+                        ? "bg-primary/5 ring-1 ring-primary/20"
+                        : "hover:bg-accent/30"
+                    }`}
+                    onClick={() =>
+                      selectCardContent(
+                        "summary",
+                        selectedCard.source_refs ?? [],
+                        relatedPagesForCard(selectedCard, {
+                          highlightedItemTexts: [
+                            selectedCard.problem_explanation ||
+                              selectedCard.description ||
+                              selectedCard.explanation,
+                          ],
+                        }),
+                      )
+                    }
+                  >
+                    <p className="text-sm leading-relaxed">
+                      {selectedCard.problem_explanation || selectedCard.description || selectedCard.explanation}
+                    </p>
                   </div>
 
-                  {/* Verification Question */}
-                  {selectedCard.verification_question && (
-                    <div className="mb-4 p-4 rounded-lg border-2 border-primary/20 bg-primary/5">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">Question for Reviewer</p>
-                      <p className="text-sm font-medium">{selectedCard.verification_question}</p>
-                    </div>
-                  )}
-
-                  {/* Supporting Evidence */}
-                  {(selectedCard.supporting_evidence ?? []).length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Supporting Evidence</p>
-                      <div className="space-y-2">
-                        {selectedCard.supporting_evidence!.map((ev, i) => (
-                          <div key={i} className="flex gap-2 items-start p-2.5 rounded-md bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs">{ev.text}</p>
-                              {ev.source_title && <p className="text-[10px] text-muted-foreground mt-1">Source: {ev.source_title}</p>}
-                            </div>
-                            {ev.confidence && (
-                              <Badge variant="outline" className="text-[9px] shrink-0">{ev.confidence}</Badge>
-                            )}
+                  {/* What we need from you */}
+                  {(selectedCard.verification_question || (selectedCard.required_data ?? []).length > 0) && (
+                    <Card className="mb-5 border-primary/20">
+                      <CardContent className="pt-4 pb-4 space-y-3">
+                        {selectedCard.verification_question && (
+                          <div
+                            className={`rounded-md px-2 py-2 cursor-pointer transition-colors ${
+                              selectedContentKey === "verification-question"
+                                ? "bg-primary/5 ring-1 ring-primary/20"
+                                : "hover:bg-accent/30"
+                            }`}
+                            onClick={() =>
+                              selectCardContent(
+                                "verification-question",
+                                selectedCard.source_refs ?? [],
+                                relatedPagesForCard(selectedCard, {
+                                  highlightedItemTexts: [selectedCard.verification_question!],
+                                }),
+                              )
+                            }
+                          >
+                            <p className="text-xs font-semibold text-primary mb-1">Please confirm</p>
+                            <p className="text-sm font-medium">{selectedCard.verification_question}</p>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Missing Evidence */}
-                  {(selectedCard.missing_evidence ?? []).length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Missing Evidence</p>
-                      <div className="space-y-1.5">
-                        {selectedCard.missing_evidence!.map((item, i) => (
-                          <div key={i} className="flex gap-2 items-start p-2.5 rounded-md bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
-                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
-                            <p className="text-xs flex-1">{item}</p>
+                        )}
+                        {(selectedCard.required_data ?? []).length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-muted-foreground mb-1.5">Information needed</p>
+                            <ul className="space-y-1.5">
+                              {selectedCard.required_data!.map((item, i) => (
+                                <li
+                                  key={i}
+                                  className={`text-sm flex gap-2 items-start rounded-md px-2 py-1.5 cursor-pointer transition-colors ${
+                                    selectedContentKey === `required:${i}`
+                                      ? "bg-primary/5 ring-1 ring-primary/20"
+                                      : "hover:bg-accent/30"
+                                  }`}
+                                  onClick={() =>
+                                    selectCardContent(
+                                      `required:${i}`,
+                                      selectedCard.source_refs ?? [],
+                                      relatedPagesForCard(selectedCard, {
+                                        highlightedItemTexts: [item],
+                                      }),
+                                    )
+                                  }
+                                >
+                                  <span className="w-4 h-4 rounded border border-muted-foreground/30 shrink-0 mt-0.5" />
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Affected Entities */}
-                  {(selectedCard.affected_entities ?? []).length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Affected Entities</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedCard.affected_entities!.map((ent, i) => (
-                          <Badge key={i} variant="secondary" className="text-[11px] gap-1">
-                            {ent.entity_name}
-                            {ent.entity_type && <span className="text-muted-foreground">({ent.entity_type})</span>}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Required Data */}
-                  {(selectedCard.required_data ?? []).length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Data Needed from You</p>
-                      <ul className="space-y-1">
-                        {selectedCard.required_data!.map((item, i) => (
-                          <li key={i} className="text-xs flex gap-2 items-start">
-                            <span className="text-primary font-bold mt-0.5">•</span>
-                            <span>{item}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   )}
 
                   {/* Recommended action */}
                   {selectedCard.recommended_action && (
-                    <div className="mb-4 p-3 border-l-4 border-blue-500 bg-blue-500/5 rounded-r-md">
-                      <p className="text-xs font-medium text-blue-600 mb-1">Recommended Action</p>
+                    <div
+                      className={`mb-5 p-3 border-l-4 border-blue-500 rounded-r-md cursor-pointer transition-colors ${
+                        selectedContentKey === "recommended-action"
+                          ? "bg-primary/10 ring-1 ring-primary/20"
+                          : "bg-blue-500/5 hover:bg-blue-500/10"
+                      }`}
+                      onClick={() =>
+                        selectCardContent(
+                          "recommended-action",
+                          selectedCard.source_refs ?? [],
+                          relatedPagesForCard(selectedCard, {
+                            highlightedItemTexts: [selectedCard.recommended_action!],
+                          }),
+                        )
+                      }
+                    >
+                      <p className="text-xs font-medium text-blue-600 mb-1">Suggested fix</p>
                       <p className="text-sm">{selectedCard.recommended_action}</p>
                     </div>
+                  )}
+
+                  {/* Context (collapsed by default) */}
+                  {((selectedCard.supporting_evidence ?? []).length > 0 || (selectedCard.missing_evidence ?? []).length > 0 || (selectedCard.affected_entities ?? []).length > 0) && (
+                    <Collapsible defaultOpen={false} className="mb-5">
+                      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group w-full">
+                        <ChevronRight className="h-3 w-3 group-data-[state=open]:hidden" />
+                        <ChevronDown className="h-3 w-3 hidden group-data-[state=open]:block" />
+                        <span>Show context and evidence</span>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-3 space-y-3">
+                        {(selectedCard.supporting_evidence ?? []).length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Evidence found</p>
+                            <div className="space-y-1">
+                              {selectedCard.supporting_evidence!.map((ev, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => {
+                                    const matchingSources = (selectedCard.source_refs ?? []).filter((ref) =>
+                                      ev.source_title
+                                        ? ref.title.toLowerCase().includes(ev.source_title.toLowerCase())
+                                        : false,
+                                    );
+                                    selectCardContent(
+                                      `evidence:${i}`,
+                                      matchingSources.length > 0
+                                        ? matchingSources
+                                        : (selectedCard.source_refs ?? []),
+                                      relatedPagesForCard(selectedCard, {
+                                        highlightedItemTexts: [ev.text],
+                                      }),
+                                    );
+                                  }}
+                                  className={`w-full text-left text-xs pl-3 border-l-2 rounded-r-md py-1 transition-colors ${
+                                    selectedContentKey === `evidence:${i}`
+                                      ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                                      : "border-green-300 text-muted-foreground hover:bg-accent/30"
+                                  }`}
+                                >
+                                  {ev.text}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {(selectedCard.missing_evidence ?? []).length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Still missing</p>
+                            <ul className="space-y-0.5">
+                              {selectedCard.missing_evidence!.map((item, i) => (
+                                <li
+                                  key={i}
+                                  className={`text-xs text-muted-foreground flex gap-1.5 items-start rounded-md px-2 py-1 cursor-pointer transition-colors ${
+                                    selectedContentKey === `missing:${i}`
+                                      ? "bg-primary/5 ring-1 ring-primary/20"
+                                      : "hover:bg-accent/30"
+                                  }`}
+                                  onClick={() =>
+                                    selectCardContent(
+                                      `missing:${i}`,
+                                      [],
+                                      relatedPagesForCard(selectedCard, {
+                                        highlightedItemTexts: [item],
+                                      }),
+                                    )
+                                  }
+                                >
+                                  <span className="text-amber-500 shrink-0">-</span> {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {(selectedCard.affected_entities ?? []).length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Related</p>
+                            <div className="flex flex-wrap gap-1">
+                              {selectedCard.affected_entities!.map((ent, i) => (
+                                <button
+                                  key={i}
+                                  className={`text-[10px] rounded px-1.5 py-0.5 transition-colors ${
+                                    selectedContentKey === `entity:${i}`
+                                      ? "bg-primary/10 text-primary ring-1 ring-primary/20"
+                                      : "text-muted-foreground hover:bg-accent/30"
+                                  }`}
+                                  onClick={() =>
+                                    selectCardContent(
+                                      `entity:${i}`,
+                                      selectedCard.source_refs ?? [],
+                                      relatedPagesForCard(selectedCard, {
+                                        highlightedItemTexts: [ent.entity_name],
+                                      }),
+                                    )
+                                  }
+                                >
+                                  {ent.entity_name}
+                                  {i < selectedCard.affected_entities!.length - 1 ? "," : ""}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CollapsibleContent>
+                    </Collapsible>
                   )}
 
                   {/* Owner assignment for unknown_owner cards */}
@@ -1038,13 +1313,14 @@ export function KB2VerifyPage({ companySlug }: { companySlug: string }) {
             <KB2RightPanel
               companySlug={companySlug}
               autoContext={selectedCard ? { type: "verify_card", id: selectedCard.card_id, title: selectedCard.title || "Verify Card" } : null}
-              sourceRefs={selectedCard?.source_refs ?? []}
-              relatedEntityPages={[]}
+              sourceRefs={rightPanelSources}
+              relatedEntityPages={rightPanelRelated}
               defaultTab="sources"
             />
-          }
-        />
-      </div>
+            }
+          />
+        }
+      />
     </TooltipProvider>
   );
 }

@@ -186,10 +186,21 @@ export const extractionValidationStepV2: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
 
   const step3ExecId = await ctx.getStepExecutionId("pass1", 3);
-  const sourceNodes = (await tc.graph_nodes_pre_resolution.find(
+  const rawSourceNodes = (await tc.graph_nodes_pre_resolution.find(
     step3ExecId ? { execution_id: step3ExecId } : { run_id: ctx.runId },
   ).toArray()) as unknown as KB2GraphNodeType[];
   const step3Artifact = await ctx.getStepArtifact("pass1", 3);
+
+  const seenNodeIds = new Set<string>();
+  const sourceNodes = rawSourceNodes.filter((n) => {
+    const key = n.node_id ?? `${n.type}:${n.display_name}`;
+    if (seenNodeIds.has(key)) return false;
+    seenNodeIds.add(key);
+    return true;
+  });
+  if (rawSourceNodes.length !== sourceNodes.length) {
+    logger.log(`Deduped ${rawSourceNodes.length} → ${sourceNodes.length} pre-resolution nodes`);
+  }
 
   if (sourceNodes.length === 0) {
     throw new Error("No candidate entities found — run step 3 first");
@@ -211,8 +222,10 @@ export const extractionValidationStepV2: StepFunction = async (ctx) => {
   const ambiguousNodes: KB2GraphNodeType[] = [];
 
   for (const sourceNode of sourceNodes) {
+    const { _id: _stripId, ...restSource } = sourceNode as typeof sourceNode & { _id?: unknown };
+    void _stripId;
     const node: KB2GraphNodeType = {
-      ...sourceNode,
+      ...restSource,
       execution_id: ctx.executionId,
       attributes: { ...(sourceNode.attributes ?? {}) },
     };

@@ -49,15 +49,13 @@ const PROJECT_SURFACE_RE = /\b(page|portal|browser|browse|tracking|calendar|choo
 const DIRECT_PROJECT_SURFACE_RE = /\b(page|portal|browser|browse|tracking|calendar|chooser|navigation|comparison|feature|orders|responsiveness|redesign|integration|pipeline|standardization|search|profile|profiles|form)\b/i;
 const PROJECT_FRAGMENT_RE = /\b(button|buttons|card|cards|designs?|endpoint|tests?|e2e|mockups?|touch target)\b/i;
 const CONFLUENCE_UMBRELLA_RE = /\b(phase\s+\d+|website redesign|roadmap)\b/i;
-const CONFLUENCE_SECTION_PROJECT_RE = /\b(browse|profiles?|responsiveness)\b/i;
 const INITIATIVE_RE = /\b(phase|initiative|priority|biggest new feature|goal of|ongoing effort|feature work|started this effort|distinct feature|living document)\b/i;
-const DECISION_TRIGGER_RE = /\b(decided|decision|prefer|better than|instead of|tradeoff|going with|makes more sense|standardize|suggested|opted)\b/i;
+const DECISION_TRIGGER_RE = /\b(decided|decision|prefer|instead of|tradeoff|going with|makes more sense|standardize|suggested|opted)\b/i;
 const PROCESS_TRIGGER_RE = /\b(process|workflow|runbook|playbook|checklist|triage|handoff|manual process|review flow|deployment pipeline|daily|weekly|every \d+)\b/i;
-const COLOR_PATTERN_RE = /\b(pink|blue|green)\b/i;
-const COLOR_CONTEXT_RE = /\b(gender|male|female|button|cta|donate|donation|sponsor|money|accent|indicator|card)\b/i;
-const LAYOUT_PATTERN_RE = /\b(vertical|sidebar|left side|tabs across the top|grid|layout)\b/i;
-const LAYOUT_CONTEXT_RE = /\b(browse|chooser|category|categories|navigation|selection|compare|page)\b/i;
-const CLIENT_PATTERN_RE = /\b(client side|clientside|load all|load everything|single api call|on mount|filter locally|sort locally|pagination|prev next|one pet at a time|flip through)\b/i;
+const PATTERN_TRIGGER_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|instead of|always|never)\b/i;
+const WEAK_DECISION_FEEDBACK_RE = /\blooks so much better\b|\bwhere we started\b/i;
+const IMPLEMENTATION_CONTEXT_RE = /\b(ui|ux|button|cta|card|layout|menu|navigation|sidebar|filter|pagination|page|modal|drawer|grid|tab|tabs|table|form|search|sort|cache|caching|load|loading|client side|server side|api|schema|color|accent|style|responsive|mobile)\b/i;
+const IMPLEMENTATION_ACTION_RE = /\b(use|using|keep|put|place|load|store|filter|sort|paginate|render|show|hide|stack)\b/i;
 
 const EXTRACTION_PROMPT = `You are extracting evidence-backed observations and candidate entities from already-structured enterprise source units.
 
@@ -80,6 +78,7 @@ OUTPUT RULES:
 - evidence_excerpt must be copied from the unit text, not paraphrased.
 - suggested_type should be the best candidate type for later validation, even if uncertain.
 - If evidence is weak, still return the observation with lower confidence instead of overcommitting to a project.
+- Labels must be short (max 5 words), human-readable proper names. Good: "Shelter Search Page", "Stripe Integration". Bad: "Page for searching shelters in the application".
 `;
 
 interface DeterministicSeedBundle {
@@ -181,6 +180,30 @@ function compactSignalLabel(text: string, fallback: string): string {
   return cleaned.split(" ").slice(0, 8).join(" ").trim() || fallback;
 }
 
+function normalizeDecisionLabelText(text: string): string {
+  return text
+    .replace(/^[-*>#\s]+/, "")
+    .replace(/^the user is choosing,\s*not comparing,\s*so\s+/i, "")
+    .replace(/\bmakes more sense to me than\b/i, " over ")
+    .replace(/\bmakes more sense than\b/i, " over ")
+    .replace(/\s+across the top\b/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shouldSuppressDecisionExcerpt(text: string): boolean {
+  const normalized = text
+    .replace(/^[-*>#\s]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return true;
+  if (WEAK_DECISION_FEEDBACK_RE.test(normalized)) return true;
+  if (/^instead of\b/i.test(normalized) && normalized.split(/\s+/).length <= 5) {
+    return true;
+  }
+  return false;
+}
+
 function toTitleCase(value: string): string {
   return value
     .split(/\s+/)
@@ -235,6 +258,12 @@ function deriveStructuredProjectLabelFromDoc(doc: KB2ParsedDocument): string | n
   return formatStructuredLabel(text);
 }
 
+function extractJiraDescription(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const match = normalized.match(/## Description\n([\s\S]*?)(?=\n## |\n# |$)/);
+  return match?.[1]?.trim() ?? "";
+}
+
 function deriveStructuredProjectSeedFromConfluenceUnit(
   doc: KB2ParsedDocument,
   unit: KB2SourceUnit,
@@ -257,10 +286,7 @@ function deriveStructuredProjectSeedFromConfluenceUnit(
 
   let label = normalizeStructuredProjectSurface(phaseMatch[1]);
   if (!label) return null;
-  if (/\bmobile and polish\b/i.test(label) && /\bmobile responsiveness\b/i.test(unit.text)) {
-    label = "mobile responsiveness";
-  }
-  if (!CONFLUENCE_SECTION_PROJECT_RE.test(label)) return null;
+  if (!DIRECT_PROJECT_SURFACE_RE.test(label) && label.split(/\s+/).length < 2) return null;
   if (TASK_SHAPED_RE.test(label)) return null;
 
   const normalizedText = unit.text.toLowerCase();
@@ -387,75 +413,56 @@ function buildDeterministicSignalSeedsForUnit(
     });
   }
 
-  const hasColorPattern = COLOR_PATTERN_RE.test(text) && COLOR_CONTEXT_RE.test(text);
-  if (hasColorPattern) {
+  const hasPatternSignal = IMPLEMENTATION_CONTEXT_RE.test(text) && (
+    PATTERN_TRIGGER_RE.test(text) ||
+    (IMPLEMENTATION_ACTION_RE.test(text) && DECISION_TRIGGER_RE.test(text))
+  );
+  if (hasPatternSignal) {
     pushSignal({
       observation_kind: "pattern_signal",
-      label: "Semantic UI color rule",
+      label: compactSignalLabel(
+        chooseSignalExcerpt(text, [PATTERN_TRIGGER_RE, IMPLEMENTATION_CONTEXT_RE]),
+        unit.title,
+      ),
       suggested_type: "decision",
-      reasoning: "This excerpt states a repeated UI color rule, so it should survive as a pattern signal for later convention synthesis.",
-      confidence: "high",
-      excerpt: chooseSignalExcerpt(text, [COLOR_PATTERN_RE, COLOR_CONTEXT_RE]),
-      origin: "deterministic-pattern",
-      promote_candidate: false,
-      attributes: { signal_family: "semantic_color_ui" },
-    });
-  }
-
-  const hasLayoutPattern = LAYOUT_PATTERN_RE.test(text) && LAYOUT_CONTEXT_RE.test(text);
-  if (hasLayoutPattern) {
-    pushSignal({
-      observation_kind: "pattern_signal",
-      label: "Selection layout rule",
-      suggested_type: "decision",
-      reasoning: "This excerpt captures a repeated layout choice for browse or pick-one flows, so it should remain available as a pattern signal.",
+      reasoning: "This excerpt describes a reusable implementation rule or team default, so it should survive as a pattern signal for later convention synthesis.",
       confidence: DECISION_TRIGGER_RE.test(text) ? "high" : "medium",
-      excerpt: chooseSignalExcerpt(text, [LAYOUT_PATTERN_RE, LAYOUT_CONTEXT_RE]),
+      excerpt: chooseSignalExcerpt(text, [PATTERN_TRIGGER_RE, IMPLEMENTATION_CONTEXT_RE]),
       origin: "deterministic-pattern",
       promote_candidate: false,
-      attributes: { signal_family: "selection_layout_ui" },
-    });
-  }
-
-  const hasClientPattern = CLIENT_PATTERN_RE.test(text);
-  if (hasClientPattern) {
-    pushSignal({
-      observation_kind: "pattern_signal",
-      label: "Client-side browse loading rule",
-      suggested_type: "decision",
-      reasoning: "This excerpt describes a reusable implementation habit for loading and filtering browse data, so it should remain as a pattern signal.",
-      confidence: "high",
-      excerpt: chooseSignalExcerpt(text, [CLIENT_PATTERN_RE]),
-      origin: "deterministic-pattern",
-      promote_candidate: false,
-      attributes: { signal_family: "client_side_browse" },
+      attributes: { signal_family: "implementation_pattern" },
     });
   }
 
   if (DECISION_TRIGGER_RE.test(text)) {
     const excerpt = chooseSignalExcerpt(text, [DECISION_TRIGGER_RE]);
-    pushSignal({
-      observation_kind: "decision_signal",
-      label: compactSignalLabel(excerpt, unit.title),
-      suggested_type: "decision",
-      reasoning: "This excerpt contains an explicit choice, tradeoff, or standard and should remain available as a decision signal before canonicalization.",
-      confidence: hasColorPattern || hasLayoutPattern || hasClientPattern ? "high" : "medium",
-      excerpt,
-      origin: "deterministic-decision",
-      promote_candidate:
-        doc.provider === "slack" ||
-        (doc.provider === "github" && unit.kind === "review_comment") ||
-        (!hasColorPattern && !hasLayoutPattern && !hasClientPattern),
-    });
+    if (!shouldSuppressDecisionExcerpt(excerpt)) {
+      pushSignal({
+        observation_kind: "decision_signal",
+        label: compactSignalLabel(normalizeDecisionLabelText(excerpt), unit.title),
+        suggested_type: "decision",
+        reasoning: "This excerpt contains an explicit choice, tradeoff, or standard and should remain available as a decision signal before canonicalization.",
+        confidence: hasPatternSignal ? "high" : "medium",
+        excerpt,
+        origin: "deterministic-decision",
+        promote_candidate:
+          doc.provider === "slack" ||
+          (doc.provider === "github" && unit.kind === "review_comment") ||
+          !hasPatternSignal,
+      });
+    }
   }
 
   const processText = `${unit.title}\n${text}`;
   const strongProcessTitle = /\b(process|workflow|runbook|playbook|checklist|onboarding|deployment|sync)\b/i.test(unit.title);
   if (PROCESS_TRIGGER_RE.test(processText)) {
     const excerpt = chooseSignalExcerpt(`${unit.title}\n${text}`, [PROCESS_TRIGGER_RE]);
+    const processLabel = strongProcessTitle
+      ? compactSignalLabel(unit.title, "Workflow")
+      : compactSignalLabel(excerpt, compactSignalLabel(unit.title, "Workflow"));
     pushSignal({
       observation_kind: "process_signal",
-      label: compactSignalLabel(excerpt, compactSignalLabel(unit.title, "Workflow")),
+      label: processLabel,
       suggested_type: "process",
       reasoning: "This excerpt describes a repeatable human or delivery workflow, so it should be preserved as a process signal.",
       confidence: "medium",
@@ -485,6 +492,8 @@ function buildDeterministicSeeds(
     const unitId = primaryUnit?.unit_id ?? `${doc.sourceId}:deterministic`;
 
     if (doc.provider === "jira" && attrs.key) {
+      const jiraDescription = extractJiraDescription(doc.content);
+      const jiraSummary = doc.title.replace(/^[A-Z]+-\d+:\s*/i, "").trim() || doc.title;
       const ticketObservation = buildDeterministicObservation({
         doc,
         unitId,
@@ -496,11 +505,17 @@ function buildDeterministicSeeds(
         source_ref: primaryRef,
         aliases: [doc.title].filter((value) => value !== attrs.key),
         attributes: {
-          summary: doc.title,
+          ticket_key: String(attrs.key),
+          summary: jiraSummary,
+          description: jiraDescription,
           issue_type: attrs.issue_type ?? attrs.issueType ?? attrs.type,
           status: attrs.status,
+          raw_status: attrs.status,
           assignee: attrs.assignee,
           reporter: attrs.reporter,
+          created_at: attrs.created,
+          resolved_at: attrs.resolved,
+          sprint: attrs.sprint,
         },
       });
       observations.push(ticketObservation);
@@ -511,11 +526,18 @@ function buildDeterministicSeeds(
         confidence: "high",
         aliases: [doc.title].filter((value) => value !== attrs.key),
         attributes: {
-          summary: doc.title,
+          ticket_key: String(attrs.key),
+          summary: jiraSummary,
+          description: jiraDescription,
           status: attrs.status,
+          raw_status: attrs.status,
           priority: attrs.priority,
+          issue_type: attrs.issue_type ?? attrs.issueType ?? attrs.type,
           assignee: attrs.assignee,
           reporter: attrs.reporter,
+          created_at: attrs.created,
+          resolved_at: attrs.resolved,
+          sprint: attrs.sprint,
           _candidate_stage: "step3",
           _candidate_origin: "deterministic-jira",
         },
@@ -832,9 +854,7 @@ function getCandidatePromotionDecision(
     if (
       observation.observation_kind === "decision_signal" ||
       DECISION_TRIGGER_RE.test(text) ||
-      (COLOR_PATTERN_RE.test(text) && COLOR_CONTEXT_RE.test(text)) ||
-      (LAYOUT_PATTERN_RE.test(text) && LAYOUT_CONTEXT_RE.test(text)) ||
-      CLIENT_PATTERN_RE.test(text)
+      (PATTERN_TRIGGER_RE.test(text) && IMPLEMENTATION_CONTEXT_RE.test(text))
     ) {
       return {
         promote: true,

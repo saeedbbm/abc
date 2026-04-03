@@ -3,18 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ChevronDown,
@@ -35,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { KB2RightPanel, SourceRef, RelatedEntityPage, AutoContext } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
+import { LeftSidebarLayout } from "./LeftSidebarLayout";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,6 +80,13 @@ interface GraphNodeSummary {
     section_heading?: string;
     excerpt: string;
   }[];
+}
+
+interface HumanSidebarCategoryGroup {
+  key: string;
+  label: string;
+  humanPages: HumanPage[];
+  feedbackEntityPages: EntityPage[];
 }
 
 type ProjectBucketLabel =
@@ -184,6 +180,18 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   customer_feedback: "Customer Feedback",
 };
 
+const ENTITY_GROUPS: { label: string; types: string[] }[] = [
+  { label: "People & Teams", types: ["team_member", "team", "client_company", "client_person"] },
+  { label: "Projects & Work", types: ["project", "ticket", "pull_request", "pipeline"] },
+  { label: "Decisions & Patterns", types: ["decision", "process"] },
+  { label: "Systems & Infrastructure", types: ["repository", "integration", "infrastructure", "cloud_resource", "library", "database", "environment"] },
+  { label: "Customer Feedback", types: ["customer_feedback"] },
+];
+
+const HUMAN_FEEDBACK_CATEGORY_KEY = "customer_feedback";
+const HUMAN_FEEDBACK_CATEGORY_LABEL = "Customer Feedback";
+const STANDALONE_HUMAN_FEEDBACK_GROUP_KEY = `standalone:${HUMAN_FEEDBACK_CATEGORY_KEY}`;
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -194,12 +202,15 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
   const [selectedPage, setSelectedPage] = useState<HumanPage | null>(null);
   const [selectedEntityPage, setSelectedEntityPage] =
     useState<EntityPage | null>(null);
+  const [selectedHumanParagraphKey, setSelectedHumanParagraphKey] = useState<string | null>(null);
   const [layerOrder, setLayerOrder] = useState<string[]>(DEFAULT_LAYER_ORDER);
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(
     new Set(DEFAULT_LAYER_ORDER)
   );
+  const [expandedHumanCategories, setExpandedHumanCategories] = useState<Set<string>>(
+    new Set([STANDALONE_HUMAN_FEEDBACK_GROUP_KEY])
+  );
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
-  const [viewTab, setViewTab] = useState("human");
   const [sidebarMode, setSidebarMode] = useState<"human" | "ai">("human");
 
   const [graphNodes, setGraphNodes] = useState<Record<string, GraphNodeSummary>>({});
@@ -235,23 +246,84 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       } catch { /* ignore config errors */ }
     }
 
-    const humanPages = hData.pages ?? [];
+    const baseHumanPages = hData.pages ?? [];
     const entityPages = eData.pages ?? [];
-    setHumanPages(humanPages);
-    setEntityPages(entityPages);
     const nodeMap: typeof graphNodes = {};
     for (const n of nData.nodes ?? []) {
       nodeMap[n.node_id] = { display_name: n.display_name, type: n.type, truth_status: n.truth_status, attributes: n.attributes, source_refs: n.source_refs ?? [] };
     }
+
+    const feedbackHumanPages = await Promise.all(
+      entityPages
+        .filter((ep) => ep.node_type === HUMAN_FEEDBACK_CATEGORY_KEY)
+        .map(async (ep) => {
+          const primarySource = nodeMap[ep.node_id]?.source_refs?.[0];
+          let content = primarySource?.excerpt ?? "";
+
+          if (primarySource?.doc_id) {
+            try {
+              const params = new URLSearchParams({
+                type: "parsed_doc",
+                doc_id: primarySource.doc_id,
+              });
+              if (primarySource.source_type) {
+                params.set("source_type", primarySource.source_type);
+              }
+              const response = await fetch(`/api/${companySlug}/kb2?${params.toString()}`);
+              if (response.ok) {
+                const data = await response.json();
+                const parsedContent = getParsedDocContent(data.document);
+                if (parsedContent) content = parsedContent;
+              }
+            } catch {
+              // Fall back to the stored excerpt below.
+            }
+          }
+
+          const parsed = parseFeedbackDocument(content, ep.title);
+          const normalizedBody = (parsed.body || content)
+            .replace(/\s*\n\s*/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          return {
+            page_id: `customer-feedback:${ep.page_id}`,
+            title: parsed.title || ep.title,
+            layer: "company",
+            category: HUMAN_FEEDBACK_CATEGORY_KEY,
+            paragraphs: normalizedBody
+              ? [{ heading: "", body: normalizedBody, entity_refs: [] }]
+              : [],
+            linked_entity_page_ids: [ep.page_id, ep.node_id],
+          } satisfies HumanPage;
+        }),
+    );
+
+    const humanPages = [...baseHumanPages, ...feedbackHumanPages];
+    setHumanPages(humanPages);
+    setEntityPages(entityPages);
     setGraphNodes(nodeMap);
     if (humanPages.length > 0) {
-      const firstPage = humanPages.find((page: HumanPage) => !isPlaceholderHumanPage(page)) ?? humanPages[0];
+      const firstPage =
+        baseHumanPages.find((page: HumanPage) => !isPlaceholderHumanPage(page))
+        ?? humanPages.find((page: HumanPage) => !isPlaceholderHumanPage(page))
+        ?? humanPages[0];
       setSelectedPage(firstPage);
       setRightPanelContext({
         type: "human_page",
         id: firstPage.page_id,
         title: firstPage.title,
       });
+      setRightPanelSources([]);
+      setRightPanelRelated([]);
+      setSelectedHumanParagraphKey(null);
+    } else {
+      setSelectedPage(null);
+      setSelectedEntityPage(null);
+      setRightPanelContext(null);
+      setRightPanelSources([]);
+      setRightPanelRelated([]);
+      setSelectedHumanParagraphKey(null);
     }
   }, [companySlug]);
 
@@ -264,6 +336,15 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       const next = new Set(prev);
       if (next.has(layer)) next.delete(layer);
       else next.add(layer);
+      return next;
+    });
+  };
+
+  const toggleHumanCategory = (categoryKey: string) => {
+    setExpandedHumanCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryKey)) next.delete(categoryKey);
+      else next.add(categoryKey);
       return next;
     });
   };
@@ -284,11 +365,50 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
 
   const pagesByLayer = layerOrder.reduce(
     (acc, layer) => {
-      acc[layer] = humanPages.filter((p) => p.layer === layer);
+      acc[layer] = humanPages.filter(
+        (p) => p.layer === layer && p.category !== HUMAN_FEEDBACK_CATEGORY_KEY,
+      );
       return acc;
     },
     {} as Record<string, HumanPage[]>
   );
+
+  const feedbackHumanPages = humanPages.filter(
+    (page) => page.category === HUMAN_FEEDBACK_CATEGORY_KEY,
+  );
+  const humanSidebarGroupsByLayer = layerOrder.reduce(
+    (acc, layer) => {
+      const groups = new Map<string, HumanSidebarCategoryGroup>();
+
+      for (const page of pagesByLayer[layer] ?? []) {
+        const groupKey = page.category || page.page_id;
+        const existing = groups.get(groupKey);
+        if (existing) {
+          existing.humanPages.push(page);
+        } else {
+          groups.set(groupKey, {
+            key: groupKey,
+            label: page.title,
+            humanPages: [page],
+            feedbackEntityPages: [],
+          });
+        }
+      }
+
+      acc[layer] = Array.from(groups.values());
+      return acc;
+    },
+    {} as Record<string, HumanSidebarCategoryGroup[]>,
+  );
+  const standaloneHumanFeedbackGroup =
+    feedbackHumanPages.length > 0
+      ? {
+          key: HUMAN_FEEDBACK_CATEGORY_KEY,
+          label: HUMAN_FEEDBACK_CATEGORY_LABEL,
+          humanPages: feedbackHumanPages,
+          feedbackEntityPages: [],
+        }
+      : null;
 
   const linkedEntityPages = selectedPage
     ? entityPages.filter((ep) =>
@@ -297,33 +417,202 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       )
     : [];
 
-  const sourceRefsForEntity = (ep: EntityPage): SourceRef[] =>
-    (graphNodes[ep.node_id]?.source_refs ?? []).map((ref) => ({
-      source_type: ref.source_type,
-      doc_id: ref.doc_id,
-      title: ref.title,
-      excerpt: ref.excerpt,
-      section_heading: ref.section_heading,
-    }));
+  const buildRelatedEntityPage = (
+    ep: EntityPage,
+    options?: {
+      highlightedSectionNames?: string[];
+      highlightedItemTexts?: string[];
+    },
+  ): RelatedEntityPage => ({
+    page_id: ep.page_id,
+    title: ep.title,
+    node_type: ep.node_type,
+    highlighted_section_names: options?.highlightedSectionNames,
+    highlighted_item_texts: options?.highlightedItemTexts,
+    sections: ep.sections.map((section) => ({
+      section_name: section.section_name,
+      items: section.items.map((item) => ({
+        text: item.text,
+        confidence: item.confidence,
+      })),
+    })),
+  });
 
-  const relatedPagesForHuman = (page: HumanPage): RelatedEntityPage[] => {
-    const related = entityPages.filter(
+  const mergeRelatedEntityPages = (pages: RelatedEntityPage[]): RelatedEntityPage[] => {
+    const merged = new Map<string, RelatedEntityPage>();
+    for (const page of pages) {
+      const existing = merged.get(page.page_id);
+      if (!existing) {
+        merged.set(page.page_id, {
+          ...page,
+          highlighted_section_names: [...(page.highlighted_section_names ?? [])],
+          highlighted_item_texts: [...(page.highlighted_item_texts ?? [])],
+        });
+        continue;
+      }
+      merged.set(page.page_id, {
+        ...existing,
+        highlighted_section_names: [
+          ...new Set([
+            ...(existing.highlighted_section_names ?? []),
+            ...(page.highlighted_section_names ?? []),
+          ]),
+        ],
+        highlighted_item_texts: [
+          ...new Set([
+            ...(existing.highlighted_item_texts ?? []),
+            ...(page.highlighted_item_texts ?? []),
+          ]),
+        ],
+      });
+    }
+    return Array.from(merged.values());
+  };
+
+  function entityPagesForHumanParagraph(
+    page: HumanPage,
+    paragraph: HumanPage["paragraphs"][number],
+  ): EntityPage[] {
+    const explicitRefs = paragraph.entity_refs
+      .map((ref) => {
+        const resolvedRef = resolveEntityRef(ref).toLowerCase();
+        return entityPages.find((ep) =>
+          ep.page_id === ref ||
+          ep.node_id === ref ||
+          ep.title.toLowerCase() === resolvedRef ||
+          ep.title.toLowerCase().includes(resolvedRef) ||
+          resolvedRef.includes(ep.title.toLowerCase())
+        ) ?? null;
+      })
+      .filter((ep): ep is EntityPage => Boolean(ep));
+
+    if (explicitRefs.length > 0) return explicitRefs;
+
+    return entityPages.filter(
       (ep) =>
         page.linked_entity_page_ids.includes(ep.page_id) ||
         page.linked_entity_page_ids.includes(ep.node_id),
     );
-    return related.map((ep) => ({
-      page_id: ep.page_id,
-      title: ep.title,
-      node_type: ep.node_type,
-      sections: ep.sections.map((section) => ({
-        section_name: section.section_name,
-        items: section.items.map((item) => ({
-          text: item.text,
-          confidence: item.confidence,
-        })),
-      })),
-    }));
+  }
+
+  function sourceRefsForHumanParagraph(
+    page: HumanPage,
+    paragraph: HumanPage["paragraphs"][number],
+  ): SourceRef[] {
+    const refs: SourceRef[] = [];
+    const seen = new Set<string>();
+    for (const ep of entityPagesForHumanParagraph(page, paragraph)) {
+      for (const ref of graphNodes[ep.node_id]?.source_refs ?? []) {
+        const nextRef: SourceRef = {
+          source_type: ref.source_type,
+          doc_id: ref.doc_id,
+          title: ref.title,
+          excerpt: ref.excerpt,
+          section_heading: ref.section_heading,
+        };
+        const key = `${nextRef.source_type}::${nextRef.doc_id}::${nextRef.title}::${nextRef.section_heading ?? ""}::${nextRef.excerpt ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        refs.push(nextRef);
+      }
+    }
+    return refs;
+  }
+
+  function relatedPagesForHumanParagraph(
+    page: HumanPage,
+    paragraph: HumanPage["paragraphs"][number],
+  ): RelatedEntityPage[] {
+    return mergeRelatedEntityPages(
+      entityPagesForHumanParagraph(page, paragraph).map((ep) =>
+        buildRelatedEntityPage(ep, {
+          highlightedSectionNames: paragraph.heading ? [paragraph.heading] : [],
+          highlightedItemTexts: paragraph.body ? [paragraph.body] : [],
+        }),
+      ),
+    );
+  }
+
+  const selectHumanParagraph = (
+    page: HumanPage,
+    paragraph: HumanPage["paragraphs"][number],
+    paragraphKey: string,
+  ) => {
+    setSelectedHumanParagraphKey(paragraphKey);
+    setRightPanelSources(sourceRefsForHumanParagraph(page, paragraph));
+    setRightPanelRelated(relatedPagesForHumanParagraph(page, paragraph));
+  };
+
+  const selectHumanSidebarPage = (page: HumanPage) => {
+    setSelectedPage(page);
+    setSelectedEntityPage(null);
+    setSelectedHumanParagraphKey(null);
+    setRightPanelContext({ type: "human_page", id: page.page_id, title: page.title });
+    setRightPanelSources([]);
+    setRightPanelRelated([]);
+  };
+
+  const renderHumanSidebarGroup = (
+    group: HumanSidebarCategoryGroup,
+    groupKey: string,
+  ) => {
+    const itemCount = group.humanPages.length + group.feedbackEntityPages.length;
+    const isGroupExpanded = expandedHumanCategories.has(groupKey);
+    const shouldNest =
+      group.feedbackEntityPages.length > 0 || group.humanPages.length > 1;
+
+    if (!shouldNest && group.humanPages.length === 1) {
+      const page = group.humanPages[0];
+      return (
+        <button
+          key={page.page_id}
+          onClick={() => selectHumanSidebarPage(page)}
+          className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
+            selectedPage?.page_id === page.page_id
+              ? "bg-accent font-medium"
+              : "hover:bg-accent/50"
+          }`}
+        >
+          {page.title}
+        </button>
+      );
+    }
+
+    return (
+      <div key={groupKey} className="mb-0.5">
+        <button
+          onClick={() => toggleHumanCategory(groupKey)}
+          className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground hover:bg-accent/50"
+        >
+          {isGroupExpanded ? (
+            <ChevronDown className="h-2.5 w-2.5" />
+          ) : (
+            <ChevronRight className="h-2.5 w-2.5" />
+          )}
+          {group.label}
+          <Badge variant="outline" className="ml-auto text-[9px]">
+            {itemCount}
+          </Badge>
+        </button>
+        {isGroupExpanded && (
+          <div className="ml-4 space-y-0.5">
+            {group.humanPages.map((page) => (
+              <button
+                key={page.page_id}
+                onClick={() => selectHumanSidebarPage(page)}
+                className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
+                  selectedPage?.page_id === page.page_id
+                    ? "bg-accent font-medium"
+                    : "hover:bg-accent/50"
+                }`}
+              >
+                {page.title}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const navigateToEntity = (refText: string) => {
@@ -333,10 +622,10 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
       e.page_id === refText || e.node_id === refText,
     );
     if (ep) {
+      setSelectedHumanParagraphKey(null);
       setSelectedEntityPage(ep);
-      setViewTab("ai");
       setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
-      setRightPanelSources(sourceRefsForEntity(ep));
+      setRightPanelSources([]);
       setRightPanelRelated([]);
     }
   };
@@ -350,15 +639,13 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
     return ref;
   };
 
-  const highlightEntityRefs = (body: string, entityRefs: string[]) => {
-    if (entityRefs.length === 0) return <span>{body}</span>;
-    const resolvedRefs = entityRefs.map(resolveEntityRef).filter((r) => r.length > 1);
-    if (resolvedRefs.length === 0) return <span>{body}</span>;
+  const highlightEntityRefs = (text: string, resolvedRefs: string[]) => {
+    if (resolvedRefs.length === 0) return <>{text}</>;
     const escaped = resolvedRefs.map((r) =>
       r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     );
     const regex = new RegExp(`(${escaped.join("|")})`, "gi");
-    const parts = body.split(regex);
+    const parts = text.split(regex);
     return (
       <>
         {parts.map((part, i) => {
@@ -370,7 +657,10 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
               <span
                 key={i}
                 className="bg-primary/10 text-primary font-medium px-0.5 rounded cursor-pointer hover:bg-primary/20 transition-colors"
-                onClick={() => navigateToEntity(part)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigateToEntity(part);
+                }}
               >
                 {part}
               </span>
@@ -382,193 +672,326 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
     );
   };
 
+  const renderInlineFormattedText = (text: string, resolvedRefs: string[]) => {
+    const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__)/g);
+    return (
+      <>
+        {parts.map((part, i) => {
+          const isBold =
+            (part.startsWith("**") && part.endsWith("**")) ||
+            (part.startsWith("__") && part.endsWith("__"));
+          if (!isBold) {
+            return <span key={i}>{highlightEntityRefs(part, resolvedRefs)}</span>;
+          }
+          const inner = part.slice(2, -2);
+          return <strong key={i}>{highlightEntityRefs(inner, resolvedRefs)}</strong>;
+        })}
+      </>
+    );
+  };
+
+  const BULLET_RE = /^[\s]*[-•*]\s+/;
+
+  const renderStructuredBody = (body: string, entityRefs: string[]) => {
+    const resolvedRefs = entityRefs.map(resolveEntityRef).filter((r) => r.length > 1);
+    const lines = body.split("\n");
+    const blocks: Array<{ type: "text"; content: string } | { type: "list"; items: string[] }> = [];
+    let currentList: string[] | null = null;
+
+    for (const line of lines) {
+      if (BULLET_RE.test(line)) {
+        if (!currentList) currentList = [];
+        currentList.push(line.replace(BULLET_RE, "").trim());
+      } else {
+        if (currentList) {
+          blocks.push({ type: "list", items: currentList });
+          currentList = null;
+        }
+        const trimmed = line.trim();
+        if (trimmed) blocks.push({ type: "text", content: trimmed });
+      }
+    }
+    if (currentList) blocks.push({ type: "list", items: currentList });
+
+    return (
+      <>
+        {blocks.map((block, i) =>
+          block.type === "list" ? (
+            <ul key={i} className="list-disc pl-5 space-y-1 text-sm leading-relaxed my-2">
+              {block.items.map((item, j) => (
+                <li key={j}>{renderInlineFormattedText(item, resolvedRefs)}</li>
+              ))}
+            </ul>
+          ) : (
+            <p key={i} className="text-sm leading-relaxed">
+              {renderInlineFormattedText(block.content, resolvedRefs)}
+            </p>
+          )
+        )}
+      </>
+    );
+  };
+
   return (
-    <div className="flex h-full flex-1 min-w-0">
-      {/* Left nav tree */}
-      <div className="w-64 border-r flex flex-col">
-        <div className="p-4 border-b">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium">Knowledge Base</h2>
-            <div className="ml-auto flex rounded-md border text-[10px] overflow-hidden">
-              <button
-                onClick={() => {
-                  setSidebarMode("human");
-                  const page = selectedPage ?? humanPages[0];
-                  setSelectedEntityPage(null);
-                  if (page) {
-                    setSelectedPage(page);
-                    setViewTab("human");
-                    setRightPanelContext({
-                      type: "human_page",
-                      id: page.page_id,
-                      title: page.title,
-                    });
-                    setRightPanelSources([]);
-                    setRightPanelRelated(relatedPagesForHuman(page));
-                  } else {
-                    setRightPanelContext(null);
-                    setRightPanelSources([]);
-                    setRightPanelRelated([]);
-                  }
-                }}
-                className={`px-2 py-0.5 transition-colors ${sidebarMode === "human" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              >
-                <BookOpen className="h-3 w-3 inline mr-0.5" />Human
-              </button>
-              <button
-                onClick={() => {
-                  setSidebarMode("ai");
-                  const ep = selectedEntityPage ?? linkedEntityPages[0] ?? entityPages[0];
-                  if (ep) {
-                    setSelectedEntityPage(ep);
-                    setSelectedPage(null);
-                    setViewTab("ai");
-                    setRightPanelContext({
-                      type: "entity_page",
-                      id: ep.page_id,
-                      title: ep.title,
-                    });
-                    setRightPanelSources(sourceRefsForEntity(ep));
-                    setRightPanelRelated([]);
-                  } else {
-                    setSelectedPage(null);
+    <LeftSidebarLayout
+      autoSaveId="kb-left"
+      leftSidebar={
+        <div className="h-full border-r flex flex-col">
+          <div className="p-4 border-b">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium">Docs</h2>
+              <div className="ml-auto flex rounded-md border text-[10px] overflow-hidden">
+                <button
+                  onClick={() => {
+                    setSidebarMode("human");
+                    const page = selectedPage ?? humanPages[0];
                     setSelectedEntityPage(null);
-                    setRightPanelContext(null);
-                    setRightPanelSources([]);
-                    setRightPanelRelated([]);
-                  }
-                }}
-                className={`px-2 py-0.5 transition-colors border-l ${sidebarMode === "ai" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              >
-                <Cpu className="h-3 w-3 inline mr-0.5" />AI
-              </button>
+                    setSelectedHumanParagraphKey(null);
+                    if (page) {
+                      setSelectedPage(page);
+                      setRightPanelContext({
+                        type: "human_page",
+                        id: page.page_id,
+                        title: page.title,
+                      });
+                      setRightPanelSources([]);
+                      setRightPanelRelated([]);
+                    } else {
+                      setRightPanelContext(null);
+                      setRightPanelSources([]);
+                      setRightPanelRelated([]);
+                    }
+                  }}
+                  className={`px-2 py-0.5 transition-colors ${sidebarMode === "human" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
+                >
+                  <BookOpen className="h-3 w-3 inline mr-0.5" />Human
+                </button>
+                <button
+                  onClick={() => {
+                    setSidebarMode("ai");
+                    const ep = selectedEntityPage ?? linkedEntityPages[0] ?? entityPages[0];
+                    if (ep) {
+                      setSelectedHumanParagraphKey(null);
+                      setSelectedEntityPage(ep);
+                      setSelectedPage(null);
+                      setRightPanelContext({
+                        type: "entity_page",
+                        id: ep.page_id,
+                        title: ep.title,
+                      });
+                      setRightPanelSources([]);
+                      setRightPanelRelated([]);
+                    } else {
+                      setSelectedHumanParagraphKey(null);
+                      setSelectedPage(null);
+                      setSelectedEntityPage(null);
+                      setRightPanelContext(null);
+                      setRightPanelSources([]);
+                      setRightPanelRelated([]);
+                    }
+                  }}
+                  className={`px-2 py-0.5 transition-colors border-l ${sidebarMode === "ai" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
+                >
+                  <Cpu className="h-3 w-3 inline mr-0.5" />AI
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        <ScrollArea className="flex-1 p-2">
-          {sidebarMode === "human" ? (
-            <>
-              {layerOrder.map((layer) => {
-                const pages = pagesByLayer[layer] ?? [];
-                const isExpanded = expandedLayers.has(layer);
-                return (
-                  <div key={layer} className="mb-1">
-                    <button
-                      onClick={() => toggleLayer(layer)}
-                      className="flex items-center gap-1 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                      {LAYER_LABELS[layer] ?? layer}
-                      {pages.length > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-[10px]">
-                          {pages.length}
-                        </Badge>
-                      )}
-                    </button>
-                    {isExpanded && (
-                      <div className="ml-4 space-y-0.5">
-                        {pages.length === 0 ? (
-                          <div className="text-[10px] text-muted-foreground px-2 py-1">
-                            No pages yet
-                          </div>
-                        ) : (
-                          pages.map((p) => (
-                            <button
-                              key={p.page_id}
-                              onClick={() => {
-                                setSelectedPage(p);
-                                setSelectedEntityPage(null);
-                                setViewTab("human");
-                                setRightPanelContext({ type: "human_page", id: p.page_id, title: p.title });
-                                setRightPanelSources([]);
-                                setRightPanelRelated(relatedPagesForHuman(p));
-                              }}
-                              className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
-                                selectedPage?.page_id === p.page_id
-                                  ? "bg-accent font-medium"
-                                  : "hover:bg-accent/50"
-                              }`}
-                            >
-                              {p.title}
-                            </button>
-                          ))
-                        )}
-                      </div>
+          <ScrollArea className="flex-1 p-2">
+            {sidebarMode === "human" ? (
+              <>
+                {standaloneHumanFeedbackGroup && (
+                  <div className="mb-2">
+                    {renderHumanSidebarGroup(
+                      standaloneHumanFeedbackGroup,
+                      STANDALONE_HUMAN_FEEDBACK_GROUP_KEY,
                     )}
                   </div>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              {ENTITY_TYPE_ORDER.map((t) => {
-                const pages = entityPagesByType[t] ?? [];
-                if (pages.length === 0) return null;
-                const isExpanded = expandedTypes.has(t);
-
-                if (t === "project") {
-                  const PROJECT_SUB_GROUPS = [
-                    "Past Documented",
-                    "Past Undocumented",
-                    "Ongoing Documented",
-                    "Ongoing Undocumented",
-                    "Proposed",
-                  ] as const;
-                  const subGroups: Record<string, EntityPage[]> = {};
-                  for (const label of PROJECT_SUB_GROUPS) subGroups[label] = [];
-                  for (const ep of pages) {
-                    const node = graphNodes[ep.node_id];
-                    subGroups[classifyProjectBucket(node)].push(ep);
-                  }
+                )}
+                {layerOrder.map((layer) => {
+                  const groups = humanSidebarGroupsByLayer[layer] ?? [];
+                  const isExpanded = expandedLayers.has(layer);
+                  const visibleItemCount = groups.reduce(
+                    (count, group) => count + group.humanPages.length + group.feedbackEntityPages.length,
+                    0,
+                  );
                   return (
-                    <div key={t} className="mb-1">
+                    <div key={layer} className="mb-1">
                       <button
-                        onClick={() => toggleType(t)}
+                        onClick={() => toggleLayer(layer)}
                         className="flex items-center gap-1 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
                       >
-                        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        {ENTITY_TYPE_LABELS[t] ?? t}
-                        <Badge variant="secondary" className="ml-auto text-[10px]">{pages.length}</Badge>
+                        {isExpanded ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                        {LAYER_LABELS[layer] ?? layer}
+                        {visibleItemCount > 0 && (
+                          <Badge variant="secondary" className="ml-auto text-[10px]">
+                            {visibleItemCount}
+                          </Badge>
+                        )}
                       </button>
                       {isExpanded && (
-                        <div className="ml-4 space-y-1">
-                          {PROJECT_SUB_GROUPS.map((sg) => {
-                            const sgPages = subGroups[sg];
-                            const sgKey = `project_${sg}`;
-                            const sgExpanded = expandedTypes.has(sgKey);
-                            const isEmpty = sgPages.length === 0;
-                            return (
-                              <div key={sg}>
-                                <button
-                                  onClick={() => { if (!isEmpty) toggleType(sgKey); }}
-                                  className={`flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground ${isEmpty ? "opacity-50 cursor-default" : "hover:bg-accent/50"}`}
-                                >
-                                  {isEmpty ? (
-                                    <span className="h-2.5 w-2.5 inline-block" />
-                                  ) : sgExpanded ? (
-                                    <ChevronDown className="h-2.5 w-2.5" />
-                                  ) : (
-                                    <ChevronRight className="h-2.5 w-2.5" />
+                        <div className="ml-4 space-y-0.5">
+                          {groups.length === 0 ? (
+                            <div className="text-[10px] text-muted-foreground px-2 py-1">
+                              No pages yet
+                            </div>
+                          ) : (
+                            groups.map((group) =>
+                              renderHumanSidebarGroup(group, `${layer}:${group.key}`),
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                {ENTITY_GROUPS.map((group) => {
+                  const groupPages = group.types.flatMap((t) => entityPagesByType[t] ?? []);
+                  if (groupPages.length === 0) return null;
+                  const groupKey = `group_${group.label}`;
+                  const isGroupExpanded = expandedTypes.has(groupKey);
+
+                  return (
+                    <div key={group.label} className="mb-1">
+                      <button
+                        onClick={() => toggleType(groupKey)}
+                        className="flex items-center gap-1 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
+                      >
+                        {isGroupExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        {group.label}
+                        <Badge variant="secondary" className="ml-auto text-[10px]">{groupPages.length}</Badge>
+                      </button>
+                      {isGroupExpanded && (
+                        <div className="ml-4 space-y-0.5">
+                          {group.types.map((t) => {
+                            const pages = entityPagesByType[t] ?? [];
+                            if (pages.length === 0) return null;
+                            const isTypeExpanded = expandedTypes.has(t);
+
+                            if (t === "project") {
+                              const PROJECT_SUB_GROUPS = [
+                                "Past Documented",
+                                "Past Undocumented",
+                                "Ongoing Documented",
+                                "Ongoing Undocumented",
+                                "Proposed",
+                              ] as const;
+                              const subGroups: Record<string, EntityPage[]> = {};
+                              for (const label of PROJECT_SUB_GROUPS) subGroups[label] = [];
+                              for (const ep of pages) {
+                                const node = graphNodes[ep.node_id];
+                                subGroups[classifyProjectBucket(node)].push(ep);
+                              }
+                              return (
+                                <div key={t} className="mb-0.5">
+                                  <button
+                                    onClick={() => toggleType(t)}
+                                    className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground hover:bg-accent/50"
+                                  >
+                                    {isTypeExpanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                    {ENTITY_TYPE_LABELS[t] ?? t}
+                                    <Badge variant="outline" className="ml-auto text-[9px]">{pages.length}</Badge>
+                                  </button>
+                                  {isTypeExpanded && (
+                                    <div className="ml-4 space-y-0.5">
+                                      {PROJECT_SUB_GROUPS.map((sg) => {
+                                        const sgPages = subGroups[sg];
+                                        if (sgPages.length === 0) return null;
+                                        const sgKey = `project_${sg}`;
+                                        const sgExpanded = expandedTypes.has(sgKey);
+                                        return (
+                                          <div key={sg}>
+                                            <button
+                                              onClick={() => toggleType(sgKey)}
+                                              className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground hover:bg-accent/50"
+                                            >
+                                              {sgExpanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                              {sg}
+                                              <Badge variant="outline" className="ml-auto text-[9px]">{sgPages.length}</Badge>
+                                            </button>
+                                            {sgExpanded && (
+                                              <div className="ml-4 space-y-0.5">
+                                                {sgPages.map((ep) => (
+                                                  <button
+                                                    key={ep.page_id}
+                                                    onClick={() => {
+                                                      setSelectedHumanParagraphKey(null);
+                                                      setSelectedEntityPage(ep);
+                                                      setSelectedPage(null);
+                                                      setSidebarMode("ai");
+                                                      setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
+                                                      setRightPanelSources([]);
+                                                      setRightPanelRelated([]);
+                                                    }}
+                                                    className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
+                                                      selectedEntityPage?.page_id === ep.page_id ? "bg-accent font-medium" : "hover:bg-accent/50"
+                                                    }`}
+                                                  >
+                                                    {ep.title}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
                                   )}
-                                  {sg}
-                                  <Badge variant="outline" className="ml-auto text-[9px]">{sgPages.length}</Badge>
+                                </div>
+                              );
+                            }
+
+                            if (group.types.length === 1 || pages.length <= 5) {
+                              return pages.map((ep) => (
+                                <button
+                                  key={ep.page_id}
+                                  onClick={() => {
+                                    setSelectedHumanParagraphKey(null);
+                                    setSelectedEntityPage(ep);
+                                    setSelectedPage(null);
+                                    setSidebarMode("ai");
+                                    setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
+                                    setRightPanelSources([]);
+                                    setRightPanelRelated([]);
+                                  }}
+                                  className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
+                                    selectedEntityPage?.page_id === ep.page_id ? "bg-accent font-medium" : "hover:bg-accent/50"
+                                  }`}
+                                >
+                                  {ep.title}
                                 </button>
-                                {sgExpanded && !isEmpty && (
+                              ));
+                            }
+
+                            return (
+                              <div key={t} className="mb-0.5">
+                                <button
+                                  onClick={() => toggleType(t)}
+                                  className="flex items-center gap-1 w-full px-2 py-1 text-[11px] font-medium rounded text-muted-foreground hover:bg-accent/50"
+                                >
+                                  {isTypeExpanded ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                  {ENTITY_TYPE_LABELS[t] ?? t}
+                                  <Badge variant="outline" className="ml-auto text-[9px]">{pages.length}</Badge>
+                                </button>
+                                {isTypeExpanded && (
                                   <div className="ml-4 space-y-0.5">
-                                    {sgPages.map((ep) => (
+                                    {pages.map((ep) => (
                                       <button
                                         key={ep.page_id}
                                         onClick={() => {
+                                          setSelectedHumanParagraphKey(null);
                                           setSelectedEntityPage(ep);
                                           setSelectedPage(null);
-                                          setViewTab("ai");
                                           setSidebarMode("ai");
                                           setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
-                                          setRightPanelSources(sourceRefsForEntity(ep));
+                                          setRightPanelSources([]);
                                           setRightPanelRelated([]);
                                         }}
                                         className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
@@ -587,272 +1010,127 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
                       )}
                     </div>
                   );
-                }
-
-                return (
-                  <div key={t} className="mb-1">
-                    <button
-                      onClick={() => toggleType(t)}
-                      className="flex items-center gap-1 w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-accent"
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                      {ENTITY_TYPE_LABELS[t] ?? t}
-                      <Badge variant="secondary" className="ml-auto text-[10px]">
-                        {pages.length}
-                      </Badge>
-                    </button>
-                    {isExpanded && (
-                      <div className="ml-4 space-y-0.5">
-                        {pages.map((ep) => (
-                          <button
-                            key={ep.page_id}
-                            onClick={() => {
-                              setSelectedEntityPage(ep);
-                              setSelectedPage(null);
-                              setViewTab("ai");
-                              setSidebarMode("ai");
-                              setRightPanelContext({ type: "entity_page", id: ep.page_id, title: ep.title });
-                              setRightPanelSources(sourceRefsForEntity(ep));
-                              setRightPanelRelated([]);
-                            }}
-                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors ${
-                              selectedEntityPage?.page_id === ep.page_id
-                                ? "bg-accent font-medium"
-                                : "hover:bg-accent/50"
-                            }`}
-                          >
-                            {ep.title}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </>
-          )}
-        </ScrollArea>
-      </div>
-
-      {/* Main content area + right panel */}
-      <SplitLayout
-        autoSaveId="kb-v3"
-        mainContent={
-        <div className="flex flex-col h-full">
-        {selectedPage || selectedEntityPage ? (
-          selectedEntityPage ? (
-            <div className="flex-1 min-h-0">
-              <EntityPageView
-                companySlug={companySlug}
-                page={selectedEntityPage}
-                sourceRefs={graphNodes[selectedEntityPage.node_id]?.source_refs ?? []}
-                onBack={sidebarMode === "ai" ? undefined : () => {
-                  setSelectedEntityPage(null);
-                  setViewTab("human");
-                }}
-                onItemClick={(refs) => setRightPanelSources(refs)}
-              />
-            </div>
-          ) : (
-          <ScrollArea className="flex-1 p-6">
-              <Tabs value={viewTab} onValueChange={setViewTab}>
-                <div className="flex items-center gap-4 mb-4">
-                  <h1 className="text-lg font-semibold">
-                    {selectedPage?.title}
-                  </h1>
-                  <TabsList className="ml-auto">
-                    <TabsTrigger value="human" className="text-xs">
-                      <BookOpen className="h-3 w-3 mr-1" /> Human View
-                    </TabsTrigger>
-                    <TabsTrigger value="ai" className="text-xs">
-                      <Cpu className="h-3 w-3 mr-1" /> AI View
-                    </TabsTrigger>
-                    <TabsTrigger value="sources" className="text-xs">
-                      <FileText className="h-3 w-3 mr-1" /> Sources
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                {/* Human View */}
-                <TabsContent value="human">
-                  {!selectedPage?.paragraphs.length ? (
-                    <p className="text-xs text-muted-foreground italic">
-                      No content yet
-                    </p>
-                  ) : (
-                    selectedPage.paragraphs.map((para, pi) => (
-                      <div key={pi} className="mb-6">
-                        {para.heading && (
-                          <h2 className="text-sm font-semibold mb-2 border-b pb-1">
-                            {para.heading}
-                          </h2>
-                        )}
-                        <p className="text-sm leading-relaxed">
-                          {highlightEntityRefs(para.body, para.entity_refs)}
-                        </p>
-                        {para.entity_refs.length > 0 && (
-                          <div className="flex gap-1 mt-2 flex-wrap">
-                            {para.entity_refs.map((ref, ri) => {
-                              const displayName = resolveEntityRef(ref);
-                              return (
-                              <Badge
-                                key={ri}
-                                variant="outline"
-                                className="text-[10px] cursor-pointer hover:bg-accent"
-                                onClick={() => navigateToEntity(ref)}
-                              >
-                                {displayName}
-                              </Badge>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </TabsContent>
-
-                {/* AI View */}
-                <TabsContent value="ai">
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Linked entity pages for this human page:
-                  </p>
-                  {linkedEntityPages.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No linked entity pages found.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {linkedEntityPages.map((ep) => (
-                        <Card
-                          key={ep.page_id}
-                          className="cursor-pointer hover:bg-accent/50 transition-colors"
-                          onClick={() => {
-                            setSelectedEntityPage(ep);
-                            setViewTab("ai");
-                            setRightPanelContext({
-                              type: "entity_page",
-                              id: ep.page_id,
-                              title: ep.title,
-                            });
-                            setRightPanelSources(sourceRefsForEntity(ep));
-                            setRightPanelRelated([]);
-                          }}
-                        >
-                          <CardHeader className="py-3">
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                variant="outline"
-                                className="text-[10px]"
-                              >
-                                {ep.node_type}
-                              </Badge>
-                              <CardTitle className="text-sm">
-                                {ep.title}
-                              </CardTitle>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="pb-3">
-                            <p className="text-xs text-muted-foreground">
-                              {ep.sections.length} section
-                              {ep.sections.length !== 1 ? "s" : ""}
-                            </p>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-
-                {/* Sources */}
-                <TabsContent value="sources">
-                  {(() => {
-                    const sourceMap = new Map<string, { title: string; source_type: string; entities: string[] }>();
-                    for (const ep of linkedEntityPages) {
-                      const node = graphNodes[ep.node_id];
-                      if (!node?.source_refs) continue;
-                      for (const ref of node.source_refs) {
-                        const key = `${ref.source_type}:${ref.title}`;
-                        if (!sourceMap.has(key)) {
-                          sourceMap.set(key, { title: ref.title, source_type: ref.source_type, entities: [] });
-                        }
-                        const entry = sourceMap.get(key)!;
-                        if (!entry.entities.includes(node.display_name)) {
-                          entry.entities.push(node.display_name);
-                        }
-                      }
-                    }
-                    const sources = Array.from(sourceMap.values());
-                    const byProvider = sources.reduce((acc, s) => {
-                      if (!acc[s.source_type]) acc[s.source_type] = [];
-                      acc[s.source_type].push(s);
-                      return acc;
-                    }, {} as Record<string, typeof sources>);
-                    const PROVIDER_ICONS: Record<string, string> = {
-                      confluence: "📄", jira: "🎫", slack: "💬", github: "🔧", customerFeedback: "📣",
-                    };
-                    if (sources.length === 0) {
-                      return <p className="text-xs text-muted-foreground">No source documents linked to this page.</p>;
-                    }
-                    return (
-                      <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground">
-                          {sources.length} source document{sources.length !== 1 ? "s" : ""} contributed to this page.
-                        </p>
-                        {Object.entries(byProvider).map(([provider, docs]) => (
-                          <div key={provider}>
-                            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                              <span>{PROVIDER_ICONS[provider] ?? "📎"}</span> {provider} ({docs.length})
-                            </h3>
-                            <div className="space-y-1">
-                              {docs.map((doc, i) => (
-                                <div key={i} className="text-xs bg-muted/30 rounded px-3 py-2 border border-border/30">
-                                  <div className="font-medium">{doc.title}</div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                                    Used by: {doc.entities.slice(0, 5).join(", ")}{doc.entities.length > 5 ? ` +${doc.entities.length - 5} more` : ""}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </TabsContent>
-              </Tabs>
+                })}
+              </>
+            )}
           </ScrollArea>
-          )
-        ) : (
-          <div className="flex items-center justify-center flex-1">
-            <p className="text-muted-foreground">
-              {sidebarMode === "human"
-                ? humanPages.length === 0
-                  ? "No KB pages yet. Run the pipeline from KB Admin."
-                  : "Select a page from the left panel."
-                : entityPages.length === 0
-                  ? "No entity pages yet. Run the pipeline from KB Admin."
-                  : "Select an entity from the left panel."}
-            </p>
-          </div>
-        )}
         </div>
-        }
-        rightPanel={
-          <KB2RightPanel
-            companySlug={companySlug}
-            autoContext={rightPanelContext}
-            sourceRefs={rightPanelSources}
-            relatedEntityPages={rightPanelRelated}
-            defaultTab="sources"
-          />
-        }
-      />
-    </div>
+      }
+      mainContent={
+        <SplitLayout
+          autoSaveId="kb-v3"
+          mainContent={
+            <div className="flex flex-col h-full">
+              {selectedPage || selectedEntityPage ? (
+                selectedEntityPage ? (
+                  <div className="flex-1 min-h-0">
+                    <EntityPageView
+                      companySlug={companySlug}
+                      page={selectedEntityPage}
+                      onBack={sidebarMode === "ai" ? undefined : () => {
+                        setSelectedEntityPage(null);
+                        setSelectedHumanParagraphKey(null);
+                        if (selectedPage) {
+                          setRightPanelContext({
+                            type: "human_page",
+                            id: selectedPage.page_id,
+                            title: selectedPage.title,
+                          });
+                          setRightPanelSources([]);
+                          setRightPanelRelated([]);
+                        }
+                      }}
+                      onItemClick={(selection) => {
+                        setRightPanelSources(selection.sourceRefs);
+                        setRightPanelRelated(selection.relatedPages);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <ScrollArea className="flex-1 p-6">
+                    <div className="mb-6">
+                      <h1 className="text-lg font-semibold">{selectedPage?.title}</h1>
+                    </div>
+                    {!selectedPage?.paragraphs.length ? (
+                      <p className="text-xs text-muted-foreground italic">
+                        No content yet
+                      </p>
+                    ) : (
+                      selectedPage.paragraphs.map((para, pi) => (
+                        <div
+                          key={pi}
+                          className={`mb-6 cursor-pointer rounded-md px-2 py-2 transition-colors ${
+                            selectedHumanParagraphKey === `${selectedPage.page_id}:${pi}`
+                              ? "bg-primary/5 ring-1 ring-primary/20"
+                              : "hover:bg-accent/30"
+                          }`}
+                          onClick={() =>
+                            selectedPage &&
+                            selectHumanParagraph(
+                              selectedPage,
+                              para,
+                              `${selectedPage.page_id}:${pi}`,
+                            )
+                          }
+                        >
+                          {para.heading && (
+                            <h2 className="text-sm font-semibold mb-2 border-b pb-1">
+                              {para.heading}
+                            </h2>
+                          )}
+                          {renderStructuredBody(para.body, para.entity_refs)}
+                          {para.entity_refs.length > 0 && (
+                            <div className="flex gap-1 mt-2 flex-wrap">
+                              {para.entity_refs.map((ref, ri) => {
+                                const displayName = resolveEntityRef(ref);
+                                return (
+                                  <Badge
+                                    key={ri}
+                                    variant="outline"
+                                    className="text-[10px] cursor-pointer hover:bg-accent"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigateToEntity(ref);
+                                    }}
+                                  >
+                                    {displayName}
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </ScrollArea>
+                )
+              ) : (
+                <div className="flex items-center justify-center flex-1">
+                  <p className="text-muted-foreground">
+                    {sidebarMode === "human"
+                      ? humanPages.length === 0
+                        ? "No docs pages yet. Run the pipeline from KB Admin."
+                        : "Select a page from the left panel."
+                      : entityPages.length === 0
+                        ? "No entity pages yet. Run the pipeline from KB Admin."
+                        : "Select an entity from the left panel."}
+                  </p>
+                </div>
+              )}
+            </div>
+          }
+          rightPanel={
+            <KB2RightPanel
+              companySlug={companySlug}
+              autoContext={rightPanelContext}
+              sourceRefs={rightPanelSources}
+              relatedEntityPages={rightPanelRelated}
+              defaultTab="sources"
+            />
+          }
+        />
+      }
+    />
   );
 }
 
@@ -860,18 +1138,63 @@ export function KB2KBPage({ companySlug }: { companySlug: string }) {
 // Entity page detail view
 // ---------------------------------------------------------------------------
 
+function getParsedDocContent(document: any): string {
+  const rawContent = typeof document?.content === "string" ? document.content.trim() : "";
+  if (rawContent) return rawContent;
+  if (!Array.isArray(document?.sections) || document.sections.length === 0) return "";
+  return document.sections
+    .map((section: { heading?: string; content?: string }) =>
+      section.heading ? `## ${section.heading}\n${section.content ?? ""}` : section.content ?? "",
+    )
+    .join("\n\n")
+    .trim();
+}
+
+function parseFeedbackDocument(
+  content: string,
+  fallbackTitle: string,
+): { title: string; meta: string; body: string } {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return { title: fallbackTitle, meta: "", body: "" };
+  }
+
+  let title = fallbackTitle;
+  let remaining = trimmed;
+
+  const headingMatch = remaining.match(/^#\s+([^\n]+)\r?\n+/);
+  if (headingMatch) {
+    title = headingMatch[1].trim() || fallbackTitle;
+    remaining = remaining.slice(headingMatch[0].length).trim();
+  }
+
+  let meta = "";
+  const lines = remaining.split(/\r?\n/);
+  if (lines[0]?.trim().startsWith("From:")) {
+    meta = lines[0].trim();
+    remaining = lines.slice(1).join("\n").trim();
+  }
+
+  return {
+    title,
+    meta,
+    body: remaining || trimmed,
+  };
+}
+
 function EntityPageView({
   companySlug,
   page,
-  sourceRefs,
   onBack,
   onItemClick,
 }: {
   companySlug: string;
   page: EntityPage;
-  sourceRefs: { source_type: string; doc_id: string; title: string; section_heading?: string; excerpt: string }[];
   onBack?: () => void;
-  onItemClick?: (refs: SourceRef[]) => void;
+  onItemClick?: (selection: {
+    sourceRefs: SourceRef[];
+    relatedPages: RelatedEntityPage[];
+  }) => void;
 }) {
   const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [verifyFormKey, setVerifyFormKey] = useState<string | null>(null);
@@ -892,6 +1215,11 @@ function EntityPageView({
       })
       .catch(() => {});
   }, [companySlug]);
+
+  useEffect(() => {
+    setSelectedItemKey(null);
+    setVerifyFormKey(null);
+  }, [page.page_id]);
 
   const handleAddToVerify = async (sectionName: string, itemText: string) => {
     if (!verifyReviewer) return;
@@ -918,38 +1246,37 @@ function EntityPageView({
   };
 
   const visibleSections = page.sections.filter(
-    (s) => s.requirement === "MUST" || s.items.length > 0
+    (s) => s.items.length > 0
   );
 
   return (
     <ScrollArea className="h-full">
-      <div className="p-6">
+      <div className="max-w-3xl mx-auto p-6">
         {onBack && (
           <Button variant="ghost" size="sm" onClick={onBack} className="mb-4">
             &larr; Back to human view
           </Button>
         )}
-        <div className="flex items-center gap-2 mb-4">
-          <h2 className="text-lg font-semibold">{page.title}</h2>
-          <Badge variant="outline">{page.node_type}</Badge>
+        <div className="flex items-center gap-2 mb-6">
+          <h2 className="text-lg font-semibold flex-1">{page.title}</h2>
+          <Badge variant="outline" className="shrink-0">
+            {page.node_type}
+          </Badge>
         </div>
         {visibleSections.map((section) => {
-          const si = page.sections.indexOf(section);
           return (
-            <div key={section.section_name} className="mb-5">
-              <div className="flex items-center gap-2 mb-2 border-b pb-1">
-                <h3 className="text-sm font-semibold">{section.section_name}</h3>
+            <div key={section.section_name} className="mb-4 rounded-md border border-border">
+              <div className="flex items-center gap-2 p-3 border-b bg-muted/20">
+                <h3 className="text-sm font-semibold flex-1">{section.section_name}</h3>
                 <Badge
                   variant={section.requirement === "MUST" ? "default" : "secondary"}
-                  className="text-[9px]"
+                  className="text-[9px] shrink-0"
                 >
                   {section.requirement}
                 </Badge>
               </div>
-              {section.items.length === 0 ? (
-                <p className="text-xs text-red-400 italic">Unknown</p>
-              ) : (
-                <ul className="space-y-0.5">
+              {section.items.length > 0 && (
+                <ul className="space-y-1 p-3">
                   {section.items.map((item, idx) => {
                     const itemKey = `${section.section_name}-${idx}`;
                     const hasItemSources = (item.source_refs ?? []).length > 0;
@@ -958,35 +1285,52 @@ function EntityPageView({
                     return (
                       <li key={idx} className="text-sm">
                         <div
-                          className={`group flex items-start gap-2 px-2 py-1.5 rounded transition-colors ${
+                          className={`group flex items-start gap-2 px-2 py-1.5 rounded-md transition-colors ${
                             isSelected
                               ? "bg-primary/10 ring-1 ring-primary/30"
-                              : "cursor-pointer hover:bg-accent/40"
+                              : "cursor-pointer hover:bg-muted/60"
                           }`}
                           onClick={() => {
                             if (!showVerifyForm) {
                               setSelectedItemKey(itemKey);
-                              if (item.source_refs) onItemClick?.(item.source_refs);
+                              onItemClick?.({
+                                sourceRefs: (item.source_refs ?? []).map((ref) => ({
+                                  source_type: ref.source_type,
+                                  doc_id: ref.doc_id,
+                                  title: ref.title,
+                                  section_heading: ref.section_heading,
+                                  excerpt: ref.excerpt,
+                                })),
+                                relatedPages: [
+                                  {
+                                    page_id: page.page_id,
+                                    title: page.title,
+                                    node_type: page.node_type,
+                                    highlighted_section_names: [section.section_name],
+                                    highlighted_item_texts: [item.text],
+                                    sections: page.sections.map((pageSection) => ({
+                                      section_name: pageSection.section_name,
+                                      items: pageSection.items.map((pageItem) => ({
+                                        text: pageItem.text,
+                                        confidence: pageItem.confidence,
+                                      })),
+                                    })),
+                                  },
+                                ],
+                              });
                             }
                           }}
                         >
                           {hasItemSources && (
                             <FileText className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
                           )}
-                          <span className="flex-1">{item.text}</span>
+                          <span
+                            className="flex-1 text-sm leading-relaxed"
+                            title={item.confidence !== "high" ? `Confidence: ${item.confidence}` : undefined}
+                          >
+                            {item.text}
+                          </span>
                           <div className="flex items-center gap-1 shrink-0">
-                            <Badge
-                              variant={
-                                item.confidence === "low"
-                                  ? "destructive"
-                                  : item.confidence === "medium"
-                                    ? "secondary"
-                                    : "default"
-                              }
-                              className="text-[9px]"
-                            >
-                              {item.confidence}
-                            </Badge>
                             {isSelected && !showVerifyForm && (
                               <button
                                 className="transition-opacity"
@@ -1004,7 +1348,10 @@ function EntityPageView({
                           </div>
                         </div>
                         {showVerifyForm && (
-                          <div className="mt-2 ml-6 space-y-2 p-2 bg-muted/30 rounded border" onClick={(e) => e.stopPropagation()}>
+                          <div
+                            className="mt-2 ml-6 space-y-2 p-3 bg-muted/30 rounded-md border"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div>
                               <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Reviewer *</label>
                               <Select value={verifyReviewer} onValueChange={setVerifyReviewer}>

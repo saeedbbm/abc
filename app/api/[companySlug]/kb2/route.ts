@@ -34,6 +34,14 @@ export async function GET(
     return buildBaselineRunFilter(targetRunId) as Record<string, any>;
   }
 
+  function normalizeSourceProvider(value?: string | null): string {
+    const normalized = (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normalized === "feedback" || normalized === "customerfeedback") {
+      return "customerfeedback";
+    }
+    return normalized;
+  }
+
   function demoFilterForCollection(targetRunId?: string): Record<string, any> {
     if (isWorkspaceLikeState(activeDemoState)) {
       return buildStateFilter(activeDemoState.state_id) as Record<string, any>;
@@ -54,6 +62,44 @@ export async function GET(
       seen.add(nodeId);
       return true;
     });
+  }
+
+  async function getLatestStepExecutionIds(
+    targetRunId: string,
+    stepIds: string[],
+  ): Promise<string[]> {
+    const executionIds = await Promise.all(
+      stepIds.map((stepId) => getLatestCompletedStepExecutionId(tc, targetRunId, stepId)),
+    );
+    return executionIds.filter(
+      (executionId): executionId is string =>
+        typeof executionId === "string" && executionId.trim().length > 0,
+    );
+  }
+
+  function buildExecutionScopedFilter(
+    scopeFilter: Record<string, any>,
+    executionIds: string[],
+    includeDocsWithoutExecution = false,
+  ): Record<string, any> {
+    if (executionIds.length === 0) return { ...scopeFilter };
+
+    const executionFilter =
+      executionIds.length === 1
+        ? { execution_id: executionIds[0] }
+        : { execution_id: { $in: executionIds } };
+
+    if (!includeDocsWithoutExecution) {
+      return { ...scopeFilter, ...executionFilter };
+    }
+
+    return {
+      $or: [
+        { ...scopeFilter, ...executionFilter },
+        { ...scopeFilter, execution_id: { $exists: false } },
+        { ...scopeFilter, execution_id: null },
+      ],
+    };
   }
 
   const filter: Record<string, any> = {};
@@ -157,7 +203,19 @@ export async function GET(
         if (nodes.length > 0) return Response.json({ nodes });
       }
       if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
-        const nodes = await tc.graph_nodes.find(buildStateFilter(activeDemoState.state_id)).toArray();
+        const stateFilter = buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+        const latestNodeExecIds = baseRunIdFromState
+          ? await getLatestStepExecutionIds(baseRunIdFromState, [
+              "pass1-step-9",
+              "pass1-step-10",
+              "pass1-step-11",
+            ])
+          : [];
+        const nodes = await tc.graph_nodes.find(
+          latestNodeExecIds.length > 0
+            ? buildExecutionScopedFilter(stateFilter, latestNodeExecIds)
+            : stateFilter,
+        ).toArray();
         return Response.json({ nodes: dedupeGraphNodes(nodes) });
       }
       let effectiveRunId = runId ?? baseRunIdFromState ?? undefined;
@@ -168,15 +226,18 @@ export async function GET(
           : undefined;
       }
       if (effectiveRunId) {
-        const latestStep9ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-9");
-        const latestStep10ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-10");
-        const latestStep11ExecId = await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-11");
-        const latestNodeExecIds = [latestStep9ExecId, latestStep10ExecId, latestStep11ExecId].filter(Boolean);
+        const latestNodeExecIds = await getLatestStepExecutionIds(effectiveRunId, [
+          "pass1-step-9",
+          "pass1-step-10",
+          "pass1-step-11",
+        ]);
         if (latestNodeExecIds.length > 0) {
-          const nodes = await tc.graph_nodes.find({
-            execution_id: { $in: latestNodeExecIds },
-            demo_state_id: { $exists: false },
-          }).toArray();
+          const nodes = await tc.graph_nodes.find(
+            buildExecutionScopedFilter(
+              baselineFilterForRun(effectiveRunId),
+              latestNodeExecIds,
+            ),
+          ).toArray();
           return Response.json({ nodes: dedupeGraphNodes(nodes) });
         }
       }
@@ -231,15 +292,43 @@ export async function GET(
         const cards = await tc.verification_cards.find({ execution_id: executionId, demo_state_id: { $exists: false } }).toArray();
         if (cards.length > 0) return Response.json({ cards });
       }
+      if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
+        const stateFilter = buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+        const latestVCExecIds = baseRunIdFromState
+          ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-18"])
+          : [];
+        const cards = await tc.verification_cards.find(
+          latestVCExecIds.length > 0
+            ? buildExecutionScopedFilter(stateFilter, latestVCExecIds, true)
+            : stateFilter,
+        ).toArray();
+        return Response.json({ cards });
+      }
+      let effectiveVCRunId = runId ?? baseRunIdFromState ?? undefined;
+      if (!effectiveVCRunId) {
+        const runIdsWithVC = await tc.verification_cards.distinct("run_id", { demo_state_id: { $exists: false } });
+        effectiveVCRunId = runIdsWithVC.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithVC)) ?? undefined
+          : undefined;
+      }
+      const latestVCExecId = effectiveVCRunId
+        ? await getLatestCompletedStepExecutionId(tc, effectiveVCRunId, "pass1-step-18")
+        : null;
       const vcFilter: Record<string, any> = {};
-      const effectiveRunId =
-        runId
-        ?? baseRunIdFromState
-        ?? await getLatestRunIdFromCollection(tc, companySlug, {
-          distinct: (field: string) => tc.verification_cards.distinct(field, { demo_state_id: { $exists: false } }),
-        })
-        ?? await getLatestCompletedRunId(tc, companySlug);
-      Object.assign(vcFilter, demoFilterForCollection(effectiveRunId ?? undefined));
+      if (latestVCExecId) {
+        Object.assign(
+          vcFilter,
+          buildExecutionScopedFilter(
+            baselineFilterForRun(effectiveVCRunId!),
+            [latestVCExecId],
+            true,
+          ),
+        );
+      } else if (effectiveVCRunId) {
+        Object.assign(vcFilter, demoFilterForCollection(effectiveVCRunId ?? undefined));
+      } else {
+        vcFilter.demo_state_id = { $exists: false };
+      }
       const cards = await tc.verification_cards.find(vcFilter).toArray();
       return Response.json({ cards });
     }
@@ -249,7 +338,15 @@ export async function GET(
         if (pages.length > 0) return Response.json({ pages });
       }
       if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
-        const pages = await tc.entity_pages.find(buildStateFilter(activeDemoState.state_id)).toArray();
+        const stateFilter = buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+        const latestEntityPagesExecIds = baseRunIdFromState
+          ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-14"])
+          : [];
+        const pages = await tc.entity_pages.find(
+          latestEntityPagesExecIds.length > 0
+            ? buildExecutionScopedFilter(stateFilter, latestEntityPagesExecIds)
+            : stateFilter,
+        ).toArray();
         return Response.json({ pages });
       }
       const epFilter: Record<string, any> = {};
@@ -264,7 +361,13 @@ export async function GET(
         ? await getLatestCompletedStepExecutionId(tc, effectiveRunId, "pass1-step-14")
         : null;
       if (latestEntityPagesExecId) {
-        epFilter.execution_id = latestEntityPagesExecId;
+        Object.assign(
+          epFilter,
+          buildExecutionScopedFilter(
+            baselineFilterForRun(effectiveRunId!),
+            [latestEntityPagesExecId],
+          ),
+        );
       } else if (effectiveRunId) {
         Object.assign(epFilter, baselineFilterForRun(effectiveRunId));
       } else {
@@ -343,15 +446,43 @@ export async function GET(
         const howtos = await tc.howto.find({ execution_id: executionId, demo_state_id: { $exists: false } }).sort({ created_at: -1 }).toArray();
         if (howtos.length > 0) return Response.json({ howtos });
       }
+      if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
+        const stateFilter = buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+        const latestHowtoExecIds = baseRunIdFromState
+          ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-16"])
+          : [];
+        const howtos = await tc.howto.find(
+          latestHowtoExecIds.length > 0
+            ? buildExecutionScopedFilter(stateFilter, latestHowtoExecIds, true)
+            : stateFilter,
+        ).sort({ created_at: -1 }).toArray();
+        return Response.json({ howtos });
+      }
+      let effectiveHowtoRunId = runId ?? baseRunIdFromState ?? undefined;
+      if (!effectiveHowtoRunId) {
+        const runIdsWithHowto = await tc.howto.distinct("run_id", { demo_state_id: { $exists: false } });
+        effectiveHowtoRunId = runIdsWithHowto.length > 0
+          ? (await getLatestCompletedRunId(tc, companySlug, runIdsWithHowto)) ?? undefined
+          : undefined;
+      }
+      const latestHowtoExecId = effectiveHowtoRunId
+        ? await getLatestCompletedStepExecutionId(tc, effectiveHowtoRunId, "pass1-step-16")
+        : null;
       const htFilter: Record<string, any> = {};
-      const effectiveRunId =
-        runId
-        ?? baseRunIdFromState
-        ?? await getLatestRunIdFromCollection(tc, companySlug, {
-          distinct: (field: string) => tc.howto.distinct(field, { demo_state_id: { $exists: false } }),
-        })
-        ?? await getLatestCompletedRunId(tc, companySlug);
-      Object.assign(htFilter, demoFilterForCollection(effectiveRunId ?? undefined));
+      if (latestHowtoExecId) {
+        Object.assign(
+          htFilter,
+          buildExecutionScopedFilter(
+            baselineFilterForRun(effectiveHowtoRunId!),
+            [latestHowtoExecId],
+            true,
+          ),
+        );
+      } else if (effectiveHowtoRunId) {
+        Object.assign(htFilter, buildBaselineRunFilter(effectiveHowtoRunId));
+      } else {
+        htFilter.demo_state_id = { $exists: false };
+      }
       const howtos = await tc.howto.find(htFilter).sort({ created_at: -1 }).toArray();
       return Response.json({ howtos });
     }
@@ -397,16 +528,15 @@ export async function GET(
       if (snapshot?.parsed_documents) {
         const docs = snapshot.parsed_documents as any[];
         const docIdLower = docId.toLowerCase();
-        const sourceTypeLower = sourceType?.toLowerCase();
+        const normalizedSourceType = normalizeSourceProvider(sourceType);
 
         const exactMatch = docs.find((d: any) => {
           const sid = (d.sourceId ?? "").toLowerCase();
           const did = (d.doc_id ?? d.id ?? "").toLowerCase();
           const idMatch = sid === docIdLower || did === docIdLower;
           if (!idMatch) return false;
-          if (sourceTypeLower) {
-            const provider = (d.provider ?? "").toLowerCase();
-            return provider === sourceTypeLower;
+          if (normalizedSourceType) {
+            return normalizeSourceProvider(d.provider ?? "") === normalizedSourceType;
           }
           return true;
         });
@@ -416,9 +546,8 @@ export async function GET(
           const title = (d.title ?? "").toLowerCase();
           const titleMatch = title === docIdLower;
           if (!titleMatch) return false;
-          if (sourceTypeLower) {
-            const provider = (d.provider ?? "").toLowerCase();
-            return provider === sourceTypeLower;
+          if (normalizedSourceType) {
+            return normalizeSourceProvider(d.provider ?? "") === normalizedSourceType;
           }
           return true;
         });
@@ -427,8 +556,8 @@ export async function GET(
         const partialMatch = docs.find((d: any) => {
           const title = (d.title ?? "").toLowerCase();
           if (docIdLower.startsWith(title) || title.startsWith(docIdLower)) {
-            if (sourceTypeLower) {
-              return (d.provider ?? "").toLowerCase() === sourceTypeLower;
+            if (normalizedSourceType) {
+              return normalizeSourceProvider(d.provider ?? "") === normalizedSourceType;
             }
             return true;
           }
@@ -451,8 +580,88 @@ export async function POST(
   const { companySlug } = await params;
   const body = await request.json();
   const tc = getTenantCollections(companySlug);
+  const type = body.type ?? request.nextUrl.searchParams.get("type");
 
-  switch (body.type) {
+  switch (type) {
+    case "howto": {
+      const { howto_id, section_name, content } = body;
+      if (!howto_id || !section_name || typeof content !== "string") {
+        return Response.json({ error: "howto_id, section_name, and content are required" }, { status: 400 });
+      }
+      const updated_at = new Date().toISOString();
+      await tc.howto.updateOne(
+        { howto_id },
+        {
+          $set: {
+            "sections.$[section].content": content,
+            "sections.$[section].steps": [],
+            "sections.$[section].source_refs": [],
+            "sections.$[section].entity_refs": [],
+            updated_at,
+          },
+        },
+        {
+          arrayFilters: [{ "section.section_name": section_name }],
+        },
+      );
+      return Response.json({ ok: true });
+    }
+    case "howto_comment": {
+      const howto_id = typeof body.howto_id === "string" ? body.howto_id : "";
+      const comment = typeof body.comment === "string" ? body.comment.trim() : "";
+      if (!howto_id || !comment) {
+        return Response.json({ error: "howto_id and comment are required" }, { status: 400 });
+      }
+      const updated_at = new Date().toISOString();
+      const author =
+        typeof body.author === "string" && body.author.trim().length > 0
+          ? body.author.trim()
+          : "Teammate";
+      await tc.howto.updateOne(
+        { howto_id },
+        {
+          $push: {
+            discussion: {
+              author,
+              text: comment,
+              timestamp: updated_at,
+            },
+          },
+          $set: { updated_at },
+        } as any,
+      );
+      return Response.json({ ok: true });
+    }
+    case "howto_meta": {
+      const howto_id = typeof body.howto_id === "string" ? body.howto_id : "";
+      if (!howto_id) {
+        return Response.json({ error: "howto_id is required" }, { status: 400 });
+      }
+      const allowedStatuses = new Set(["draft", "in_review", "approved", "archived"]);
+      const plan_status =
+        typeof body.plan_status === "string" && allowedStatuses.has(body.plan_status)
+          ? body.plan_status
+          : "draft";
+      const owner_name = typeof body.owner_name === "string" ? body.owner_name.trim() : "";
+      const reviewers = Array.isArray(body.reviewers)
+        ? body.reviewers
+            .filter((reviewer: unknown): reviewer is string => typeof reviewer === "string")
+            .map((reviewer: string) => reviewer.trim())
+            .filter(Boolean)
+        : [];
+      await tc.howto.updateOne(
+        { howto_id },
+        {
+          $set: {
+            plan_status,
+            owner_name,
+            reviewers,
+            updated_at: new Date().toISOString(),
+          },
+        },
+      );
+      return Response.json({ ok: true });
+    }
     case "save_highlight_check": {
       const { run_id, step_id, execution_id: saveExecId, highlight_failures } = body;
       if (!highlight_failures) {
@@ -474,6 +683,6 @@ export async function POST(
       return Response.json({ ok: true });
     }
     default:
-      return Response.json({ error: `Unknown POST type: ${body.type}` }, { status: 400 });
+      return Response.json({ error: `Unknown POST type: ${type}` }, { status: 400 });
   }
 }

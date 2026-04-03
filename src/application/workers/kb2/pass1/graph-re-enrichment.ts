@@ -215,7 +215,7 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
       return `- "${f.display_name}" [${f.type}]: ${attrs.description ?? ""}`;
     }).join("\n");
 
-    const prompt = `CONVENTIONS:\n${convContext}\n\nPROPOSED FEATURES/PROJECTS:\n${featureContext}\n\nFor each proposed feature or project, determine which conventions should apply when implementing it. Only include high-confidence matches where the convention's pattern_rule is clearly relevant to the feature.`;
+    const prompt = `CONVENTIONS:\n${convContext}\n\nPROPOSED FEATURES/PROJECTS:\n${featureContext}\n\nFor each proposed feature or project, determine which conventions should apply when implementing it. Only include high-confidence matches where the convention's pattern_rule is clearly relevant to the feature.\n\nIMPORTANT: Use the EXACT convention_name and feature_name strings as shown in quotes above. Do not paraphrase or abbreviate the names.`;
 
     try {
       const startMs = Date.now();
@@ -237,8 +237,8 @@ export const graphReEnrichmentStep: StepFunction = async (ctx) => {
       }
 
       for (const match of result.applies_to ?? []) {
-        const convNode = nodeByName.get(match.convention_name.toLowerCase().trim());
-        const featNode = nodeByName.get(match.feature_name.toLowerCase().trim());
+        const { node: convNode } = findNodeByName(match.convention_name, nodeByName, conventionNodes);
+        const { node: featNode } = findNodeByName(match.feature_name, nodeByName, proposedFeatures);
         if (!convNode || !featNode || convNode.node_id === featNode.node_id) continue;
         const key = `${convNode.node_id}|${featNode.node_id}|APPLIES_TO`;
         if (edgeSet.has(key)) continue;

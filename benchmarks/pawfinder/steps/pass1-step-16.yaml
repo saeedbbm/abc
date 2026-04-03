@@ -1,0 +1,30 @@
+step_id: pass1-step-16
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+
+benchmark_focus:
+  - Final how-to quality for proposed work, especially the Toy Donation Feature.
+  - Whether the generated plan turns discovered conventions and implementation evidence into concrete engineering guidance.
+
+benchmark_must_fit:
+  - The Toy Donation Feature how-to should reference all 3 hidden conventions when the graph wires them through `APPLIES_TO`.
+  - The guide should include concrete implementation choices backed by real source artifacts, not generic filler.
+  - Related-project implementation patterns should appear when the KB contains strong evidence for similar surfaces or components.
+
+benchmark_watchouts:
+  - The guide names conventions but never explains the concrete choice they require.
+  - The guide sounds polished but could have been written without this company's source material.
+  - The guide cites vague references like "existing patterns" rather than real PRs, Slack threads, or ticket keys.
+
+benchmark_false_positive_examples:
+  - a convention-aware sounding plan that never names owners or source artifacts
+  - a generic engineering checklist that mentions layout, pagination, or loading but is not traceable to benchmark evidence
+  - a plan that references only the 3 hidden conventions and misses the related-project implementation details in the raw sources
+
+benchmark_questions:
+  - Does the Toy Donation guide name Kim, Tim, and Matt when applying their conventions?
+  - Does the guide cite real source artifacts for concrete implementation choices?
+  - Does the guide surface company-specific implementation prescriptions rather than generic product advice?
+  - Does the guide use related-project evidence for implementation patterns beyond just the convention summaries?

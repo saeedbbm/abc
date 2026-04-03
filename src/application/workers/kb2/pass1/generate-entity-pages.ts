@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel, getFastModelName, getReasoningModel, getReasoningModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import { cleanEntityTitle } from "@/src/application/lib/kb2/title-cleanup";
 import {
   getEntityTemplate as getStaticEntityTemplate,
   getSectionInstructionsKB2,
@@ -50,6 +51,32 @@ function summarizeEntityPageSample(
   };
 }
 
+function resolveEntityPageTitle(node: KB2GraphNodeType): string {
+  const cleaned = cleanEntityTitle(node.display_name, node.type);
+  if (node.type !== "decision") return cleaned;
+  const patternRule = typeof node.attributes?.pattern_rule === "string"
+    ? cleanEntityTitle(node.attributes.pattern_rule, "decision")
+    : "";
+  if (
+    node.attributes?.is_convention === true &&
+    patternRule &&
+    (/^(going with\b|green\b)$/i.test(cleaned) || /\b(the|a|an|of|for|to|with|on|in)$/i.test(cleaned))
+  ) {
+    return patternRule;
+  }
+
+  if (/^Instead Of\b/i.test(cleaned)) {
+    const sourceText = (node.source_refs ?? [])
+      .map((ref) => `${ref.section_heading ?? ""}\n${ref.excerpt ?? ""}`)
+      .join("\n");
+    if (/\bsequentially\b/i.test(sourceText)) {
+      return "Concurrent Processing Decision";
+    }
+  }
+
+  return cleaned;
+}
+
 export const generateEntityPagesStep: StepFunction = async (ctx) => {
   const tc = getTenantCollections(ctx.companySlug);
   const logger = new PrefixLogger("kb2-gen-entity-pages");
@@ -91,6 +118,7 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
 
     const node = nodeById.get(plan.node_id);
     if (!node) continue;
+    const entityTitle = resolveEntityPageTitle(node);
 
     const isConventionNode = node.attributes?.is_convention === true;
     const useReasoning = node.type === "team_member" || isConventionNode;
@@ -104,8 +132,14 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
     const template = ctx.config?.entity_templates?.[node.type]
       ? (() => { const t = ctx.config!.entity_templates![node.type]!; return t.enabled !== false ? { description: t.description, includeRules: t.includeRules, excludeRules: t.excludeRules, sections: t.sections } : undefined; })()
       : getStaticEntityTemplate(node.type);
-    const sectionInstructions = template
-      ? getSectionInstructionsKB2(template)
+    const effectiveTemplate = template && isConventionNode && node.type === "decision"
+      ? {
+          ...template,
+          excludeRules: "Low-level code snippets and file-by-file diffs. DO include concrete implementation prescriptions of this convention such as exact colors, layout direction, breakpoint behavior, data-loading thresholds, component behavior, and reusable UI rules.",
+        }
+      : template;
+    const sectionInstructions = effectiveTemplate
+      ? getSectionInstructionsKB2(effectiveTemplate)
       : "Generate relevant sections based on the entity type.";
 
     const sourceRefsList = node.source_refs.map((r) => `- "${r.title}" (${r.source_type})`).join("\n");
@@ -148,18 +182,22 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
 - Evidence Trail: The constituent decisions, discussions, and artifacts that led to this convention.
 - Applied On: Which features, services, or modules currently follow this convention.
 - Future Applications: Where this convention should be applied next and any proposed changes.
+- For conventions, INCLUDE concrete implementation prescriptions from the sources: exact colors, layout direction, breakpoint behavior, data-loading thresholds, component structure, and other reusable rules. Do not strip implementation detail just because this entity is a decision page.
 `
       : "";
 
     let entityPageSystemPrompt = `You generate structured entity reference pages for a knowledge base.
 Each page has sections with bullet-point items. Each item is a single factual statement.
 
-${template ? `Include rules: ${template.includeRules}\nExclude rules: ${template.excludeRules}\n` : ""}${conventionSectionOverride}
+${effectiveTemplate ? `Include rules: ${effectiveTemplate.includeRules}\nExclude rules: ${effectiveTemplate.excludeRules}\n` : ""}${conventionSectionOverride}
 Section layout:
 ${isConvention ? "Convention Rule, Established By, Evidence Trail, Applied On, Future Applications" : sectionInstructions}
 
 Rules:
-- Each item must be a standalone factual statement.
+- Each item must be a standalone factual statement in one short sentence. Active voice, plain English.
+- No filler intros ("This entity represents...", "Based on the analysis..."). State the fact directly.
+- No hedge words in items unless the source material itself is uncertain. No "may", "potentially", "appears to".
+- One fact per bullet. If a bullet has more than 2 sentences, split it.
 - For source_excerpts: you MUST list EVERY source document that supports this fact. For each, provide the document title (from "Available Source Documents") and an EXACT VERBATIM quote of 1-2 sentences copied directly from the Document Snippets or Vector Search Results that proves this fact. Do NOT paraphrase — copy the text exactly as it appears.
 - You MUST check ALL Document Snippets and Vector Search Results for mentions of each fact. If a fact appears in 3 documents, all 3 must be listed.
 - Rate confidence: high = multiple sources confirm, medium = single source, low = inferred/uncertain.
@@ -167,7 +205,7 @@ Rules:
 - If a section has no relevant data, return it with an empty items array.`;
     if (ctx.config?.prompts?.generate_entity_pages?.system) {
       entityPageSystemPrompt = ctx.config.prompts.generate_entity_pages.system
-        .replace(/\$\{template_rules\}/g, template ? `Include rules: ${template.includeRules}\nExclude rules: ${template.excludeRules}` : "")
+        .replace(/\$\{template_rules\}/g, effectiveTemplate ? `Include rules: ${effectiveTemplate.includeRules}\nExclude rules: ${effectiveTemplate.excludeRules}` : "")
         .replace(/\$\{section_instructions\}/g, sectionInstructions);
     }
 
@@ -176,7 +214,7 @@ Rules:
     const result = await structuredGenerate({
       model: pageModel,
       system: entityPageSystemPrompt,
-      prompt: `Generate the entity page for "${node.display_name}" (type: ${node.type}).
+      prompt: `Generate the entity page for "${entityTitle}" (type: ${node.type}).
 
 ${context}`,
       schema: GeneratedSectionSchema,
@@ -187,7 +225,7 @@ ${context}`,
     totalLLMCalls++;
     if (usageData) {
       const cost = calculateCostUsd(pageModelName, usageData.promptTokens, usageData.completionTokens);
-      ctx.logLLMCall(stepId, pageModelName, `Entity page: ${node.display_name}`, JSON.stringify(result, null, 2).slice(0, 5000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+      ctx.logLLMCall(stepId, pageModelName, `Entity page: ${entityTitle}`, JSON.stringify(result, null, 2).slice(0, 5000), usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
     }
 
     const requirement = template?.sections ?? [];
@@ -197,7 +235,7 @@ ${context}`,
       execution_id: ctx.executionId,
       node_id: node.node_id,
       node_type: node.type,
-      title: node.display_name,
+      title: entityTitle,
       sections: result.sections.map((s) => {
         const spec = requirement.find((r) => r.name === s.section_name);
         return {
@@ -235,19 +273,6 @@ ${context}`,
                 };
               })
               .filter(Boolean) as { source_type: string; doc_id: string; title: string; section_heading?: string; excerpt: string }[];
-
-            const seenDocIds = new Set(matched.map((m) => m.doc_id));
-            if (matched.length === 0 && node.source_refs.length > 0) {
-              const fallback = node.source_refs[0];
-              matched.push({
-                source_type: fallback.source_type,
-                doc_id: fallback.doc_id,
-                title: fallback.title,
-                section_heading: fallback.section_heading,
-                excerpt: fallback.excerpt,
-              });
-              seenDocIds.add(fallback.doc_id);
-            }
 
             return {
               text: item.text,

@@ -229,14 +229,27 @@ export async function resolveActiveDemoState(
     return getStateById(tc, companySlug, requestedStateId);
   }
 
-  const active = await stateCollection(tc).findOne({
-    company_slug: companySlug,
-    is_active: true,
-    archived_at: null,
-  });
-  if (active) return active as unknown as KB2DemoStateDoc;
+  const [active, latestCompletedRunId] = await Promise.all([
+    stateCollection(tc).findOne({
+      company_slug: companySlug,
+      is_active: true,
+      archived_at: null,
+    }),
+    getLatestCompletedRunId(tc, companySlug),
+  ]);
+  const activeState = active as unknown as KB2DemoStateDoc | null;
 
-  const baseline = await ensureBaselineState(tc, companySlug);
+  if (latestCompletedRunId && activeState?.base_run_id !== latestCompletedRunId) {
+    const latestBaseline = await ensureBaselineState(tc, companySlug, latestCompletedRunId);
+    if (latestBaseline) {
+      await setOnlyActiveState(tc, companySlug, latestBaseline.state_id);
+      return { ...latestBaseline, is_active: true, updated_at: nowIso() };
+    }
+  }
+
+  if (activeState) return activeState;
+
+  const baseline = await ensureBaselineState(tc, companySlug, latestCompletedRunId);
   if (!baseline) return null;
   await setOnlyActiveState(tc, companySlug, baseline.state_id);
   return { ...baseline, is_active: true, updated_at: nowIso() };

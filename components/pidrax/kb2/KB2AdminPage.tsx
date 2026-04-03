@@ -39,7 +39,6 @@ import {
   Ban,
   RefreshCw,
 } from "lucide-react";
-import { KB2RightPanel } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
 import { KB2InputWorkbench } from "./KB2InputWorkbench";
 
@@ -66,7 +65,7 @@ function GraphPlaceholder() {
 interface StepDef {
   name: string;
   index: number;
-  pass: "pass1" | "pass2";
+  pass: string;
 }
 
 interface Run {
@@ -102,7 +101,7 @@ interface DemoStateInfo {
 interface RunStep {
   step_id: string;
   run_id: string;
-  pass: "pass1" | "pass2";
+  pass: string;
   step_number: number;
   name: string;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -147,6 +146,13 @@ interface RunStep {
     llm_judge_error?: string;
     cross_check_details?: Record<string, unknown>;
   };
+}
+
+interface RunCardSummary {
+  latestSteps: RunStep[];
+  totalDurationMs: number;
+  totalCostUsd: number;
+  statusLabel: string;
 }
 
 interface LLMCall {
@@ -293,17 +299,7 @@ function InputDataViewer({ rawInput }: { rawInput: RawInputInfo }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-type AdminSection = "demo_state" | "runs" | "context" | "prompts" | "settings" | "templates" | "refinements" | "step_detail" | "input_workbench";
-
-const ADMIN_NAV: { key: AdminSection; label: string; icon: React.ReactNode }[] = [
-  { key: "demo_state", label: "Demo State", icon: <RefreshCw className="h-4 w-4" /> },
-  { key: "runs", label: "Pipeline Runs", icon: <Play className="h-4 w-4" /> },
-  { key: "context", label: "SE Context", icon: <Info className="h-4 w-4" /> },
-  { key: "prompts", label: "Prompts", icon: <FileText className="h-4 w-4" /> },
-  { key: "templates", label: "Templates", icon: <Braces className="h-4 w-4" /> },
-  { key: "settings", label: "Pipeline Settings", icon: <Settings2 className="h-4 w-4" /> },
-  { key: "refinements", label: "Refinements", icon: <Zap className="h-4 w-4" /> },
-];
+type AdminSection = "runs" | "step_detail" | "input_workbench";
 
 const STEP_PROMPT_MAP: Record<string, string> = {
   "Input Snapshot": "",
@@ -344,10 +340,6 @@ const STEP_SETTINGS_MAP: Record<string, string> = {
   "Generate Human Pages": "page_generation",
   "Generate How-To Guides": "howto",
   "Create Verify Cards": "verification",
-  "Cluster FactGroups": "pass2",
-  "Conflict Detection": "pass2",
-  "Evidence Upgrade": "pass2",
-  "Propagation": "pass2",
   "GraphRAG Retrieval": "graphrag",
 };
 
@@ -356,29 +348,32 @@ const STEP_USES_LLM = new Set([
   "Graph Enrichment", "Project & Ticket Discovery",
   "Generate Entity Pages", "Generate Human Pages", "Generate How-To Guides",
   "Extract Claims", "Create Verify Cards",
-  "Cluster FactGroups", "Conflict Detection",
 ]);
 
 export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   const [activeSection, setActiveSection] = useState<AdminSection>("runs");
   const [selectedStepName, setSelectedStepName] = useState<string | null>(null);
-  const [stepNavExpanded, setStepNavExpanded] = useState<{ pass1: boolean; pass2: boolean }>({ pass1: true, pass2: false });
 
   const [pass1Steps, setPass1Steps] = useState<StepDef[]>([]);
-  const [pass2Steps, setPass2Steps] = useState<StepDef[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [demoStateInfo, setDemoStateInfo] = useState<DemoStateInfo | null>(null);
   const [demoStateLoading, setDemoStateLoading] = useState(true);
   const [demoActionLoading, setDemoActionLoading] = useState<string | null>(null);
-  const [demoLabel, setDemoLabel] = useState("");
-  const [demoSourceRunId, setDemoSourceRunId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runSteps, setRunSteps] = useState<RunStep[]>([]);
+  const [runSummarySteps, setRunSummarySteps] = useState<Record<string, RunStep[]>>({});
+  const [runSummaryLoading, setRunSummaryLoading] = useState<Record<string, boolean>>({});
+  const [expandedRunCards, setExpandedRunCards] = useState<Record<string, boolean>>({});
   const [selectedExecutions, setSelectedExecutions] = useState<Record<string, string>>({});
-  const [stepsLoading, setStepsLoading] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState("pass1");
-  const [rightPanelSources, setRightPanelSources] = useState<{ source_type: string; doc_id: string; title: string; excerpt: string; section_heading?: string }[]>([]);
-  const [rightPanelRunId, setRightPanelRunId] = useState<string | null>(null);
+  const [resetRunId, setResetRunId] = useState("");
+  const sortedRuns = useMemo(
+    () => [...runs].sort((a, b) => getRunTimestamp(b) - getRunTimestamp(a)),
+    [runs],
+  );
+  const completedRuns = useMemo(
+    () => sortedRuns.filter((run) => run.status === "completed"),
+    [sortedRuns],
+  );
 
   // Config state for SE context, prompts, pipeline settings, templates, refinements
   const [configLoading, setConfigLoading] = useState(false);
@@ -442,10 +437,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   const [rawInputLoading, setRawInputLoading] = useState(true);
 
   // Pipeline controls
-  const [singleStep, setSingleStep] = useState<string>("");
   const [fromStep, setFromStep] = useState<string>("");
   const [toStep, setToStep] = useState<string>("");
-  const [reuseRunId, setReuseRunId] = useState("");
   const [pipelineRunning, setPipelineRunning] = useState(false);
 
   // Live log
@@ -478,11 +471,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       const p1: StepDef[] = (data.pass1Steps ?? []).map(
         (s: { name: string; index: number }) => ({ name: s.name, index: s.index, pass: "pass1" as const }),
       );
-      const p2: StepDef[] = (data.pass2Steps ?? []).map(
-        (s: { name: string; index: number }) => ({ name: s.name, index: s.index, pass: "pass2" as const }),
-      );
       setPass1Steps(p1);
-      setPass2Steps(p2);
     } catch {
       /* ignore */
     }
@@ -527,16 +516,29 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     loadConfig();
   }, [fetchStepDefs, fetchRuns, fetchDemoState, fetchRawInput, loadConfig]);
 
-  const completedRuns = useMemo(
-    () => runs.filter((run) => run.status === "completed"),
-    [runs],
-  );
-
   useEffect(() => {
-    if (!demoSourceRunId && demoStateInfo?.latest_completed_run_id) {
-      setDemoSourceRunId(demoStateInfo.latest_completed_run_id);
-    }
-  }, [demoSourceRunId, demoStateInfo?.latest_completed_run_id]);
+    setResetRunId((current) => {
+      if (current && completedRuns.some((run) => run.run_id === current)) {
+        return current;
+      }
+
+      const activeBaseRunId = demoStateInfo?.active_state?.base_run_id ?? "";
+      if (activeBaseRunId && completedRuns.some((run) => run.run_id === activeBaseRunId)) {
+        return activeBaseRunId;
+      }
+
+      const latestCompletedRunId = demoStateInfo?.latest_completed_run_id ?? "";
+      if (latestCompletedRunId && completedRuns.some((run) => run.run_id === latestCompletedRunId)) {
+        return latestCompletedRunId;
+      }
+
+      return completedRuns[0]?.run_id ?? "";
+    });
+  }, [
+    completedRuns,
+    demoStateInfo?.active_state?.base_run_id,
+    demoStateInfo?.latest_completed_run_id,
+  ]);
 
   const runDemoStateAction = useCallback(
     async (
@@ -562,7 +564,6 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
           ?? demoStateInfo?.latest_completed_run_id
           ?? null;
         if (baseRunId) setSelectedRunId(baseRunId);
-        if (body.label) setDemoLabel("");
         toast.success(successMessage);
         return data;
       } catch (e: any) {
@@ -581,7 +582,6 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
   const fetchRunSteps = useCallback(
     async (runId: string) => {
-      setStepsLoading(true);
       try {
         const res = await fetch(
           `/api/${companySlug}/kb2?type=steps&run_id=${runId}`,
@@ -590,8 +590,6 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         setRunSteps(data.steps ?? []);
       } catch {
         setRunSteps([]);
-      } finally {
-        setStepsLoading(false);
       }
     },
     [companySlug],
@@ -601,6 +599,31 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     if (selectedRunId) fetchRunSteps(selectedRunId);
     else setRunSteps([]);
   }, [selectedRunId, fetchRunSteps]);
+
+  useEffect(() => {
+    const missingRunIds = sortedRuns
+      .map((run) => run.run_id)
+      .filter((runId) => runSummarySteps[runId] === undefined && !runSummaryLoading[runId]);
+
+    if (missingRunIds.length === 0) return;
+
+    for (const runId of missingRunIds) {
+      setRunSummaryLoading((prev) => ({ ...prev, [runId]: true }));
+
+      fetch(`/api/${companySlug}/kb2?type=steps&run_id=${runId}`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error("Failed to load run steps");
+          const data = await res.json();
+          setRunSummarySteps((prev) => ({ ...prev, [runId]: data.steps ?? [] }));
+        })
+        .catch(() => {
+          setRunSummarySteps((prev) => ({ ...prev, [runId]: [] }));
+        })
+        .finally(() => {
+          setRunSummaryLoading((prev) => ({ ...prev, [runId]: false }));
+        });
+    }
+  }, [companySlug, runSummaryLoading, runSummarySteps, sortedRuns]);
 
   // -------------------------------------------------------------------------
   // Run pipeline via SSE
@@ -616,11 +639,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      const activeRunId = (body.reuseRunId as string | undefined) ?? reuseRunId ?? selectedRunId;
+      const activeRunId = (body.reuseRunId as string | undefined) ?? selectedRunId;
       const pollInterval = setInterval(() => {
+        fetchRuns();
         if (activeRunId) {
           fetchRunSteps(activeRunId);
-          fetchRuns();
         }
       }, 5_000);
 
@@ -628,13 +651,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         const res = await fetch(`/api/${companySlug}/kb2/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            reuseRunId: reuseRunId || undefined,
-            ...body,
-          }),
+          body: JSON.stringify(body),
           signal: ctrl.signal,
         });
 
+        fetchRuns();
         if (activeRunId) {
           setTimeout(() => { fetchRunSteps(activeRunId); fetchRuns(); }, 1_500);
         }
@@ -660,6 +681,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
               setLogEntries((prev) => [...prev, entry]);
 
               if (entry.type === "step_started") {
+                fetchRuns();
                 setStepTracker((prev) => {
                   const existing = prev.find((s) => s.step_number === entry.step_number && s.pass === entry.pass);
                   if (existing) {
@@ -715,7 +737,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         abortRef.current = null;
       }
     },
-    [companySlug, pipelineRunning, reuseRunId, selectedRunId, fetchRuns, fetchRunSteps, fetchDemoState],
+    [companySlug, pipelineRunning, selectedRunId, fetchRuns, fetchRunSteps, fetchDemoState],
   );
 
   useEffect(() => {
@@ -765,7 +787,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
   // All step names for dropdowns
   // -------------------------------------------------------------------------
 
-  const allSteps = [...pass1Steps, ...pass2Steps];
+  const allSteps = pass1Steps;
+  const selectedStepDef = useMemo(
+    () => (selectedStepName ? pass1Steps.find((step) => step.name === selectedStepName) ?? null : null),
+    [pass1Steps, selectedStepName],
+  );
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -884,14 +910,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     return runSteps.find((s) => s.step_id === stepKey);
   }, [runSteps, selectedExecutions]);
 
-  const pass1StepIds = useMemo(() => Object.keys(stepExecutions).filter((k) => k.startsWith("pass1")).sort(), [stepExecutions]);
-  const pass2StepIds = useMemo(() => Object.keys(stepExecutions).filter((k) => k.startsWith("pass2")).sort(), [stepExecutions]);
-  const pass1RunSteps = useMemo(() => pass1StepIds.map((id) => getSelectedStep(id)).filter(Boolean) as RunStep[], [pass1StepIds, getSelectedStep]);
-  const pass2RunSteps = useMemo(() => pass2StepIds.map((id) => getSelectedStep(id)).filter(Boolean) as RunStep[], [pass2StepIds, getSelectedStep]);
-
   const PROMPT_SECTIONS: { heading: string; keys: { key: string; label: string; subKeys?: string[] }[] }[] = [
     {
-      heading: "Pass 1 — Pipeline Prompts",
+      heading: "Pipeline Prompts",
       keys: [
         { key: "entity_extraction", label: "Entity Extraction" },
         { key: "entity_resolution", label: "Entity Resolution" },
@@ -903,13 +924,6 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         { key: "generate_howto", label: "How-To Generation (Pipeline)" },
         { key: "extract_claims", label: "Claim Extraction" },
         { key: "create_verify_cards", label: "Verify Card Creation" },
-      ],
-    },
-    {
-      heading: "Pass 2 — Refinement Prompts",
-      keys: [
-        { key: "cluster_factgroups", label: "Cluster Factgroups" },
-        { key: "conflict_detection", label: "Conflict Detection" },
       ],
     },
     {
@@ -986,18 +1000,6 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       fields: [
         { key: "batch_size", label: "Batch Size", type: "number" },
         { key: "card_sections", label: "Card Sections (comma-separated: problem_explanation, supporting_evidence, missing_evidence, affected_entities, required_data, verification_question, recommended_action)", type: "text" },
-      ],
-    },
-    {
-      heading: "Pass 2",
-      settingsKey: "pass2",
-      fields: [
-        { key: "cluster_similarity_threshold", label: "Cluster Similarity Threshold", type: "number" },
-        { key: "cluster_max_pairs", label: "Cluster Max Pairs", type: "number" },
-        { key: "conflict_batch_size", label: "Conflict Batch Size", type: "number" },
-        { key: "evidence_score_threshold", label: "Evidence Score Threshold", type: "number" },
-        { key: "evidence_min_hits", label: "Evidence Min Hits", type: "number" },
-        { key: "propagation_chunk_size", label: "Propagation Chunk Size", type: "number" },
       ],
     },
     {
@@ -1123,7 +1125,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         <CardHeader>
           <Label className="text-sm font-medium">Refinement Feedback</Label>
           <p className="text-xs text-muted-foreground">
-            After Pass 1, write general feedback here. This gets used in Pass 2's Admin Refinements step.
+            Write general feedback here for future refinement steps.
           </p>
         </CardHeader>
         <CardContent>
@@ -1478,7 +1480,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
           <div>
             <h2 className="text-lg font-semibold">Admin Refinements</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Define entity merges, removals, and discovery decisions that will be applied during Pass 2.
+              Define entity merges, removals, and discovery decisions for future refinement runs.
             </p>
           </div>
           <Button
@@ -1652,7 +1654,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         <Card>
           <CardHeader className="pb-3">
             <h3 className="text-sm font-semibold">General Feedback</h3>
-            <p className="text-xs text-muted-foreground">Free-text feedback for the Pass 2 admin refinements step.</p>
+            <p className="text-xs text-muted-foreground">Free-text feedback for future refinement steps.</p>
           </CardHeader>
           <CardContent>
             <Textarea
@@ -1660,7 +1662,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
               onChange={(e) => setRefinements((p) => ({ ...p, general_feedback: e.target.value }))}
               rows={5}
               className="resize-y font-mono text-sm"
-              placeholder="After looking at Pass 1 results, here are adjustments..."
+              placeholder="After looking at the results, here are adjustments..."
             />
           </CardContent>
         </Card>
@@ -1670,17 +1672,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
   const renderDemoState = () => {
     const activeState = demoStateInfo?.active_state ?? null;
-    const states = demoStateInfo?.states ?? [];
-    const latestCompletedRunId = demoStateInfo?.latest_completed_run_id ?? null;
-    const sourceRunId = demoSourceRunId || latestCompletedRunId || "";
-    const actionBusy = demoActionLoading !== null;
-    const stateCounts = states.reduce(
-      (acc, state) => {
-        acc[state.kind] += 1;
-        return acc;
-      },
-      { baseline: 0, workspace: 0, checkpoint: 0 },
-    );
+    const selectedResetRun = completedRuns.find((run) => run.run_id === resetRunId) ?? null;
     const kindMeta: Record<DemoState["kind"], { label: string; className: string }> = {
       baseline: {
         label: "Baseline",
@@ -1698,11 +1690,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
     return (
       <ScrollArea className="flex-1">
-        <div className="p-6 max-w-5xl space-y-6">
+        <div className="p-6 max-w-3xl space-y-6">
           <div>
-            <h2 className="text-lg font-semibold">Demo State</h2>
+            <h2 className="text-lg font-semibold">Reset Session</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Manage baselines, workspaces, checkpoints, and reset directly from the admin UI.
+              Every UI edit is saved into the active workspace session. The stored pipeline result stays unchanged. Use the right panel to choose which completed pipeline result should seed the next workshop session.
             </p>
           </div>
 
@@ -1711,271 +1703,301 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading demo state…
             </div>
           ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <div className="text-sm font-semibold">Active State</div>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-xs">
-                    {activeState ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="text-sm font-semibold">Session Behavior</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  UI edits go into the active workspace session only. They do not overwrite the stored pipeline output.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4 text-xs">
+                {activeState ? (
+                  <div className="rounded-md border p-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className={kindMeta[activeState.kind].className}>
+                        {kindMeta[activeState.kind].label}
+                      </Badge>
+                      <Badge variant="secondary">Active</Badge>
+                    </div>
+                    <div className="font-medium">{activeState.label}</div>
+                    <div className="text-muted-foreground">
+                      Base pipeline run: <span className="font-mono">{activeState.base_run_id.slice(0, 8)}</span>
+                    </div>
+                    <div className="text-muted-foreground">
+                      Last updated: {fmtDate(activeState.updated_at)}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">No active session found.</p>
+                )}
+
+                <div className="rounded-md border border-dashed p-3 space-y-2">
+                  <p className="text-muted-foreground">
+                    Reset throws away the current demo session and starts a fresh one from the pipeline result you choose on the right.
+                  </p>
+                  <p className="text-muted-foreground">
+                    Current reset target:{" "}
+                    {selectedResetRun ? (
                       <>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={kindMeta[activeState.kind].className}>
-                            {kindMeta[activeState.kind].label}
-                          </Badge>
-                          <Badge variant="secondary">Active</Badge>
-                        </div>
-                        <div className="font-medium">{activeState.label}</div>
-                        <div className="text-muted-foreground">
-                          Base run: <span className="font-mono">{activeState.base_run_id.slice(0, 8)}</span>
-                        </div>
-                        <div className="text-muted-foreground">
-                          Updated: {fmtDate(activeState.updated_at)}
-                        </div>
+                        <span className="font-mono">{selectedResetRun.run_id.slice(0, 8)}</span>
+                        <span className="ml-1">({selectedResetRun.title ?? "Untitled Run"})</span>
                       </>
                     ) : (
-                      <p className="text-muted-foreground">No active demo state found.</p>
+                      "none"
                     )}
-                  </CardContent>
-                </Card>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </ScrollArea>
+    );
+  };
 
-                <Card>
-                  <CardHeader className="pb-2">
-                    <div className="text-sm font-semibold">Source Run</div>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-xs">
-                    <div className="text-muted-foreground">
-                      Choose which completed run to publish or clone into a fresh workspace.
-                    </div>
-                    {completedRuns.length === 0 ? (
-                      <div className="h-9 px-3 rounded-md border flex items-center text-muted-foreground">
-                        No completed runs available
+  const renderRunLauncherTab = () => (
+    <div className="p-4 space-y-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <h3 className="text-sm font-semibold">Run Range</h3>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Select value={fromStep} onValueChange={setFromStep}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="From…" />
+            </SelectTrigger>
+            <SelectContent>
+              {allSteps.map((step) => (
+                <SelectItem key={`range-from-${step.index}`} value={`${step.pass}-${step.index}`}>
+                  <span className="mr-1 text-muted-foreground">{step.index}</span>
+                  {step.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={toStep} onValueChange={setToStep}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="To…" />
+            </SelectTrigger>
+            <SelectContent>
+              {allSteps.map((step) => (
+                <SelectItem key={`range-to-${step.index}`} value={`${step.pass}-${step.index}`}>
+                  <span className="mr-1 text-muted-foreground">{step.index}</span>
+                  {step.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="flex-1"
+              disabled={!fromStep || !toStep || pipelineRunning}
+              onClick={() => {
+                const [pass, fromIdx] = fromStep.split("-");
+                const [, toIdx] = toStep.split("-");
+                runPipeline({ pass, fromStep: Number(fromIdx), toStep: Number(toIdx) });
+              }}
+            >
+              Run Range
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={() => runPipeline({ pass: "pass1" })}
+              disabled={pipelineRunning}
+            >
+              <Play className="h-3.5 w-3.5 mr-1" /> Run All
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-2">
+        {sortedRuns.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No runs yet.</p>
+        ) : (
+          sortedRuns.map((run) => (
+            <Card key={run.run_id} className={`overflow-hidden ${getRunCardClasses(summarizeRunCard(run, runSummarySteps[run.run_id] ?? []).statusLabel)}`}>
+              {(() => {
+                const expanded = !!expandedRunCards[run.run_id];
+                const loading = !!runSummaryLoading[run.run_id];
+                const steps = runSummarySteps[run.run_id] ?? [];
+                const summary = summarizeRunCard(run, steps);
+
+                return (
+                  <>
+                    <button
+                      onClick={() => setExpandedRunCards((prev) => ({ ...prev, [run.run_id]: !prev[run.run_id] }))}
+                      className={`w-full px-3 py-3 text-left transition-colors ${getRunCardHoverClasses(summary.statusLabel)}`}
+                    >
+                      <div className="grid grid-cols-[6.5rem_1fr_auto] gap-3 items-start">
+                        <div>
+                          <div className="text-[11px] font-semibold leading-none">
+                            {fmtRunDay(run.completed_at ?? run.started_at)}
+                          </div>
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            {fmtRunTime(run.completed_at ?? run.started_at)}
+                          </div>
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          <div className="text-xs font-medium truncate">
+                            {fmtRunRangeLabel(run)}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground font-mono">
+                            {run.run_id.slice(0, 8)}
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                            <Badge className={getRunStatusBadgeClasses(summary.statusLabel)}>
+                              {getRunStatusIcon(summary.statusLabel)}
+                              {summary.statusLabel}
+                            </Badge>
+                            <span>{loading ? "Loading..." : fmtDuration(summary.totalDurationMs)}</span>
+                            <span>{loading ? "..." : fmtCost(summary.totalCostUsd)}</span>
+                          </div>
+                        </div>
+                        <div className="pt-0.5">
+                          {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                        </div>
                       </div>
-                    ) : (
-                      <Select value={sourceRunId} onValueChange={setDemoSourceRunId}>
+                    </button>
+
+                    {expanded && (
+                      <CardContent className="border-t pt-3 pb-4 px-3 space-y-2">
+                        {loading ? (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading step details…
+                          </div>
+                        ) : summary.latestSteps.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No step details yet.</p>
+                        ) : (
+                          summary.latestSteps.map((step) => (
+                            <div key={step.step_id} className={`rounded-md border-l-4 px-2.5 py-2 space-y-1 ${getStepRowClasses(step.status)}`}>
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="w-4 shrink-0 font-mono text-muted-foreground text-right">
+                                  {step.step_number}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate">{step.name}</span>
+                                <Badge className={getStepStatusBadgeClasses(step.status)}>
+                                  {step.status}
+                                </Badge>
+                              </div>
+                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground pl-6">
+                                <span>{fmtDuration(step.duration_ms ?? 0)}</span>
+                                <span>{fmtCost(step.metrics?.cost_usd ?? 0)}</span>
+                                {step.summary && <span className="truncate">{step.summary}</span>}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </CardContent>
+                    )}
+                  </>
+                );
+              })()}
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderAdminRightPanel = () => {
+    const selectedResetRun = completedRuns.find((run) => run.run_id === resetRunId) ?? null;
+    const resetBusy = demoActionLoading === "start_workspace";
+    const resetDisabled = demoStateLoading || demoActionLoading !== null || !selectedResetRun;
+
+    return (
+      <div className="flex h-full min-h-0 flex-col border-l bg-background">
+        <Tabs defaultValue="reset" className="flex min-h-0 flex-1 flex-col">
+          <div className="border-b p-3">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="reset" className="text-xs">Reset to Demo</TabsTrigger>
+              <TabsTrigger value="runs" className="text-xs">Runs</TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="reset" className="m-0 min-h-0 flex-1">
+            <ScrollArea className="h-full">
+              <div className="p-4 space-y-4">
+                <div>
+                  <h2 className="text-sm font-semibold">Reset to Demo</h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Start a fresh demo session from a completed pipeline result.
+                  </p>
+                </div>
+
+                {demoStateLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading session info…
+                  </div>
+                ) : completedRuns.length > 0 ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] font-medium">Pipeline Result</Label>
+                      <Select value={resetRunId || undefined} onValueChange={setResetRunId}>
                         <SelectTrigger className="h-9 text-xs">
-                          <SelectValue placeholder="Select source run" />
+                          <SelectValue placeholder="Choose a completed run" />
                         </SelectTrigger>
                         <SelectContent>
                           {completedRuns.map((run) => (
                             <SelectItem key={run.run_id} value={run.run_id}>
-                              {run.title ?? "Untitled Run"} [{run.run_id.slice(0, 8)}]
+                              <div className="grid w-full grid-cols-[6.5rem_1fr] gap-2 items-start">
+                                <div className="text-left">
+                                  <div className="text-[11px] font-medium leading-none">
+                                    {fmtRunDay(run.completed_at ?? run.started_at)}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-1">
+                                    {fmtRunTime(run.completed_at ?? run.started_at)}
+                                  </div>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="truncate">{fmtRunRangeLabel(run)}</div>
+                                  <div className="text-[10px] text-muted-foreground font-mono">
+                                    {run.run_id.slice(0, 8)}
+                                  </div>
+                                </div>
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    )}
-                    <div className="text-muted-foreground">
-                      Latest completed:{" "}
-                      {latestCompletedRunId ? (
-                        <span className="font-mono">{latestCompletedRunId.slice(0, 8)}</span>
-                      ) : (
-                        "none"
-                      )}
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <div className="text-sm font-semibold">State Counts</div>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span>Baselines</span>
-                      <Badge variant="secondary">{stateCounts.baseline}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Workspaces</span>
-                      <Badge variant="secondary">{stateCounts.workspace}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Checkpoints</span>
-                      <Badge variant="secondary">{stateCounts.checkpoint}</Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">Controls</div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        KB edits, tickets, how-to guides, and verification changes will follow the active demo state.
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={actionBusy}
-                      onClick={() => fetchDemoState()}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-1">
-                    <Label htmlFor="demo-state-label">Optional Label</Label>
-                    <input
-                      id="demo-state-label"
-                      value={demoLabel}
-                      onChange={(e) => setDemoLabel(e.target.value)}
-                      placeholder="Used for new workspace, checkpoint, or reset names"
-                      className="w-full h-9 rounded-md border bg-background px-3 text-xs"
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={actionBusy || !sourceRunId}
-                      onClick={() => runDemoStateAction(
-                        "publish_baseline",
-                        { run_id: sourceRunId },
-                        "Baseline published",
-                      )}
-                    >
-                      {demoActionLoading === "publish_baseline" ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <Save className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      Publish Baseline
-                    </Button>
 
                     <Button
-                      size="sm"
-                      disabled={actionBusy || !sourceRunId}
+                      className="w-full"
+                      disabled={resetDisabled}
                       onClick={() => runDemoStateAction(
                         "start_workspace",
-                        {
-                          run_id: sourceRunId,
-                          label: demoLabel.trim() || undefined,
-                        },
-                        "Fresh workspace started",
+                        { run_id: resetRunId },
+                        "Fresh demo session started from selected pipeline result",
                       )}
                     >
-                      {demoActionLoading === "start_workspace" ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <Play className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      Start Workspace
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={actionBusy || !activeState}
-                      onClick={() => runDemoStateAction(
-                        "save_checkpoint",
-                        { label: demoLabel.trim() || undefined },
-                        "Checkpoint saved",
-                      )}
-                    >
-                      {demoActionLoading === "save_checkpoint" ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <Save className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      Save Checkpoint
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={actionBusy || !activeState}
-                      onClick={() => runDemoStateAction(
-                        "reset_workspace",
-                        { label: demoLabel.trim() || undefined },
-                        "Workspace reset to baseline",
-                      )}
-                    >
-                      {demoActionLoading === "reset_workspace" ? (
+                      {resetBusy ? (
                         <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
                       ) : (
                         <RotateCcw className="h-3.5 w-3.5 mr-1" />
                       )}
-                      Reset Workspace
+                      Reset Demo Session
                     </Button>
+                  </>
+                ) : (
+                  <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                    No completed pipeline runs are available yet.
                   </div>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
 
-                  <div className="text-[11px] text-muted-foreground">
-                    Completed pipeline runs auto-publish reusable baselines. Reset creates a fresh workspace from the current baseline without rerunning the pipeline.
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <div className="text-sm font-semibold">Available States</div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {states.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No demo states available yet.</p>
-                  ) : (
-                    states.map((state) => (
-                      <div
-                        key={state.state_id}
-                        className={`rounded-md border p-3 text-xs ${
-                          state.is_active ? "border-primary bg-accent/30" : ""
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Badge className={kindMeta[state.kind].className}>
-                                {kindMeta[state.kind].label}
-                              </Badge>
-                              {state.is_active && <Badge variant="secondary">Active</Badge>}
-                              {state.archived_at && <Badge variant="outline">Archived</Badge>}
-                            </div>
-                            <div className="font-medium truncate">{state.label}</div>
-                            <div className="text-muted-foreground">
-                              Base run: <span className="font-mono">{state.base_run_id.slice(0, 8)}</span>
-                            </div>
-                            <div className="text-muted-foreground">
-                              Updated: {fmtDate(state.updated_at)}
-                            </div>
-                            <div className="text-muted-foreground font-mono opacity-70">
-                              State ID: {state.state_id.slice(0, 8)}
-                            </div>
-                          </div>
-
-                          {!state.is_active && !state.archived_at ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={actionBusy}
-                              onClick={() => runDemoStateAction(
-                                "activate_state",
-                                { state_id: state.state_id },
-                                `Activated ${state.label}`,
-                              )}
-                            >
-                              {demoActionLoading === "activate_state" ? (
-                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                              )}
-                              Activate
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </div>
-      </ScrollArea>
+          <TabsContent value="runs" className="m-0 min-h-0 flex-1">
+            <ScrollArea className="h-full">
+              {renderRunLauncherTab()}
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
+      </div>
     );
   };
 
@@ -1986,29 +2008,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     <div className="flex h-full">
       {/* Admin left nav */}
       <div className="w-52 border-r flex flex-col shrink-0 bg-muted/20">
-        <div className="p-3 border-b">
-          <h1 className="text-sm font-semibold">KB Admin</h1>
-        </div>
         <ScrollArea className="flex-1">
         <div className="p-2 space-y-0.5">
-          {ADMIN_NAV.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => { setActiveSection(item.key); setSelectedStepName(null); }}
-              className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors ${
-                activeSection === item.key && !selectedStepName
-                  ? "bg-accent font-medium text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              }`}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-
-          <div className="border-t my-2" />
-          <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Step Workbench</p>
-
           <button
             onClick={() => { setActiveSection("input_workbench"); setSelectedStepName(null); }}
             className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors ${
@@ -2018,51 +2019,20 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            Step 0 — Input Data
+            0 Input Data
           </button>
 
-          {/* Pass 1 Steps */}
-          <button
-            onClick={() => setStepNavExpanded((p) => ({ ...p, pass1: !p.pass1 }))}
-            className="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground"
-          >
-            {stepNavExpanded.pass1 ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Pass 1 ({pass1Steps.length})
-          </button>
-          {stepNavExpanded.pass1 && pass1Steps.map((s) => (
+          {pass1Steps.map((s) => (
             <button
               key={`p1-${s.index}`}
               onClick={() => { setActiveSection("step_detail"); setSelectedStepName(s.name); }}
-              className={`w-full text-left flex items-center gap-1.5 pl-6 pr-2 py-1 rounded-md text-[11px] transition-colors ${
+              className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors ${
                 activeSection === "step_detail" && selectedStepName === s.name
                   ? "bg-accent font-medium text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               }`}
             >
-              <span className="text-[9px] font-mono w-4 shrink-0 text-right opacity-50">{s.index}</span>
-              <span className="truncate">{s.name}</span>
-            </button>
-          ))}
-
-          {/* Pass 2 Steps */}
-          <button
-            onClick={() => setStepNavExpanded((p) => ({ ...p, pass2: !p.pass2 }))}
-            className="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground"
-          >
-            {stepNavExpanded.pass2 ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Pass 2 ({pass2Steps.length})
-          </button>
-          {stepNavExpanded.pass2 && pass2Steps.map((s) => (
-            <button
-              key={`p2-${s.index}`}
-              onClick={() => { setActiveSection("step_detail"); setSelectedStepName(s.name); }}
-              className={`w-full text-left flex items-center gap-1.5 pl-6 pr-2 py-1 rounded-md text-[11px] transition-colors ${
-                activeSection === "step_detail" && selectedStepName === s.name
-                  ? "bg-accent font-medium text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              }`}
-            >
-              <span className="text-[9px] font-mono w-4 shrink-0 text-right opacity-50">{s.index}</span>
+              <span className="w-4 shrink-0 text-right text-[10px] font-mono opacity-60">{s.index}</span>
               <span className="truncate">{s.name}</span>
             </button>
           ))}
@@ -2071,23 +2041,11 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
       </div>
 
       {/* Admin section content */}
-      {activeSection === "demo_state" ? (
-        renderDemoState()
-      ) : activeSection === "context" ? (
-        <ScrollArea className="flex-1">{renderSEContext()}</ScrollArea>
-      ) : activeSection === "prompts" ? (
-        <ScrollArea className="flex-1">{renderPromptsEditor()}</ScrollArea>
-      ) : activeSection === "templates" ? (
-        <ScrollArea className="flex-1">{renderTemplatesEditor()}</ScrollArea>
-      ) : activeSection === "settings" ? (
-        <ScrollArea className="flex-1">{renderPipelineSettings()}</ScrollArea>
-      ) : activeSection === "refinements" ? (
-        <ScrollArea className="flex-1">{renderRefinements()}</ScrollArea>
-      ) : activeSection === "input_workbench" ? (
+      {activeSection === "input_workbench" ? (
         <ScrollArea className="flex-1">
           <div className="p-6 max-w-4xl space-y-6">
             <div>
-              <h2 className="text-lg font-semibold">Step 0 — Input Workbench</h2>
+              <h2 className="text-lg font-semibold">0 Input Data</h2>
               <p className="text-xs text-muted-foreground mt-1">
                 Paste human-format text for each source and save. This data feeds Step 1 (Input Snapshot).
               </p>
@@ -2102,7 +2060,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
               <div>
                 <h2 className="text-lg font-semibold">{selectedStepName}</h2>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Step Workbench — configure, run, and inspect results
+                  Configure, run, and inspect results.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -2110,9 +2068,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                   size="sm"
                   disabled={pipelineRunning}
                   onClick={() => {
-                    const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                    const match = allS.find((s) => s.name === selectedStepName);
-                    if (match) runPipeline({ pass: match.pass, step: match.index, reuseRunId: selectedRunId || undefined });
+                    if (selectedStepDef) {
+                      runPipeline({ pass: "pass1", step: selectedStepDef.index, reuseRunId: selectedRunId || undefined });
+                    }
                   }}
                 >
                   <Play className="h-3.5 w-3.5 mr-1" /> Run This Step
@@ -2137,9 +2095,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                   variant="secondary"
                   disabled={pipelineRunning}
                   onClick={() => {
-                    const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                    const match = allS.find((s) => s.name === selectedStepName);
-                    if (match) runPipeline({ pass: match.pass, fromStep: match.index, reuseRunId: selectedRunId || undefined });
+                    if (selectedStepDef) {
+                      runPipeline({ pass: "pass1", fromStep: selectedStepDef.index, reuseRunId: selectedRunId || undefined });
+                    }
                   }}
                 >
                   Run From Here
@@ -2159,9 +2117,9 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">No run selected</SelectItem>
-                        {runs.map((r, ri) => (
+                        {sortedRuns.map((r) => (
                           <SelectItem key={r.run_id} value={r.run_id}>
-                            #{runs.length - ri} {r.title ? `${r.title} — ` : ""}{new Date(r.started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })} ({r.status}) [{r.run_id.slice(0, 8)}]
+                            {fmtRunDay(r.completed_at ?? r.started_at)} {fmtRunTime(r.completed_at ?? r.started_at)} · {fmtRunRangeLabel(r)} · {r.run_id.slice(0, 8)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -2169,10 +2127,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                   </div>
                   {/* Sub-run selector */}
                   {(() => {
-                    const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                    const match = allS.find((s) => s.name === selectedStepName);
-                    if (!match) return null;
-                    const stepKey = `${match.pass}-step-${match.index}`;
+                    if (!selectedStepDef) return null;
+                    const stepKey = `pass1-step-${selectedStepDef.index}`;
                     const execs = selectedRunId ? (stepExecutions[stepKey] ?? []) : [];
                     const currentExecId = selectedExecutions[stepKey];
                     return (
@@ -2549,10 +2505,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
               <TabsContent value="run" className="space-y-4 mt-4">
                 {(() => {
-                  const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                  const match = allS.find((s) => s.name === selectedStepName);
-                  if (!match || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see step execution details.</p>;
-                  const stepKey = `${match.pass}-step-${match.index}`;
+                  if (!selectedStepDef || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see step execution details.</p>;
+                  const stepKey = `pass1-step-${selectedStepDef.index}`;
                   const isNewSelected = selectedExecutions[stepKey] === "__new__";
                   const runStep = getSelectedStep(stepKey);
                   return (
@@ -2641,10 +2595,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
               <TabsContent value="results" className="space-y-4 mt-4">
                 {(() => {
-                  const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                  const match = allS.find((s) => s.name === selectedStepName);
-                  if (!match || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see results.</p>;
-                  const stepKey = `${match.pass}-step-${match.index}`;
+                  if (!selectedStepDef || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see results.</p>;
+                  const stepKey = `pass1-step-${selectedStepDef.index}`;
                   const isNewSelected = selectedExecutions[stepKey] === "__new__";
                   const runStep = getSelectedStep(stepKey);
 
@@ -2695,17 +2647,17 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
                   const isEntityExtractionStep = selectedStepName?.toLowerCase().includes("entity") && selectedStepName?.toLowerCase().includes("extract");
                   if (isEntityExtractionStep && (artifact as any)?.entities_by_type) {
-                    return <>{resultHeader}<EntityExtractionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                    return <>{resultHeader}<EntityExtractionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} /></>;
                   }
 
                   const isExtractionValidationStep = selectedStepName?.toLowerCase().includes("extraction") && selectedStepName?.toLowerCase().includes("validation");
                   if (isExtractionValidationStep && (artifact as any)?.recovery_details) {
-                    return <>{resultHeader}<ExtractionValidationViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                    return <>{resultHeader}<ExtractionValidationViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} stepId={runStep?.step_id} /></>;
                   }
 
                   const isEntityResolutionStep = selectedStepName?.toLowerCase().includes("entity") && selectedStepName?.toLowerCase().includes("resolution");
                   if (isEntityResolutionStep && (artifact as any)?.merges) {
-                    return <>{resultHeader}<EntityResolutionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                    return <>{resultHeader}<EntityResolutionViewer artifact={artifact as any} companySlug={companySlug} runId={selectedRunId} executionId={runStep?.execution_id} /></>;
                   }
 
                   const isGraphBuildStep = selectedStepName === "Graph Build" && (artifact as any)?.total_edges != null;
@@ -2750,7 +2702,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                   }
 
                   if (isDiscovery({ name: selectedStepName } as RunStep, artifact)) {
-                    return <>{resultHeader}<DiscoveryViewer artifact={artifact as any} onSelectSources={(refs) => { setRightPanelSources(refs); setRightPanelRunId(selectedRunId); }} /></>;
+                    return <>{resultHeader}<DiscoveryViewer artifact={artifact as any} /></>;
                   }
 
                   if (isAttributeCompletion({ name: selectedStepName } as RunStep, artifact)) {
@@ -2813,10 +2765,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
 
               <TabsContent value="judge" className="space-y-4 mt-4">
                 {(() => {
-                  const allS = [...pass1Steps.map((s) => ({ ...s, pass: "pass1" as const })), ...pass2Steps.map((s) => ({ ...s, pass: "pass2" as const }))];
-                  const match = allS.find((s) => s.name === selectedStepName);
-                  if (!match || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see judge results.</p>;
-                  const stepKey = `${match.pass}-step-${match.index}`;
+                  if (!selectedStepDef || !selectedRunId) return <p className="text-xs text-muted-foreground">Select a run above to see judge results.</p>;
+                  const stepKey = `pass1-step-${selectedStepDef.index}`;
                   const runStep = getSelectedStep(stepKey);
 
                   if (!runStep) return <p className="text-xs text-muted-foreground">No run data available for this step.</p>;
@@ -3055,312 +3005,8 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
         </ScrollArea>
       ) : (
     <div className="flex flex-1 flex-col min-w-0">
-      {/* Header + input status + pipeline controls */}
-      <div className="border-b p-4 space-y-3">
-        <h2 className="text-base font-semibold">Pipeline Runs</h2>
-
-        {/* Raw input data */}
-        {rawInputLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking input data…
-          </div>
-        ) : !rawInput?.exists ? (
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 text-sm">
-                <XCircle className="h-4 w-4 text-red-500" />
-                <span className="text-muted-foreground">
-                  No input data found. Run the Arch1 pipeline at{" "}
-                  <code className="text-xs bg-muted px-1 rounded">/brewandgo</code>{" "}
-                  first to generate input.
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <InputDataViewer rawInput={rawInput} />
-        )}
-
-        <div className="flex flex-wrap items-end gap-2">
-          {/* Primary run buttons */}
-          <Button
-            size="sm"
-            onClick={() => runPipeline({ pass: "pass1" })}
-            disabled={pipelineRunning}
-          >
-            <Play className="h-3.5 w-3.5 mr-1" /> Run Pass 1
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => runPipeline({ pass: "pass2" })}
-            disabled={pipelineRunning}
-          >
-            <Play className="h-3.5 w-3.5 mr-1" /> Run Pass 2
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => runPipeline({ pass: "all" })}
-            disabled={pipelineRunning}
-          >
-            <Play className="h-3.5 w-3.5 mr-1" /> Run All
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => runPipeline({ pass: "pass1", toStep: 11 })}
-            disabled={pipelineRunning}
-          >
-            <Play className="h-3.5 w-3.5 mr-1" /> Run P1 Steps 1–11
-          </Button>
-
-          <div className="w-px h-6 bg-border" />
-
-          {/* Single step */}
-          <div className="flex items-end gap-1">
-            <Select value={singleStep} onValueChange={setSingleStep}>
-              <SelectTrigger className="w-48 h-8 text-xs">
-                <SelectValue placeholder="Select step…" />
-              </SelectTrigger>
-              <SelectContent>
-                {allSteps.map((s) => (
-                  <SelectItem
-                    key={`${s.pass}-${s.index}`}
-                    value={`${s.pass}-${s.index}`}
-                  >
-                    <span className="text-muted-foreground mr-1">
-                      {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
-                    </span>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!singleStep || pipelineRunning}
-              onClick={() => {
-                const [pass, idx] = singleStep.split("-");
-                runPipeline({ pass, step: Number(idx) });
-              }}
-            >
-              Run Step
-            </Button>
-          </div>
-
-          <div className="w-px h-6 bg-border" />
-
-          {/* From step */}
-          <div className="flex items-end gap-1">
-            <Select value={fromStep} onValueChange={setFromStep}>
-              <SelectTrigger className="w-48 h-8 text-xs">
-                <SelectValue placeholder="From step…" />
-              </SelectTrigger>
-              <SelectContent>
-                {allSteps.map((s) => (
-                  <SelectItem
-                    key={`from-${s.pass}-${s.index}`}
-                    value={`${s.pass}-${s.index}`}
-                  >
-                    <span className="text-muted-foreground mr-1">
-                      {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
-                    </span>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!fromStep || pipelineRunning}
-              onClick={() => {
-                const [pass, idx] = fromStep.split("-");
-                runPipeline({ pass, fromStep: Number(idx) });
-              }}
-            >
-              Run From Here
-            </Button>
-          </div>
-
-          <div className="w-px h-6 bg-border" />
-
-          {/* Run range (from → to) */}
-          <div className="flex items-end gap-1">
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">
-                Run Range
-              </label>
-              <div className="flex items-center gap-1">
-                <Select value={fromStep} onValueChange={setFromStep}>
-                  <SelectTrigger className="w-36 h-8 text-xs">
-                    <SelectValue placeholder="From…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allSteps.map((s) => (
-                      <SelectItem
-                        key={`range-from-${s.pass}-${s.index}`}
-                        value={`${s.pass}-${s.index}`}
-                      >
-                        <span className="text-muted-foreground mr-1">
-                          {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
-                        </span>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <span className="text-xs text-muted-foreground">→</span>
-                <Select value={toStep} onValueChange={setToStep}>
-                  <SelectTrigger className="w-36 h-8 text-xs">
-                    <SelectValue placeholder="To…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allSteps.map((s) => (
-                      <SelectItem
-                        key={`range-to-${s.pass}-${s.index}`}
-                        value={`${s.pass}-${s.index}`}
-                      >
-                        <span className="text-muted-foreground mr-1">
-                          {s.pass === "pass1" ? "P1" : "P2"}.{s.index}
-                        </span>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!fromStep || !toStep || pipelineRunning}
-              onClick={() => {
-                const [fPass, fIdx] = fromStep.split("-");
-                const [, tIdx] = toStep.split("-");
-                runPipeline({ pass: fPass, fromStep: Number(fIdx), toStep: Number(tIdx) });
-              }}
-            >
-              Run Range
-            </Button>
-          </div>
-
-          <div className="w-px h-6 bg-border" />
-
-          {/* Reuse run ID */}
-          <div className="flex items-end gap-1">
-            <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">
-                Reuse Run ID
-              </label>
-              <Select
-              value={reuseRunId}
-              onValueChange={(v) => setReuseRunId(v === "__none__" ? "" : v)}
-            >
-                <SelectTrigger className="w-56 h-8 text-xs">
-                  <SelectValue placeholder="None (fresh run)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None (fresh run)</SelectItem>
-                  {runs.map((r) => (
-                    <SelectItem key={r.run_id} value={r.run_id}>
-                      <span className="text-[10px]">
-                        {r.title ?? "Untitled Run"}
-                      </span>
-                      <span className="ml-1 text-muted-foreground text-[9px]">
-                        {fmtDate(r.started_at)}
-                      </span>
-                      <span className="ml-1 font-mono text-muted-foreground text-[9px] opacity-60">
-                        {r.run_id.slice(0, 8)}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {pipelineRunning && (
-            <>
-              <div className="w-px h-6 bg-border" />
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={async () => {
-                  abortRef.current?.abort();
-                  await fetch(`/api/${companySlug}/kb2/run`, { method: "DELETE" });
-                  setPipelineRunning(false);
-                  if (selectedRunId) fetchRunSteps(selectedRunId);
-                  fetchRuns();
-                }}
-              >
-                Cancel
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Body: runs list + inspector/log */}
+      {/* Body: inspector + log */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: runs list */}
-        <div className="w-64 border-r flex flex-col">
-          <div className="p-3 border-b flex items-center justify-between">
-            <span className="text-xs font-medium">Runs</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0"
-              onClick={fetchRuns}
-            >
-              <RotateCcw className="h-3 w-3" />
-            </Button>
-          </div>
-          <ScrollArea className="flex-1">
-            {runs.length === 0 ? (
-              <p className="p-4 text-xs text-muted-foreground">No runs yet</p>
-            ) : (
-              <div className="p-2 space-y-1">
-                {runs.map((run) => (
-                  <button
-                    key={run.run_id}
-                    onClick={() => setSelectedRunId(run.run_id)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-xs transition-colors ${
-                      selectedRunId === run.run_id
-                        ? "bg-accent font-medium"
-                        : "hover:bg-accent/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-0.5">
-                      {statusBadge(run.status)}
-                    </div>
-                    <div className="font-medium text-[11px] truncate mt-1">
-                      {run.title ?? "Untitled Run"}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <span>{fmtDate(run.completed_at ?? run.started_at)}</span>
-                        {run.completed_at && run.started_at !== run.completed_at && (
-                          <span className="opacity-50">
-                            ({run.status === "completed" ? "done" : run.status === "cancelled" ? "cancelled" : run.status})
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-mono opacity-50 mt-0.5">{run.run_id.slice(0, 8)}</div>
-                    </div>
-                    {run.error && run.status !== "completed" && run.status !== "cancelled" && (
-                      <div className="text-[10px] text-red-500 mt-0.5 truncate">
-                        {run.error}
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </div>
-
-        {/* Right: inspector + log */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Live log (shown when pipeline is running or has entries) */}
           {(pipelineRunning || logEntries.length > 0) && (() => {
@@ -3409,7 +3055,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
                       {step.status === "failed" && <XCircle className="h-3 w-3 text-red-500 shrink-0" />}
                       {step.status === "cancelled" && <Ban className="h-3 w-3 text-orange-500 shrink-0" />}
                       <span className="font-mono text-muted-foreground w-8 shrink-0">
-                        {step.pass === "pass1" ? "P1" : "P2"}.{step.step_number}
+                        {step.step_number}.
                       </span>
                       <span className={step.status === "running" ? "text-blue-600 dark:text-blue-400 font-medium" : step.status === "failed" || step.status === "cancelled" ? "text-red-600 dark:text-red-400" : "text-foreground"}>
                         {step.step_name}
@@ -3466,113 +3112,14 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
             );
           })()}
 
-          {/* Step inspector */}
-          {selectedRunId ? (
-            stepsLoading ? (
-              <div className="flex items-center justify-center flex-1">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
-              <Tabs
-                value={inspectorTab}
-                onValueChange={setInspectorTab}
-                className="flex-1 flex flex-col min-h-0"
-              >
-                <div className="px-4 pt-3 flex items-center gap-3 border-b">
-                  <span className="text-xs">
-                    <span className="font-medium">
-                      {runs.find((r) => r.run_id === selectedRunId)?.title ?? "Untitled Run"}
-                    </span>
-                    <span className="text-muted-foreground font-mono ml-2 text-[10px]">
-                      {selectedRunId.slice(0, 8)}
-                    </span>
-                  </span>
-                  <TabsList className="ml-auto">
-                    <TabsTrigger value="pass1" className="text-xs">
-                      Pass 1 Steps
-                    </TabsTrigger>
-                    <TabsTrigger value="pass2" className="text-xs">
-                      Pass 2 Steps
-                    </TabsTrigger>
-                    <TabsTrigger value="graph" className="text-xs">
-                      Graph
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                <TabsContent value="pass1" className="flex-1 m-0 min-h-0">
-                  <ScrollArea className="h-full">
-                    <div className="p-4 space-y-2">
-                      {pass1RunSteps.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          No Pass 1 steps recorded for this run.
-                        </p>
-                      ) : (
-                        pass1RunSteps.map((step) => (
-                          <StepCard
-                            key={step.step_id}
-                            step={step}
-                            companySlug={companySlug}
-                            onSelectSources={(refs, runId) => {
-                              setRightPanelSources(refs);
-                              setRightPanelRunId(runId);
-                            }}
-                            onRerun={() => {
-                              runPipeline({ pass: step.pass, step: step.step_number, reuseRunId: step.run_id });
-                            }}
-                            pipelineRunning={pipelineRunning}
-                            executionCount={(stepExecutions[step.step_id] ?? []).length}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="pass2" className="flex-1 m-0 min-h-0">
-                  <ScrollArea className="h-full">
-                    <div className="p-4 space-y-2">
-                      {pass2RunSteps.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          No Pass 2 steps recorded for this run.
-                        </p>
-                      ) : (
-                        pass2RunSteps.map((step) => (
-                          <StepCard
-                            key={step.step_id}
-                            step={step}
-                            companySlug={companySlug}
-                            onSelectSources={(refs, runId) => {
-                              setRightPanelSources(refs);
-                              setRightPanelRunId(runId);
-                            }}
-                            onRerun={() => {
-                              runPipeline({ pass: step.pass, step: step.step_number, reuseRunId: step.run_id });
-                            }}
-                            pipelineRunning={pipelineRunning}
-                            executionCount={(stepExecutions[step.step_id] ?? []).length}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="graph" className="flex-1 m-0 min-h-0">
-                  <KB2GraphExplorer
-                    companySlug={companySlug}
-                    runId={selectedRunId}
-                  />
-                </TabsContent>
-              </Tabs>
-            )
-          ) : (
-            <div className="flex items-center justify-center flex-1">
-              <p className="text-sm text-muted-foreground">
-                Select a run to inspect, or start a new pipeline run.
+          <div className="flex flex-1 items-center justify-center px-6">
+            <div className="max-w-md text-center">
+              <h2 className="text-sm font-semibold">Run Summaries</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Expand a run card on the right to see step-level details, timing, cost, and failure information.
               </p>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
@@ -3580,14 +3127,7 @@ export function KB2AdminPage({ companySlug }: { companySlug: string }) {
     </div>
       }
       rightPanel={
-        <KB2RightPanel
-          companySlug={companySlug}
-          autoContext={{ type: "admin", id: "admin", title: "KB Admin" }}
-          sourceRefs={rightPanelSources}
-          relatedEntityPages={[]}
-          defaultTab="sources"
-          runId={rightPanelRunId ?? undefined}
-        />
+        renderAdminRightPanel()
       }
     />
   );
@@ -7132,7 +6672,7 @@ function StepCard({
           {statusIcon()}
           <span className="text-xs font-medium flex-1 truncate text-left">
             <span className="text-muted-foreground mr-1.5">
-              {step.pass === "pass1" ? "P1" : "P2"}.{step.step_number}
+              {step.step_number}.
             </span>
             {step.name}
             {executionCount != null && executionCount > 1 && (
@@ -7436,6 +6976,12 @@ function LLMCallCard({ call }: { call: LLMCall }) {
 // Helpers used in subcomponents
 // ---------------------------------------------------------------------------
 
+function getRunTimestamp(run: { started_at: string; completed_at?: string }) {
+  const iso = run.completed_at ?? run.started_at;
+  const ts = new Date(iso).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
 function fmtDate(iso: string) {
   try {
     return new Date(iso).toLocaleString(undefined, {
@@ -7446,6 +6992,199 @@ function fmtDate(iso: string) {
     });
   } catch {
     return iso;
+  }
+}
+
+function fmtRunDay(iso: string) {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function fmtRunTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function fmtRunRangeLabel(run: { title?: string; total_steps?: number; current_step?: number }) {
+  const title = (run.title ?? "").trim();
+  const rangeMatch = title.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if (rangeMatch) return `${rangeMatch[1]}-${rangeMatch[2]}`;
+
+  const singleMatch =
+    title.match(/\bstep\s*(\d+)\b/i)
+    ?? title.match(/\brerun\s*(\d+)\b/i)
+    ?? title.match(/\b(\d+)\b(?!.*\b\d+\b)/);
+  if (singleMatch) return `${singleMatch[1]}-${singleMatch[1]}`;
+
+  if (typeof run.total_steps === "number" && run.total_steps > 0) {
+    return `1-${run.total_steps}`;
+  }
+
+  if (typeof run.current_step === "number" && run.current_step > 0) {
+    return `1-${run.current_step}`;
+  }
+
+  return "All";
+}
+
+function getLatestRunSteps(steps: RunStep[]): RunStep[] {
+  const latestByStep = new Map<string, RunStep>();
+
+  for (const step of steps) {
+    const key = `${step.pass}:${step.step_number}`;
+    const current = latestByStep.get(key);
+    if (!current) {
+      latestByStep.set(key, step);
+      continue;
+    }
+
+    const currentExec = current.execution_number ?? 0;
+    const nextExec = step.execution_number ?? 0;
+    if (nextExec >= currentExec) {
+      latestByStep.set(key, step);
+    }
+  }
+
+  return Array.from(latestByStep.values()).sort((a, b) => {
+    const passCompare = String(a.pass).localeCompare(String(b.pass));
+    if (passCompare !== 0) return passCompare;
+    return a.step_number - b.step_number;
+  });
+}
+
+function summarizeRunCard(run: Run, steps: RunStep[]): RunCardSummary {
+  const latestSteps = getLatestRunSteps(steps);
+  const totalDurationMs = steps.reduce((sum, step) => sum + (step.duration_ms ?? 0), 0);
+  const totalCostUsd = steps.reduce((sum, step) => sum + (step.metrics?.cost_usd ?? 0), 0);
+
+  const failedStep = latestSteps.find((step) => step.status === "failed" || step.status === "cancelled");
+  const runningStep = latestSteps.find((step) => step.status === "running");
+
+  let statusLabel = "Started";
+  if (failedStep) {
+    statusLabel = `${failedStep.status === "cancelled" ? "Cancelled" : "Failed"} at ${failedStep.step_number}`;
+  } else if (runningStep) {
+    statusLabel = `Running ${runningStep.step_number}`;
+  } else if (run.status === "completed" || (latestSteps.length > 0 && latestSteps.every((step) => step.status === "completed"))) {
+    statusLabel = "Successful";
+  } else if (run.status === "cancelled") {
+    statusLabel = "Cancelled";
+  } else if (run.status === "failed") {
+    statusLabel = typeof run.current_step === "number" ? `Failed at ${run.current_step}` : "Failed";
+  } else if (run.status === "running") {
+    statusLabel = typeof run.current_step === "number" ? `Running ${run.current_step}` : "Running";
+  }
+
+  return {
+    latestSteps,
+    totalDurationMs,
+    totalCostUsd,
+    statusLabel,
+  };
+}
+
+function getRunStatusTone(statusLabel: string): "success" | "failed" | "running" | "neutral" {
+  const normalized = statusLabel.toLowerCase();
+  if (normalized.startsWith("failed") || normalized.startsWith("cancelled")) return "failed";
+  if (normalized.startsWith("successful")) return "success";
+  if (normalized.startsWith("running")) return "running";
+  return "neutral";
+}
+
+function getRunCardClasses(statusLabel: string) {
+  const tone = getRunStatusTone(statusLabel);
+  switch (tone) {
+    case "success":
+      return "border-l-4 border-l-emerald-500 border-emerald-200 bg-emerald-50/30 dark:border-emerald-900/60 dark:bg-emerald-950/10";
+    case "failed":
+      return "border-l-4 border-l-red-500 border-red-200 bg-red-50/30 dark:border-red-900/60 dark:bg-red-950/10";
+    case "running":
+      return "border-l-4 border-l-blue-500 border-blue-200 bg-blue-50/30 dark:border-blue-900/60 dark:bg-blue-950/10";
+    default:
+      return "border-l-4 border-l-border";
+  }
+}
+
+function getRunCardHoverClasses(statusLabel: string) {
+  const tone = getRunStatusTone(statusLabel);
+  switch (tone) {
+    case "success":
+      return "hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20";
+    case "failed":
+      return "hover:bg-red-50/60 dark:hover:bg-red-950/20";
+    case "running":
+      return "hover:bg-blue-50/60 dark:hover:bg-blue-950/20";
+    default:
+      return "hover:bg-accent/30";
+  }
+}
+
+function getRunStatusBadgeClasses(statusLabel: string) {
+  const tone = getRunStatusTone(statusLabel);
+  switch (tone) {
+    case "success":
+      return "gap-1 bg-emerald-500/15 text-emerald-700 border-emerald-500/25 dark:text-emerald-300";
+    case "failed":
+      return "gap-1 bg-red-500/15 text-red-700 border-red-500/25 dark:text-red-300";
+    case "running":
+      return "gap-1 bg-blue-500/15 text-blue-700 border-blue-500/25 dark:text-blue-300";
+    default:
+      return "gap-1";
+  }
+}
+
+function getRunStatusIcon(statusLabel: string) {
+  const tone = getRunStatusTone(statusLabel);
+  switch (tone) {
+    case "success":
+      return <CheckCircle2 className="h-3 w-3" />;
+    case "failed":
+      return <XCircle className="h-3 w-3" />;
+    case "running":
+      return <Loader2 className="h-3 w-3 animate-spin" />;
+    default:
+      return <Clock className="h-3 w-3" />;
+  }
+}
+
+function getStepRowClasses(status: RunStep["status"]) {
+  switch (status) {
+    case "completed":
+      return "border-emerald-200 border-l-emerald-500 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/10";
+    case "failed":
+    case "cancelled":
+      return "border-red-200 border-l-red-500 bg-red-50/40 dark:border-red-900/50 dark:bg-red-950/10";
+    case "running":
+      return "border-blue-200 border-l-blue-500 bg-blue-50/40 dark:border-blue-900/50 dark:bg-blue-950/10";
+    default:
+      return "border-border border-l-border";
+  }
+}
+
+function getStepStatusBadgeClasses(status: RunStep["status"]) {
+  switch (status) {
+    case "completed":
+      return "bg-emerald-500/15 text-emerald-700 border-emerald-500/25 dark:text-emerald-300";
+    case "failed":
+    case "cancelled":
+      return "bg-red-500/15 text-red-700 border-red-500/25 dark:text-red-300";
+    case "running":
+      return "bg-blue-500/15 text-blue-700 border-blue-500/25 dark:text-blue-300";
+    default:
+      return "text-muted-foreground";
   }
 }
 

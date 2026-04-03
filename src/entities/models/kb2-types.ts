@@ -102,6 +102,24 @@ export const KB2EvidenceRef = z.object({
 });
 export type KB2EvidenceRefType = z.infer<typeof KB2EvidenceRef>;
 
+export const KB2HowtoEntityRef = z.object({
+  node_id: z.string(),
+  page_id: z.string(),
+  page_title: z.string(),
+  node_type: z.string(),
+  section_name: z.string(),
+  item_text: z.string(),
+});
+export type KB2HowtoEntityRefType = z.infer<typeof KB2HowtoEntityRef>;
+
+export const KB2HowtoStep = z.object({
+  title: z.string(),
+  content: z.string(),
+  source_refs: z.array(KB2EvidenceRef).default([]).optional(),
+  entity_refs: z.array(KB2HowtoEntityRef).default([]).optional(),
+});
+export type KB2HowtoStepType = z.infer<typeof KB2HowtoStep>;
+
 export const KB2GraphNode = z.object({
   node_id: z.string(),
   run_id: z.string(),
@@ -342,19 +360,28 @@ export const KB2Ticket = z.object({
   ticket_id: z.string(),
   run_id: z.string().optional(),
   source: KB2TicketSourceEnum,
+  ticket_key: z.string().optional(),
   title: z.string(),
   description: z.string(),
   assignees: z.array(z.string()).default([]),
+  reporter: z.string().optional(),
+  owner_name: z.string().optional(),
   status: z.string().default("open"),
+  raw_status: z.string().optional(),
   priority: z.enum(["P0", "P1", "P2", "P3"]).default("P2"),
   workflow_state: KB2WorkflowStateEnum.default("backlog"),
+  issue_type: z.string().optional(),
   linked_entity_ids: z.array(z.string()).default([]),
   linked_entity_names: z.array(z.string()).default([]),
+  source_refs: z.array(KB2EvidenceRef).default([]).optional(),
   parent_ticket_id: z.string().optional(),
   subtask_ids: z.array(z.string()).default([]),
   labels: z.array(z.string()).default([]),
   comments: z.array(KB2TicketComment).default([]),
   created_at: z.string(),
+  resolved_at: z.string().optional(),
+  sprint: z.string().optional(),
+  updated_at: z.string().optional(),
 });
 export type KB2TicketType = z.infer<typeof KB2Ticket>;
 
@@ -373,13 +400,27 @@ export type KB2ImpactCardType = z.infer<typeof KB2ImpactCard>;
 export const KB2Howto = z.object({
   howto_id: z.string(),
   run_id: z.string().optional(),
-  ticket_id: z.string(),
+  execution_id: z.string().optional(),
+  ticket_id: z.string().nullable().optional(),
+  project_node_id: z.string().nullable().optional(),
   title: z.string(),
   sections: z.array(z.object({
     section_name: z.string(),
     content: z.string(),
+    steps: z.array(KB2HowtoStep).default([]).optional(),
+    source_refs: z.array(KB2EvidenceRef).default([]).optional(),
+    entity_refs: z.array(KB2HowtoEntityRef).default([]).optional(),
   })),
   linked_entity_ids: z.array(z.string()).default([]),
   created_at: z.string(),
+  updated_at: z.string().optional(),
+  plan_status: z.enum(["draft", "in_review", "approved", "archived"]).optional(),
+  owner_name: z.string().optional(),
+  reviewers: z.array(z.string()).default([]).optional(),
+  discussion: z.array(z.object({
+    author: z.string(),
+    text: z.string(),
+    timestamp: z.string(),
+  })).default([]).optional(),
 });
 export type KB2HowtoType = z.infer<typeof KB2Howto>;

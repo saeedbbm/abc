@@ -189,7 +189,7 @@ export function KB2SettingsPage({ companySlug }: { companySlug: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex flex-1 min-w-0 items-center justify-center h-full">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -202,17 +202,17 @@ export function KB2SettingsPage({ companySlug }: { companySlug: string }) {
   }, {} as Record<string, IntegrationDef[]>);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-8 px-4 sm:px-6 space-y-8">
+    <div className="flex-1 min-w-0 h-full overflow-y-auto">
+      <div className="w-full py-8 px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Configure {companySlug} &mdash; for IT administrators
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Configure {companySlug} &mdash; for IT administrators</span>
               {activeVersion && (
                 <Badge variant="outline" className="ml-2 text-[10px]">v{activeVersion}</Badge>
               )}
-            </p>
+            </div>
           </div>
           <Button onClick={saveConfig} disabled={saving} className="gap-2">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -225,7 +225,7 @@ export function KB2SettingsPage({ companySlug }: { companySlug: string }) {
             <TabsTrigger value="company">Company</TabsTrigger>
             <TabsTrigger value="sources">Data Sources</TabsTrigger>
             <TabsTrigger value="people">People & Teams</TabsTrigger>
-            <TabsTrigger value="kb">KB Structure</TabsTrigger>
+            <TabsTrigger value="kb">Docs Structure</TabsTrigger>
             <TabsTrigger value="sync">Sync</TabsTrigger>
           </TabsList>
 
@@ -644,9 +644,9 @@ export function KB2SettingsPage({ companySlug }: { companySlug: string }) {
           <TabsContent value="kb" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Knowledge Base Layers</CardTitle>
+                <CardTitle className="text-lg">Docs Layers</CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  Control which layers and pages appear in the human-readable KB sidebar.
+                  Control which layers and pages appear in the human-readable Docs sidebar.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">

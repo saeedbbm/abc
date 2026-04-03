@@ -15,8 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { KB2RightPanel, SourceRef } from "./KB2RightPanel";
+import { KB2RightPanel, SourceRef, RelatedEntityPage } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
+import { LeftSidebarLayout } from "./LeftSidebarLayout";
+import { KB2VerifyPage } from "./KB2VerifyPage";
 import {
   Plus,
   GripVertical,
@@ -25,7 +27,6 @@ import {
   Loader2,
   Sparkles,
   Check,
-  Link2,
   MessageCircle,
   Send,
   ListTree,
@@ -49,15 +50,23 @@ interface TicketComment {
 interface Ticket {
   ticket_id: string;
   source: string;
+  ticket_key?: string;
   title: string;
   description: string;
   assignees: string[];
+  reporter?: string;
+  owner_name?: string;
   status: string;
+  raw_status?: string;
   priority: string;
   workflow_state: string;
+  issue_type?: string;
   linked_entity_ids: string[];
   linked_entity_names: string[];
   created_at: string;
+  resolved_at?: string;
+  sprint?: string;
+  updated_at?: string;
   parent_ticket_id?: string;
   subtask_ids: string[];
   labels: string[];
@@ -69,6 +78,17 @@ interface TicketGraphNodeSummary {
   display_name: string;
   type: string;
   source_refs: SourceRef[];
+}
+
+interface EntityPage {
+  page_id: string;
+  node_id: string;
+  title: string;
+  node_type: string;
+  sections: {
+    section_name: string;
+    items: { text: string; confidence: string }[];
+  }[];
 }
 
 interface GeneratedTicket {
@@ -158,15 +178,19 @@ type ViewMode = "board" | "detail" | "create";
 function TicketDetailView({
   ticket,
   graphNodes,
+  entityPages,
   companySlug,
   onBack,
   onUpdated,
+  onItemSelection,
 }: {
   ticket: Ticket;
   graphNodes: Record<string, TicketGraphNodeSummary>;
+  entityPages: EntityPage[];
   companySlug: string;
   onBack: () => void;
   onUpdated: () => void;
+  onItemSelection: (sourceRefs: SourceRef[], relatedPages: RelatedEntityPage[]) => void;
 }) {
   const [subtasks, setSubtasks] = useState<Ticket[]>([]);
   const [loadingSubtasks, setLoadingSubtasks] = useState(false);
@@ -178,9 +202,11 @@ function TicketDetailView({
   const [showVerifyForm, setShowVerifyForm] = useState(false);
   const [verifyTitle, setVerifyTitle] = useState("");
   const [verifyDesc, setVerifyDesc] = useState("");
+  const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalTicket(ticket);
+    setSelectedItemKey(null);
   }, [ticket]);
 
   const fetchSubtasks = useCallback(async () => {
@@ -202,22 +228,6 @@ function TicketDetailView({
   }, [fetchSubtasks]);
 
   const displayTitle = getDisplayTicketTitle(localTicket);
-  const linkedEntityLabels = useMemo(() => {
-    const names = new Set<string>();
-    for (const name of localTicket.linked_entity_names ?? []) {
-      const trimmed = name.trim();
-      if (trimmed) names.add(trimmed);
-    }
-    if (names.size === 0) {
-      for (const id of localTicket.linked_entity_ids ?? []) {
-        const displayName = graphNodes[id]?.display_name?.trim();
-        if (displayName) names.add(displayName);
-      }
-    }
-    if (names.size > 0) return [...names];
-    return (localTicket.linked_entity_ids ?? []).map((id) => `${id.slice(0, 12)}...`);
-  }, [graphNodes, localTicket.linked_entity_ids, localTicket.linked_entity_names]);
-
   const sourceRefs = useMemo(() => {
     if (Array.isArray(localTicket.source_refs) && localTicket.source_refs.length > 0) {
       return dedupeSourceRefs(localTicket.source_refs);
@@ -231,6 +241,67 @@ function TicketDetailView({
   }, [graphNodes, localTicket.linked_entity_ids, localTicket.source_refs]);
 
   const sourceExcerpts = sourceRefs.filter((ref) => ref.excerpt?.trim());
+
+  const getTicketItemSources = useCallback(
+    (targetTicket: Ticket): SourceRef[] => {
+      if (Array.isArray(targetTicket.source_refs) && targetTicket.source_refs.length > 0) {
+        return dedupeSourceRefs(targetTicket.source_refs);
+      }
+      const refs: SourceRef[] = [];
+      for (const entityId of targetTicket.linked_entity_ids ?? []) {
+        const node = graphNodes[entityId];
+        if (node?.source_refs) refs.push(...node.source_refs);
+      }
+      return dedupeSourceRefs(refs);
+    },
+    [graphNodes],
+  );
+
+  const buildRelatedPagesForTicket = useCallback(
+    (
+      targetTicket: Ticket,
+      options?: {
+        highlightedSectionNames?: string[];
+        highlightedItemTexts?: string[];
+      },
+    ): RelatedEntityPage[] => {
+      const related = new Map<string, RelatedEntityPage>();
+      for (const entityId of targetTicket.linked_entity_ids ?? []) {
+        const page = entityPages.find((entityPage) => entityPage.node_id === entityId);
+        if (!page) continue;
+        related.set(page.page_id, {
+          page_id: page.page_id,
+          title: page.title,
+          node_type: page.node_type,
+          highlighted_section_names: options?.highlightedSectionNames,
+          highlighted_item_texts: options?.highlightedItemTexts,
+          sections: page.sections.map((section) => ({
+            section_name: section.section_name,
+            items: section.items.map((item) => ({
+              text: item.text,
+              confidence: item.confidence,
+            })),
+          })),
+        });
+      }
+      return Array.from(related.values());
+    },
+    [entityPages],
+  );
+
+  const selectDetailItem = (
+    itemKey: string,
+    selectedSources: SourceRef[],
+    selectedRelatedPages: RelatedEntityPage[],
+  ) => {
+    if (selectedItemKey === itemKey) {
+      setSelectedItemKey(null);
+      onItemSelection([], []);
+      return;
+    }
+    setSelectedItemKey(itemKey);
+    onItemSelection(selectedSources, selectedRelatedPages);
+  };
 
   const patchField = async (fields: Record<string, unknown>) => {
     await fetch(`/api/${companySlug}/kb2/tickets`, {
@@ -310,7 +381,7 @@ function TicketDetailView({
           <Badge className={getPriorityBadgeClass(localTicket.priority)}>
             {formatPriorityLabel(localTicket.priority)}
           </Badge>
-          <span className="font-mono">{localTicket.ticket_id.slice(0, 8)}</span>
+          <span className="font-mono">{getTicketKey(localTicket) ?? localTicket.ticket_id.slice(0, 8)}</span>
         </div>
       </div>
 
@@ -320,61 +391,26 @@ function TicketDetailView({
             <h1 className="text-lg font-semibold">{displayTitle}</h1>
 
             {/* Description */}
-            <div>
+            <div
+              className={`rounded-md px-2 py-2 transition-colors cursor-pointer ${
+                selectedItemKey === "description"
+                  ? "bg-primary/5 ring-1 ring-primary/20"
+                  : "hover:bg-accent/30"
+              }`}
+              onClick={() =>
+                selectDetailItem(
+                  "description",
+                  sourceRefs,
+                  buildRelatedPagesForTicket(localTicket, {
+                    highlightedItemTexts: localTicket.description ? [localTicket.description] : [],
+                  }),
+                )
+              }
+            >
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
                 {sourceExcerpts.length > 0 ? "Summary" : "Description"}
               </label>
               <p className="text-sm whitespace-pre-wrap">{localTicket.description || "No description."}</p>
-            </div>
-
-            {sourceExcerpts.length > 0 && (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">
-                  Original Source Details
-                </label>
-                <div className="space-y-2">
-                  {sourceExcerpts.slice(0, 3).map((ref, index) => (
-                    <div key={`${ref.doc_id}-${index}`} className="rounded-md border p-3 bg-muted/20">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <Badge variant="outline" className="text-[10px]">
-                          {SOURCE_LABELS[ref.source_type]?.label ?? ref.source_type}
-                        </Badge>
-                        <span className="text-xs font-medium">{ref.title || ref.doc_id}</span>
-                      </div>
-                      <p className="text-xs whitespace-pre-wrap">{ref.excerpt}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Edit in Verify */}
-            <div>
-              {!showVerifyForm ? (
-                <Button size="sm" variant="outline" onClick={() => setShowVerifyForm(true)}>
-                  Edit in Verify
-                </Button>
-              ) : (
-                <Card className="p-3 space-y-2">
-                  <Input
-                    value={verifyTitle}
-                    onChange={(e) => setVerifyTitle(e.target.value)}
-                    placeholder="Title (optional)"
-                    className="h-8 text-xs"
-                  />
-                  <Textarea
-                    value={verifyDesc}
-                    onChange={(e) => setVerifyDesc(e.target.value)}
-                    placeholder="Describe what should change..."
-                    rows={2}
-                    className="text-xs"
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddToVerify}>Add to Verify</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setShowVerifyForm(false)}>Cancel</Button>
-                  </div>
-                </Card>
-              )}
             </div>
 
             {/* Subtasks */}
@@ -393,7 +429,20 @@ function TicketDetailView({
                   {subtasks.map((st) => (
                     <div
                       key={st.ticket_id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 text-sm"
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors ${
+                        selectedItemKey === `subtask:${st.ticket_id}`
+                          ? "bg-primary/5 ring-1 ring-primary/20"
+                          : "hover:bg-muted/50"
+                      }`}
+                      onClick={() =>
+                        selectDetailItem(
+                          `subtask:${st.ticket_id}`,
+                          getTicketItemSources(st),
+                          buildRelatedPagesForTicket(st, {
+                            highlightedItemTexts: st.title ? [st.title] : [],
+                          }),
+                        )
+                      }
                     >
                       <span className="flex-1 truncate">{st.title}</span>
                       <Badge variant="outline" className="text-[10px] shrink-0">
@@ -402,11 +451,6 @@ function TicketDetailView({
                     </div>
                   ))}
                 </div>
-              )}
-              {!loadingSubtasks && subtasks.length === 0 && (
-                <p className="text-xs text-muted-foreground mb-2">
-                  No subtasks yet.
-                </p>
               )}
               <div className="flex gap-2">
                 <Input
@@ -437,48 +481,39 @@ function TicketDetailView({
               </div>
             </div>
 
-            {/* Linked entities */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Linked Entities
-                </span>
-              </div>
-              {localTicket.linked_entity_names?.length > 0 ||
-              localTicket.linked_entity_ids?.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                  {linkedEntityLabels.map((label, i) => (
-                    <Badge
-                      key={i}
-                      variant={label.endsWith("...") ? "outline" : "secondary"}
-                      className={label.endsWith("...") ? "text-[10px] font-mono" : "text-xs"}
-                    >
-                      {label}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No linked entities.
-                </p>
-              )}
-            </div>
-
             {/* Comments */}
             <div>
-              <div className="flex items-center gap-2 mb-3">
-                <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Comments ({comments.length})
-                </span>
-              </div>
+              {comments.length > 0 && (
+                <div className="flex items-center gap-2 mb-3">
+                  <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Comments
+                  </span>
+                </div>
+              )}
               {comments.length > 0 && (
                 <div className="space-y-3 mb-4">
                   {comments.map((c) => (
                     <div
                       key={c.id}
-                      className="rounded-md border px-3 py-2 text-sm"
+                      className={`rounded-md border px-3 py-2 text-sm cursor-pointer transition-colors ${
+                        selectedItemKey === `comment:${c.id}`
+                          ? "bg-primary/5 ring-1 ring-primary/20"
+                          : "hover:bg-accent/30"
+                      }`}
+                      onClick={() => {
+                        const matchingSources =
+                          c.source && c.source !== "manual"
+                            ? sourceRefs.filter((ref) => ref.source_type === c.source)
+                            : [];
+                        selectDetailItem(
+                          `comment:${c.id}`,
+                          matchingSources.length > 0 ? matchingSources : [],
+                          buildRelatedPagesForTicket(localTicket, {
+                            highlightedItemTexts: c.text ? [c.text] : [],
+                          }),
+                        );
+                      }}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-medium">{c.author}</span>
@@ -528,7 +563,7 @@ function TicketDetailView({
           {/* Metadata */}
           <div className="border-t pt-4 mt-4">
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Details</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               <div>
                 <label className="text-[10px] text-muted-foreground block mb-1">Status</label>
                 <Select
@@ -574,6 +609,30 @@ function TicketDetailView({
                   {SOURCE_LABELS[localTicket.source]?.label ?? localTicket.source}
                 </Badge>
               </div>
+              {localTicket.raw_status && (
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">External Status</label>
+                  <p className="text-xs">{localTicket.raw_status}</p>
+                </div>
+              )}
+              {localTicket.issue_type && (
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Type</label>
+                  <p className="text-xs">{localTicket.issue_type}</p>
+                </div>
+              )}
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Assignee</label>
+                <p className="text-xs">
+                  {localTicket.assignees.length > 0
+                    ? localTicket.assignees.join(", ")
+                    : localTicket.owner_name || "—"}
+                </p>
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Reporter</label>
+                <p className="text-xs">{localTicket.reporter || "—"}</p>
+              </div>
               <div>
                 <label className="text-[10px] text-muted-foreground block mb-1">
                   <Calendar className="h-3 w-3 inline mr-1" />Created
@@ -582,6 +641,20 @@ function TicketDetailView({
                   {new Date(localTicket.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
                 </p>
               </div>
+              {localTicket.resolved_at && (
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Resolved</label>
+                  <p className="text-xs">
+                    {new Date(localTicket.resolved_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+                  </p>
+                </div>
+              )}
+              {localTicket.sprint && (
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Sprint</label>
+                  <p className="text-xs">{localTicket.sprint}</p>
+                </div>
+              )}
               {localTicket.labels?.length > 0 && (
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-1">
@@ -603,6 +676,38 @@ function TicketDetailView({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Edit in Verify — subtle link at the bottom */}
+          <div className="border-t pt-3 mt-2">
+            {!showVerifyForm ? (
+              <button
+                onClick={() => setShowVerifyForm(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
+              >
+                Edit in Verify
+              </button>
+            ) : (
+              <Card className="p-3 space-y-2">
+                <Input
+                  value={verifyTitle}
+                  onChange={(e) => setVerifyTitle(e.target.value)}
+                  placeholder="Title (optional)"
+                  className="h-8 text-xs"
+                />
+                <Textarea
+                  value={verifyDesc}
+                  onChange={(e) => setVerifyDesc(e.target.value)}
+                  placeholder="Describe what should change..."
+                  rows={2}
+                  className="text-xs"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleAddToVerify}>Add to Verify</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setShowVerifyForm(false)}>Cancel</Button>
+                </div>
+              </Card>
+            )}
           </div>
           </div>
       </ScrollArea>
@@ -745,6 +850,9 @@ function TicketCreateView({
 // ---------------------------------------------------------------------------
 
 const getTicketKey = (t: Ticket) => {
+  if (typeof t.ticket_key === "string" && t.ticket_key.trim().length > 0) {
+    return t.ticket_key.trim();
+  }
   const match = t.ticket_id?.match(/^[A-Z]+-\d+/);
   if (match) return match[0];
   const titleMatch = t.title?.match(/^([A-Z]+-\d+)/);
@@ -760,8 +868,11 @@ const formatTicketLabel = (t: Ticket) => {
     ref.title.trim().length > 0,
   )?.title?.trim();
   const key = getTicketKey(t);
-  if (jiraSourceTitle && key && rawTitle.toUpperCase() === key.toUpperCase()) {
+  if (jiraSourceTitle && (!rawTitle || (key && rawTitle.toUpperCase() === key.toUpperCase()))) {
     return jiraSourceTitle;
+  }
+  if (key && rawTitle.toUpperCase().startsWith(`${key.toUpperCase()}:`)) {
+    return rawTitle;
   }
   if (key) {
     const remainder = rawTitle.replace(/^[A-Z]+-\d+[:\s-]*/, "").trim();
@@ -841,11 +952,15 @@ function TicketGroup({
 // ---------------------------------------------------------------------------
 
 export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
+  const [pageTab, setPageTab] = useState<"tasks" | "verify">("tasks");
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [entityPages, setEntityPages] = useState<EntityPage[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [rightPanelSources, setRightPanelSources] = useState<SourceRef[]>([]);
+  const [rightPanelRelated, setRightPanelRelated] = useState<RelatedEntityPage[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
@@ -857,14 +972,22 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   const [addedIndices, setAddedIndices] = useState<Set<number>>(new Set());
   const [graphNodes, setGraphNodes] = useState<Record<string, TicketGraphNodeSummary>>({});
 
+  const clearRightPanelSelection = () => {
+    setRightPanelSources([]);
+    setRightPanelRelated([]);
+  };
+
   const fetchTickets = useCallback(async () => {
-    const [tRes, nRes] = await Promise.all([
+    const [tRes, nRes, eRes] = await Promise.all([
       fetch(`/api/${companySlug}/kb2/tickets`),
       fetch(`/api/${companySlug}/kb2?type=graph_nodes`),
+      fetch(`/api/${companySlug}/kb2?type=entity_pages`),
     ]);
     const tData = await tRes.json();
     const nData = await nRes.json();
+    const eData = await eRes.json();
     setTickets(tData.tickets ?? []);
+    setEntityPages(eData.pages ?? []);
     const nodeMap: typeof graphNodes = {};
     for (const n of nData.nodes ?? []) {
       nodeMap[n.node_id] = { display_name: n.display_name, type: n.type, source_refs: n.source_refs ?? [] };
@@ -875,22 +998,6 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
-
-  const getTicketSources = (ticket: Ticket): SourceRef[] => {
-    if (Array.isArray(ticket.source_refs) && ticket.source_refs.length > 0) {
-      return dedupeSourceRefs(ticket.source_refs);
-    }
-    const refs: SourceRef[] = [];
-    for (const entityId of ticket.linked_entity_ids ?? []) {
-      const node = graphNodes[entityId];
-      if (node?.source_refs) {
-        for (const r of node.source_refs) {
-          refs.push({ source_type: r.source_type, doc_id: r.doc_id, title: r.title, excerpt: r.excerpt });
-        }
-      }
-    }
-    return dedupeSourceRefs(refs);
-  };
 
   const filteredTickets =
     sourceFilter === "all"
@@ -978,6 +1085,7 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   };
 
   const handleTicketUpdated = async () => {
+    clearRightPanelSelection();
     await fetchTickets();
     if (selectedTicket) {
       const fresh = tickets.find(
@@ -988,11 +1096,13 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   };
 
   const openTicketDetail = (ticket: Ticket) => {
+    clearRightPanelSelection();
     setSelectedTicket(ticket);
     setViewMode("detail");
   };
 
   const goBackToBoard = () => {
+    clearRightPanelSelection();
     setViewMode("board");
   };
 
@@ -1027,6 +1137,7 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
   );
 
   const handleSidebarSelect = (ticket: Ticket) => {
+    clearRightPanelSelection();
     setSelectedTicket(ticket);
     setViewMode("detail");
   };
@@ -1341,9 +1452,14 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
           <TicketDetailView
             ticket={selectedTicket}
             graphNodes={graphNodes}
+            entityPages={entityPages}
             companySlug={companySlug}
             onBack={goBackToBoard}
             onUpdated={handleTicketUpdated}
+            onItemSelection={(sources, relatedPages) => {
+              setRightPanelSources(dedupeSourceRefs(sources));
+              setRightPanelRelated(relatedPages);
+            }}
           />
         ) : (
           boardView
@@ -1364,69 +1480,115 @@ export function KB2TicketsPage({ companySlug }: { companySlug: string }) {
     }
   })();
 
-  return (
-    <SplitLayout
-      autoSaveId="tickets"
-      mainContent={
-        <div className="flex h-full overflow-hidden">
-          {/* ---- LEFT SIDEBAR ---- */}
-          <div className="w-64 border-r flex flex-col shrink-0 bg-background">
-            <div className="p-3 border-b">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={sidebarSearch}
-                  onChange={(e) => setSidebarSearch(e.target.value)}
-                  placeholder="Search tickets..."
-                  className="h-8 pl-8 text-xs"
-                />
-              </div>
-            </div>
-            <ScrollArea className="flex-1">
-              <TicketGroup
-                label="Past"
-                tickets={pastTickets}
-                selectedTicketId={selectedTicket?.ticket_id ?? null}
-                onSelect={handleSidebarSelect}
-              />
-              <TicketGroup
-                label="Ongoing"
-                tickets={ongoingTickets}
-                selectedTicketId={selectedTicket?.ticket_id ?? null}
-                onSelect={handleSidebarSelect}
-              />
-              <TicketGroup
-                label="Proposed"
-                tickets={proposedTickets}
-                selectedTicketId={selectedTicket?.ticket_id ?? null}
-                onSelect={handleSidebarSelect}
-              />
-            </ScrollArea>
-          </div>
-
-          {/* ---- MAIN CONTENT AREA ---- */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-            {contentArea}
+  if (pageTab === "verify") {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="border-b px-4">
+          <div className="flex gap-4">
+            <button
+              onClick={() => setPageTab("tasks")}
+              className="py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
+            >
+              Tasks
+            </button>
+            <button
+              className="py-2 text-xs font-medium text-foreground border-b-2 border-primary"
+            >
+              Verify
+            </button>
           </div>
         </div>
-      }
-      rightPanel={
-        <KB2RightPanel
-          companySlug={companySlug}
-          autoContext={
-            selectedTicket
-              ? {
-                  type: "ticket",
-                  id: selectedTicket.ticket_id,
-                  title: selectedTicket.title,
-                }
-              : null
+        <div className="flex-1 min-h-0">
+          <KB2VerifyPage companySlug={companySlug} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="border-b px-4 shrink-0">
+        <div className="flex gap-4">
+          <button
+            className="py-2 text-xs font-medium text-foreground border-b-2 border-primary"
+          >
+            Tasks
+          </button>
+          <button
+            onClick={() => setPageTab("verify")}
+            className="py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
+          >
+            Verify
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        <SplitLayout
+          autoSaveId="tickets"
+          mainContent={
+            <LeftSidebarLayout
+              autoSaveId="tickets-left"
+              leftSidebar={
+                <div className="h-full border-r flex flex-col bg-background">
+                  <div className="p-3 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={sidebarSearch}
+                        onChange={(e) => setSidebarSearch(e.target.value)}
+                        placeholder="Search tickets..."
+                        className="h-8 pl-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <ScrollArea className="flex-1">
+                    <TicketGroup
+                      label="Past"
+                      tickets={pastTickets}
+                      selectedTicketId={selectedTicket?.ticket_id ?? null}
+                      onSelect={handleSidebarSelect}
+                    />
+                    <TicketGroup
+                      label="Ongoing"
+                      tickets={ongoingTickets}
+                      selectedTicketId={selectedTicket?.ticket_id ?? null}
+                      onSelect={handleSidebarSelect}
+                    />
+                    <TicketGroup
+                      label="Proposed"
+                      tickets={proposedTickets}
+                      selectedTicketId={selectedTicket?.ticket_id ?? null}
+                      onSelect={handleSidebarSelect}
+                    />
+                  </ScrollArea>
+                </div>
+              }
+              mainContent={
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                  {contentArea}
+                </div>
+              }
+            />
           }
-          sourceRefs={selectedTicket ? getTicketSources(selectedTicket) : []}
-          relatedEntityPages={[]}
-          defaultTab={selectedTicket ? "sources" : "chat"}
+          rightPanel={
+            <KB2RightPanel
+              companySlug={companySlug}
+              autoContext={
+                selectedTicket
+                  ? {
+                      type: "ticket",
+                      id: selectedTicket.ticket_id,
+                      title: selectedTicket.title,
+                    }
+                  : null
+              }
+              sourceRefs={rightPanelSources}
+              relatedEntityPages={rightPanelRelated}
+              defaultTab={selectedTicket ? "sources" : "chat"}
+            />
+          }
         />
-      }
-    />
+      </div>
+    </div>
   );
 }

@@ -57,6 +57,11 @@ The most valuable output is not the documented stuff (anyone can read a Confluen
 - The Toy Donation Feature how-to guide should reference all 3 conventions in its implementation guidance
 - It should say things like: "Use green for the donate CTA (per the team's established color convention for financial actions)" and "Use a vertical sidebar for toy category selection (per the team's layout convention for selection interfaces)" and "Load the toy list in a single API call on mount since shelters typically have under 20 toys available (per the team's client-side browse pattern for small datasets)"
 - This is only possible if the `APPLIES_TO` edges exist and the How-To step can follow them to find convention entity pages
+- The Toy Donation Feature how-to guide should mention Kim, Tim, and Matt by name when applying their conventions
+- It should mention at least 3 real source artifacts by title or ticket key, not generic phrases like "existing patterns" or "team guidance"
+- It should include at least 5 concrete implementation prescriptions that could only come from this company's KB, not generic product advice
+- It should surface non-convention implementation patterns like lazy loading, skeleton states, single-column form layout, or card-grid rendering behavior when the source evidence supports them
+- The on-demand how-to route and the batch how-to generation step should produce materially comparable guidance for the same project
 
 **For verify cards:**
 - A manageable number (under 30), not 200+

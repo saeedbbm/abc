@@ -507,13 +507,15 @@ export async function runPipeline(opts: RunOptions): Promise<KB2RunType> {
             });
 
             if (!abortCtrl.signal.aborted) {
-              try {
-                console.log(`[pipeline] Running auto-judge for ${stepDef.name} (exec=${executionId})...`);
-                const judgeResult = await evaluateStep(opts.companySlug, executionId);
-                console.log(`[pipeline] Auto-judge completed for ${stepDef.name}: ${judgeResult.overall_score}% ${judgeResult.pass ? "PASS" : "FAIL"}`);
-              } catch (judgeErr) {
-                console.error(`[pipeline] Judge failed for ${stepDef.name}: ${judgeErr}`);
-              }
+              void (async () => {
+                try {
+                  console.log(`[pipeline] Running auto-judge for ${stepDef.name} (exec=${executionId})...`);
+                  const judgeResult = await evaluateStep(opts.companySlug, executionId);
+                  console.log(`[pipeline] Auto-judge completed for ${stepDef.name}: ${judgeResult.overall_score}% ${judgeResult.pass ? "PASS" : "FAIL"}`);
+                } catch (judgeErr) {
+                  console.error(`[pipeline] Judge failed for ${stepDef.name}: ${judgeErr}`);
+                }
+              })();
             }
           } catch (err: any) {
             const isCancelled = abortCtrl.signal.aborted || err.message?.includes("cancelled");

@@ -525,12 +525,23 @@ Rules:
 - Overview: 2-3 sentences explaining what this ticket is about and why it matters.
 - Context: What existing patterns, systems, and decisions are relevant. Reference specific entities.
 - Requirements: What must be true when this is done. Acceptance criteria.
-- Implementation Steps: Step-by-step how to build this. Reference specific files, patterns, libraries from the KB. Use code examples where helpful.
+- Implementation Steps: Return 4-7 explicit step objects in the section's steps array. Each step needs a short title plus 2-4 sentences of prose explaining what to do and why it matters for this feature.
 - Testing Plan: What tests to write. What edge cases to cover.
 - Risks and Considerations: What could go wrong. What tradeoffs exist.
 - Prompt Section: If an AI agent were implementing this, what prompt/instructions would you give it?
 
-CRITICAL: Reference actual patterns and decisions discovered in the KB. Do NOT give generic advice.`,
+CRITICAL:
+- Reference actual patterns and decisions discovered in the KB. Do NOT give generic advice.
+- When Convention Evidence is provided, for each convention explain what it means for this feature, the specific implementation choice it implies, and at least one supporting source artifact.
+- When Implementation Patterns From Related Projects is provided, use those artifacts to make concrete UI, data-loading, component, and workflow choices without inventing unsupported details.
+- When Evidence-Backed Implementation Prescriptions are provided, carry those exact implementation choices into Context, Requirements, and Implementation Steps with owner attribution. Do not reduce them to abstract convention mentions.
+- Cite only source artifact names that are explicitly present in the provided context and directly support the claim.
+- In Implementation Steps, write prose only. No code blocks, no pseudocode, no JSX, and no inline code samples.
+- Each implementation step should mention the exact source artifact names that justify it via that step's evidence_hints array. Use exact titles from the provided context only.
+- If a step proposes new backend, data, or UI work that is not explicitly named in the evidence, say it is new work to define instead of inventing routes, fields, payloads, or component names.
+- Do not spell raw HTTP method/path snippets in Implementation Steps. Describe existing APIs in plain English.
+- Do not invent file paths, endpoints, libraries, source titles, architecture details, owners, or conventions.
+- If a detail is not grounded in the provided context, keep the step general instead of making up a concrete implementation.`,
   },
   extract_claims: {
     system: `You extract atomic factual claims from knowledge base pages.
@@ -555,10 +566,12 @@ SEVERITY RUBRIC:
 
 RULES:
 - Filter out noise: if a candidate is trivially true or would waste a reviewer's time, set keep: false
-- Write a specific, human-friendly title
+- Write a specific, human-friendly title that names the exact fact or field needing review
+- Never use generic issue labels like "Needs Verification", "Inferred Claim", "Confirm Convention Attribution", or "Confirm Request Synthesis"
 - Write a description that explains what's at stake if this is wrong
 - Missing section cards for sections unlikely to have data should be S4 or filtered
-- Inferred claims about critical systems should be S1 or S2`,
+- Inferred claims about critical systems should be S1 or S2
+- Do NOT create a card just because a page/project was synthesized from multiple signals. Only keep cards for concrete unresolved facts a human can answer`,
   },
   cluster_factgroups: {
     system: `You validate whether pairs of claims are duplicates, conflicts, or merely related.`,
@@ -587,7 +600,7 @@ For each affected item, explain what needs to change and why.`,
     system: `You are a product management AI for a software company knowledge base.\nGiven customer feedback text, generate actionable engineering tickets.\n\nRules:\n- Each ticket should be specific and actionable\n- Set priority based on impact and urgency: P0=critical/blocking, P1=high impact, P2=medium, P3=low/nice-to-have\n- Reference affected systems by name from the provided list\n- Extract exact customer quotes as evidence\n- Do NOT create tickets that duplicate existing ones\n- Generate 1-8 tickets depending on feedback complexity`,
   },
   howto_on_demand: {
-    system: `You generate structured implementation guides. Output EXACTLY these sections separated by "## Section Name" headers:\n- Overview\n- Context\n- Requirements\n- Implementation Steps\n- Testing Plan\n- Risks and Considerations\n- Prompt Section\n\nFor the "Prompt Section", write a structured prompt that could be given to an AI coding agent to implement this task. Include file paths, patterns to follow, and test commands.\n\nBe concise but thorough. Use bullet points and code blocks where appropriate.`,
+    system: `You generate implementation plan documents for engineering work items.\nEach plan has sections that must be filled with specific, actionable content.\n\nSections: Overview, Context, Requirements, Implementation Steps, Testing Plan, Risks and Considerations, Prompt Section\n\nRules:\n- Overview: 2-3 sentences explaining what this work is about and why it matters.\n- Context: What existing patterns, systems, and decisions are relevant. Reference specific entities.\n- Requirements: What must be true when this is done. Acceptance criteria.\n- Implementation Steps: Return 4-7 explicit step objects in the section's steps array. Each step needs a short title plus 2-4 sentences of prose explaining what to do and why it matters for this feature.\n- Testing Plan: What tests to write. What edge cases to cover.\n- Risks and Considerations: What could go wrong. What tradeoffs exist.\n- Prompt Section: If an AI agent were implementing this, what prompt or instructions would you give it?\n\nCRITICAL:\n- Reference actual patterns and decisions discovered in the KB. Do NOT give generic advice.\n- When Convention Evidence is provided, for each convention explain what it means for this feature, the specific implementation choice it implies, and at least one supporting source artifact.\n- When Implementation Patterns From Related Projects is provided, use those artifacts to make concrete UI, data-loading, component, and workflow choices without inventing unsupported details.\n- When Evidence-Backed Implementation Prescriptions are provided, carry those exact implementation choices into Context, Requirements, and Implementation Steps with owner attribution. Do not reduce them to abstract convention mentions.\n- In Implementation Steps, write prose only. No code blocks, no pseudocode, no JSX, and no inline code samples.\n- Each implementation step should mention the exact source artifact names that justify it via that step's evidence_hints array. Use exact titles from the provided context only.\n- If a step proposes new backend, data, or UI work that is not explicitly named in the evidence, say it is new work to define instead of inventing routes, fields, payloads, or component names.\n- Do not spell raw HTTP method/path snippets in Implementation Steps. Describe existing APIs in plain English.\n- Do not invent file paths, endpoints, libraries, source titles, architecture details, owners, or conventions.\n- If a detail is not grounded in the provided context, keep the step general instead of making up a concrete implementation.`,
   },
   impact_analysis: {
     system: `You are a knowledge-base impact analyzer. Given a change to an entity, identify all downstream impacts on related entities, pages, tickets, and claims. Be precise about severity:\n- S1: Critical — breaks correctness of a core entity or claim\n- S2: High — significant factual change that should be propagated\n- S3: Medium — minor update that may need propagation\n- S4: Low — cosmetic or unlikely to affect other artifacts`,
@@ -615,7 +628,7 @@ const defaultPipelineSettings: PipelineSettingsConfig = {
   entity_extraction: {
     default_batch_size: 3,
     dense_batch_size: 2,
-    evidence_excerpt_max_length: 300,
+    evidence_excerpt_max_length: 800,
   },
   discovery: {
     batch_size: 3,

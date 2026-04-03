@@ -19,6 +19,7 @@ import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 const UPDATABLE_FIELDS = [
   "title", "description", "priority", "assignees", "labels",
   "linked_entity_ids", "linked_entity_names", "workflow_state", "parent_ticket_id",
+  "reporter", "owner_name", "issue_type", "raw_status", "resolved_at", "sprint", "source_refs",
 ] as const;
 
 type TicketDoc = Record<string, any>;
@@ -107,7 +108,10 @@ async function enrichTicketsForResponse(
         ...linkedNodes.map((node) => node.display_name),
       ]);
       const sourceRefs = dedupeSourceRefs(
-        linkedNodes.flatMap((node) => Array.isArray(node.source_refs) ? node.source_refs : []),
+        [
+          ...(Array.isArray(ticket.source_refs) ? ticket.source_refs : []),
+          ...linkedNodes.flatMap((node) => Array.isArray(node.source_refs) ? node.source_refs : []),
+        ],
       );
       enriched.push({
         ...ticket,
@@ -207,25 +211,51 @@ export async function POST(
     source: body.source || "manual",
     title: body.title,
     description: body.description || "",
-    assignees: body.assignees || [],
+    assignees: Array.isArray(body.assignees) ? body.assignees : body.assignee ? [body.assignee] : [],
+    reporter: body.reporter || "",
+    owner_name: body.owner_name || body.assignee || "",
     labels: body.labels || [],
     status: "open",
     priority: body.priority || "P2",
     workflow_state: "backlog",
     linked_entity_ids: body.linked_entity_ids || [],
     linked_entity_names: body.linked_entity_names || [],
+    source_refs: body.source_refs || [],
     parent_ticket_id: body.parent_ticket_id || null,
     subtask_ids: [],
     comments: [],
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 
   await tc.tickets.insertOne(ticket);
 
   if (body.parent_ticket_id) {
+    const parentTicket = await tc.tickets.findOne({
+      ticket_id: body.parent_ticket_id,
+      demo_state_id: writableState.state_id,
+    });
+
+    const parentUpdate: Record<string, unknown> = {
+      $addToSet: { subtask_ids: ticket.ticket_id },
+    };
+
+    if (parentTicket) {
+      const shouldReopenParent =
+        String(parentTicket.workflow_state ?? "").toLowerCase() === "done" ||
+        String(parentTicket.status ?? "").toLowerCase() === "closed";
+
+      if (shouldReopenParent) {
+        parentUpdate.$set = {
+          workflow_state: "todo",
+          status: "open",
+        };
+      }
+    }
+
     await tc.tickets.updateOne(
       { ticket_id: body.parent_ticket_id, demo_state_id: writableState.state_id },
-      { $addToSet: { subtask_ids: ticket.ticket_id } },
+      parentUpdate,
     );
   }
 
@@ -255,7 +285,7 @@ export async function PATCH(
       author: add_comment.author,
       text: add_comment.text,
       source: add_comment.source || "manual",
-      created_at: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     };
   }
 

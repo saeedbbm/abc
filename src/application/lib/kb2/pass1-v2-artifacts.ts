@@ -197,7 +197,7 @@ function normalizeForMatch(value: string): string {
   return normalizeWhitespace(value.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " "));
 }
 
-function truncateExcerpt(text: string, max = 320): string {
+function truncateExcerpt(text: string, max = 800): string {
   const trimmed = text.trim();
   if (trimmed.length <= max) return trimmed;
   return `${trimmed.slice(0, max - 3).trim()}...`;

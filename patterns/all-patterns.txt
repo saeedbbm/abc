@@ -1,0 +1,711 @@
+================================================================================
+IMPLEMENTATION PATTERNS — MASTER REFERENCE
+================================================================================
+
+Every concrete, reusable implementation pattern present in the PawFinder input
+data. Each pattern has: an ID, a short name, the specific detail, every source
+that establishes it, and who established it.
+
+Use this file to score how-to output: for each plan, check which pattern IDs
+from the plan-specific spec file appear in the generated text.
+
+Total patterns: 48
+
+
+================================================================================
+CATEGORY 1: IMAGE LOADING
+================================================================================
+
+
+--- PATTERN IMG-1: Lazy loading for pet photos ---
+
+Detail:       Pet card images use lazy loading so below-the-fold images are
+              not fetched until scrolled into view.
+Sources:
+  - GitHub PR #18 description: "Lazy loading for pet photos"
+  - Jira PAW-4 description: "Lazy loading for images"
+Established by: Tim (PR #18 author)
+
+
+--- PATTERN IMG-2: Skeleton loading states ---
+
+Detail:       Cards and list items show a skeleton placeholder (gray shapes
+              mimicking the final layout) while data is loading. Applied across
+              multiple features — not a one-off.
+Sources:
+  - GitHub PR #18 description: "Skeleton loading state"
+  - GitHub PR #55 review: Jill adds "skeleton loader for the shift list" on
+    Tim's guidance
+Established by: Tim (pattern), Jill (extended to volunteer portal)
+
+
+--- PATTERN IMG-3: Species-specific image fallback ---
+
+Detail:       When a pet photo returns a 404, an onError handler shows a
+              placeholder silhouette based on the animal type (dog, cat,
+              rabbit, etc.) instead of a broken image icon.
+Sources:
+  - Jira PAW-26: "Fix pet card image fallback"
+  - GitHub PR #65: "onError handler to the pet card image that shows a
+    placeholder silhouette based on the animal type"
+Established by: Tim (PR #65 reviewed by Tim)
+
+
+================================================================================
+CATEGORY 2: GRID LAYOUT AND RESPONSIVENESS
+================================================================================
+
+
+--- PATTERN GRID-1: Responsive grid breakpoints ---
+
+Detail:       Pet card grids use 3 columns on desktop, 2 columns on tablet,
+              1 column (stacked vertically) on mobile.
+Sources:
+  - GitHub PR #18 description: "Responsive grid layout (2 cols on tablet,
+    3 on desktop)"
+  - GitHub PR #61 description: "Pet cards now stack vertically on mobile
+    instead of the 2-col grid"
+Established by: Tim (PR #18), Jill (PR #61 mobile work)
+
+
+--- PATTERN GRID-2: Minimum 44px touch targets on mobile ---
+
+Detail:       All interactive elements on mobile must have a minimum touch
+              target of 44px to meet usability standards.
+Sources:
+  - GitHub PR #61: "Filter buttons have larger touch targets (44px min)"
+Established by: Jill (PR #61, likely per Kim's mobile mockups)
+
+
+--- PATTERN GRID-3: Bottom navigation bar on mobile ---
+
+Detail:       Mobile layout uses a bottom navigation bar for quick access to
+              Browse, Shelters, and Volunteer sections. Pages must account for
+              this by adding bottom padding so content is not hidden.
+Sources:
+  - GitHub PR #61: "Bottom navigation bar on mobile for quick access to
+    Browse, Shelters, and Volunteer sections"
+Established by: Jill / Kim (PR #61)
+
+
+--- PATTERN GRID-4: Hamburger menu at 768px ---
+
+Detail:       The desktop left sidebar navigation collapses into a hamburger
+              menu on screens under 768px. Menu slides in from the left as
+              an overlay.
+Sources:
+  - GitHub PR #61: "desktop left sidebar nav collapses into a hamburger
+    menu on screens under 768px. Menu slides in from the left as an overlay."
+Established by: Jill / Kim (PR #61)
+
+
+================================================================================
+CATEGORY 3: COMPONENT ARCHITECTURE AND PERFORMANCE
+================================================================================
+
+
+--- PATTERN COMP-1: React.memo + useCallback for card grids ---
+
+Detail:       When rendering a grid of cards with click handlers (e.g. Sponsor
+              button), wrap the card component in React.memo and use useCallback
+              for the click handler to prevent the entire list from re-rendering
+              when a single card's button is clicked.
+Sources:
+  - GitHub PR #18 review: Matt says "the grid re-renders the entire list when
+    a single card's sponsor button is clicked. Can you memoize the card
+    component?" Tim responds "Fixed with React.memo and a useCallback for
+    the click handler."
+Established by: Matt (identified the problem), Tim (implemented the fix)
+
+
+--- PATTERN COMP-2: Promise.all for parallel API calls ---
+
+Detail:       When fetching data from multiple independent endpoints, use
+              Promise.all to parallelize the requests instead of awaiting
+              them sequentially.
+Sources:
+  - GitHub PR #43 review: Matt says "you're making a separate API call for
+    each shelter. consider using Promise.all to parallelize the requests
+    instead of awaiting them sequentially." Jill fixes it.
+Established by: Matt (code review pattern)
+
+
+--- PATTERN COMP-3: Shared Toast component ---
+
+Detail:       A reusable Toast component exists in the shared components folder
+              for displaying success/error feedback on forms and actions. Any
+              new feature with user-facing feedback should use it.
+Sources:
+  - GitHub PR #39 review: Tim says "The toast component is great, let's move
+    it to the shared components folder so we can reuse it elsewhere."
+Established by: Jill (built it), Tim (promoted to shared)
+
+
+--- PATTERN COMP-4: 200ms CSS fade transition for content switching ---
+
+Detail:       When switching between items in a browse/selection view (e.g.
+              flipping between pet cards), use a 200ms CSS fade transition
+              on the card container.
+Sources:
+  - GitHub PR #23 review: Tim suggests "subtle fade or slide" for pet
+    transitions. Matt responds "Added a quick CSS transition on the card
+    container, 200ms fade."
+Established by: Tim (suggested), Matt (implemented)
+
+
+================================================================================
+CATEGORY 4: NAVIGATION AND LAYOUT
+================================================================================
+
+
+--- PATTERN NAV-1: Vertical left sidebar for selection ---
+
+Detail:       When the user is choosing or selecting from a list (picking one
+              item to drill into), use a vertical menu or sidebar on the left
+              side. Not tabs across the top.
+Sources:
+  - Slack #engineering 2023-03-21: Tim on categories page: "putting the
+    category list as a vertical menu on the left side...the user is choosing,
+    not comparing, so vertical nav makes more sense"
+  - Slack #engineering 2025-02-17: Tim on resource library: "put the
+    categories on the left as a vertical list, not tabs on top"
+  - GitHub PR #31: Tim's shelter locations page: "The shelter list is a
+    vertical scrollable panel on the left side"
+  - GitHub PR #55 review: Tim tells Jill "Put the shelter list on the left
+    as a vertical nav" (changed from tabs)
+Established by: Tim
+Applied on: Pet categories page, shelter locations page, volunteer portal
+            shelter selector, resource library page
+
+
+--- PATTERN NAV-2: Horizontal columns for comparison ---
+
+Detail:       When the user is comparing items side by side, use a horizontal
+              columnar layout across the page — items as columns, attributes
+              as rows.
+Sources:
+  - Slack #engineering 2024-05-13: Tim on comparison: "horizontal layout...
+    shelters laid out left to right...when you're comparing things, your eyes
+    want to go left-right"
+  - GitHub PR #43 review: Tim approves "The comparison grid looks right —
+    horizontal columns for the shelters, rows for the attributes"
+Established by: Tim
+Applied on: Shelter comparison page
+
+
+--- PATTERN NAV-3: Scrollable sidebar with max-height ---
+
+Detail:       Vertical sidebar panels use max-height (e.g. 600px) with
+              overflow-y scroll instead of pushing the page down when the
+              list is long.
+Sources:
+  - GitHub PR #31 description: "vertical scrollable panel on the left side"
+  - GitHub PR #31 review: Matt suggests "max-height with scroll instead of
+    pushing the page down"
+Established by: Matt (suggested scroll), Tim (implemented)
+
+
+--- PATTERN NAV-4: 1/3 left panel, 2/3 content split ---
+
+Detail:       The standard layout split for sidebar + content pages is 1/3
+              for the left sidebar and 2/3 for the main content area.
+Sources:
+  - GitHub PR #31: "The map takes up the right 2/3 of the page"
+Established by: Tim (PR #31 implementation)
+
+
+--- PATTERN NAV-5: Highlight differing values with light yellow ---
+
+Detail:       In comparison views, cells where values differ between compared
+              items are highlighted with a light yellow background.
+Sources:
+  - GitHub PR #43 review: Tim asks "highlight cells where values differ
+    between shelters? Like a subtle background color." Jill responds "Added
+    the highlight for differing values — used a light yellow background."
+Established by: Tim (requested), Jill (implemented)
+
+
+--- PATTERN NAV-6: Single column for all forms ---
+
+Detail:       All data-entry forms use a single-column layout, top to bottom.
+              No two-column forms. Tim's reasoning: "two column forms are
+              harder to scan and people miss fields."
+Sources:
+  - Slack #engineering 2024-10-07: Tim says "single column for forms. two
+    column forms are harder to scan and people miss fields"
+  - GitHub PR #39: "Form layout is single-column, stacked fields"
+  - GitHub PR #55: "Registration form — name, email, phone...Single column
+    form layout"
+  - Confluence Volunteer Portal spec: "Registration form should be simple —
+    single column, clear field labels"
+Established by: Tim
+Applied on: Contact form, volunteer registration form, donation form
+
+
+================================================================================
+CATEGORY 5: API DESIGN
+================================================================================
+
+
+--- PATTERN API-1: Response envelope { data, meta } ---
+
+Detail:       All API endpoints return responses in the shape
+              { data: T, meta: { timestamp, requestId } }. A response wrapper
+              middleware handles this automatically.
+Sources:
+  - GitHub PR #27 (Matt's PR that standardized it)
+  - Confluence onboarding guide: documents the envelope format
+  - Slack #engineering 2025-11-10: Jack confirms "same envelope as everything
+    else right? { data, meta }" Matt: "yep. use the response wrapper
+    middleware"
+Established by: Matt
+Applied on: All pawfinder-api endpoints
+
+
+--- PATTERN API-2: No pagination for small lists (under ~20 items) ---
+
+Detail:       For browse/list features where the dataset is small (under ~20
+              items), load the entire list in a single API call on page mount.
+              Handle navigation entirely client-side. No server round-trip
+              per click.
+Sources:
+  - GitHub PR #23: Matt's adoption chooser — "8-15 adoptable pets...no reason
+    to round-trip to the server for each click"
+  - GitHub PR #47 review: Matt tells Tim "Just load them once...only like
+    10-12 adoptable pets"
+  - GitHub PR #49 review: Matt tells Jack "just load them all upfront...5-8,
+    maybe 12 max"
+  - GitHub PR #52 review: Matt says "15 shifts is nothing"
+  - GitHub PR #55 review: Matt approves "no need to paginate 10-15 items"
+Established by: Matt
+Applied on: Adoption chooser (8-15 pets), donation page pet dedication
+            (10-12 pets), shelter events browser (5-12 events), volunteer
+            shift list (10-15 shifts)
+
+
+--- PATTERN API-3: Cursor-based pagination for larger lists ---
+
+Detail:       When pagination is needed (lists of ~30-40+ items with growth
+              potential), use cursor-based pagination (not offset-based).
+              Default page size is 20. Cursor is based on the item's
+              created_at timestamp + ID for stability.
+Sources:
+  - GitHub PR #58: "Used cursor-based pagination...Page size defaults to
+    20...Cursor is based on the item's created_at timestamp + ID so it's
+    stable"
+  - GitHub PR #58 review: Matt says "for 30-40 items that's borderline but
+    probably fine since it could grow"
+Established by: Jack (implemented), Matt (approved)
+
+
+--- PATTERN API-4: Parse DB strings into structured objects ---
+
+Detail:       Raw strings from the database (e.g. hours of operation stored
+              as "Mon-Fri 9am-5pm") must be parsed into structured objects
+              (e.g. { day, open, close }) in the service layer before sending
+              in the API response. Frontend should never do string parsing.
+Sources:
+  - GitHub PR #35 review: Matt tells Jack "Parse them into a structured
+    object { day, open, close } so the frontend doesn't have to do string
+    manipulation"
+  - Slack #engineering 2024-03-18: Matt: "don't just pass through the raw
+    string from the DB"
+Established by: Matt
+
+
+--- PATTERN API-5: ISO 8601 for all API dates ---
+
+Detail:       All API responses must return dates in ISO 8601 format.
+              Normalization happens in the service layer via a utility function.
+Sources:
+  - Slack #engineering 2024-08-19: Matt tells Jack "yes, always return ISO
+    8601 from the API. normalize in the service layer"
+Established by: Matt
+
+
+--- PATTERN API-6: Idempotent DELETE endpoints ---
+
+Detail:       DELETE endpoints should return 200 even if the resource is
+              already deleted or absent. No error on double-delete.
+Sources:
+  - GitHub PR #52 review: Matt tells Jack "the DELETE for shift cancellation
+    should be idempotent. If someone double-clicks cancel, it shouldn't
+    error. Just return 200 if they're already not signed up."
+Established by: Matt
+
+
+--- PATTERN API-7: Stay on /api/v1 ---
+
+Detail:       New endpoints go under /api/v1. No v2 until there are breaking
+              changes. Just add to the existing namespace.
+Sources:
+  - Slack #engineering 2025-11-10: Matt tells Jack "v1 is fine. we don't
+    need v2 until we have breaking changes. just add to the existing
+    namespace"
+Established by: Matt
+
+
+--- PATTERN API-8: Validate uniqueness before insert ---
+
+Detail:       Check uniqueness constraints (e.g. duplicate email) in the
+              handler before inserting into the database. Return a proper 409
+              Conflict response. Do not rely on DB constraint errors for user
+              feedback.
+Sources:
+  - GitHub PR #52 review: Matt tells Jack "The volunteer registration should
+    validate email uniqueness before creating the record. Right now it'll
+    throw a DB constraint error which isn't a great user experience."
+Established by: Matt
+
+
+--- PATTERN API-9: Capacity check with 422 response ---
+
+Detail:       For limited-availability resources (e.g. shift signups), check
+              capacity at signup time in the handler and return 422 if full.
+              Optimistic locking approach.
+Sources:
+  - GitHub PR #52 review: Matt says "check if the shift is full before
+    allowing signup"
+  - Slack #engineering 2024-11-04: Matt says "check capacity again in the
+    signup handler and return a 422 if it's full. optimistic locking
+    basically"
+Established by: Matt
+
+
+================================================================================
+CATEGORY 6: COLOR AND VISUAL DESIGN
+================================================================================
+
+
+--- PATTERN COLOR-1: Pink accent for female pets ---
+
+Detail:       Female animal UI elements use a pink accent on the gender
+              indicator element and a thin border on the photo frame. The rest
+              of the card stays clean (light gray or white background).
+Sources:
+  - Slack #design 2023-03-14: Kim says "pink accent for the girls...just on
+    the gender indicator element and maybe a thin border on the photo frame.
+    everything else stays clean"
+  - Confluence Website Redesign Phase 1: "pink for female animals"
+  - GitHub PR #18: "gender indicator with color styling per Kim's designs"
+  - GitHub PR #47: "pet card appears with the standard gender-colored accent"
+Established by: Kim
+
+
+--- PATTERN COLOR-2: Blue accent for male pets ---
+
+Detail:       Male animal UI elements use a blue accent, same elements as
+              COLOR-1 (gender indicator + thin photo frame border).
+Sources:
+  Same as COLOR-1 — Kim: "blue for the boys"
+Established by: Kim
+
+
+--- PATTERN COLOR-3: Green for financial CTAs only ---
+
+Detail:       Green is reserved exclusively for buttons that trigger financial
+              transactions (Sponsor, Donate, Purchase, Complete Donation).
+              Intermediate selection buttons (e.g. preset donation amounts)
+              use neutral gray. Green is only for the final action CTA.
+Sources:
+  - Slack #design 2023-03-14: Kim: "going with green for that since it's
+    money-related"
+  - Slack #design 2024-02-19: Kim: "light gray buttons for the preset
+    amounts...the green is only for the final 'Complete Donation' button
+    so it really pops"
+  - Slack #design 2023-10-02: Kim: "neutral blue...it's not a money action
+    so doesn't need to be green"
+  - Confluence Website Redesign Phase 1: "green since it's a financial
+    action"
+  - Confluence Website Redesign Phase 3: "Green for the donation CTA keeps
+    things consistent with our other financial actions"
+Established by: Kim
+Applied on: Sponsor Me button, Complete Donation button
+
+
+--- PATTERN COLOR-4: White background for payment sections ---
+
+Detail:       Payment/checkout form sections use a clean white background
+              with zero color noise. Credit card form is simple, clean fields
+              on white.
+Sources:
+  - Slack #design 2024-02-19: Kim: "payment info section stays white and
+    clean. credit card form, simple, no color noise. just clean fields on
+    white"
+  - GitHub PR #47: "Payment section has a clean white background"
+Established by: Kim
+
+
+--- PATTERN COLOR-5: Blues and grays for non-financial pages ---
+
+Detail:       Pages with no financial elements use the standard blues and
+              grays palette as accent colors. No green.
+Sources:
+  - Slack #design 2025-03-10: Kim: "no financial stuff on this page so
+    it's just our standard blues and grays"
+Established by: Kim
+Applied on: Volunteer portal
+
+
+--- PATTERN COLOR-6: Neutral blue for non-financial action buttons ---
+
+Detail:       Action buttons that are not financial (View Details, Visit,
+              Browse) use blue or neutral styling, not green.
+Sources:
+  - Slack #design 2023-10-02: Kim: "going with a neutral blue for that
+    one. it's not a money action"
+  - Confluence Website Redesign Phase 2: "blue (not green, since it's not
+    a financial action)"
+Established by: Kim
+Applied on: Visit button on shelter location cards
+
+
+================================================================================
+CATEGORY 7: FILE AND FOLDER CONVENTIONS
+================================================================================
+
+
+--- PATTERN FILE-1: CSS Modules with camelCase class names ---
+
+Detail:       Frontend uses CSS Modules for styling. Class names use
+              camelCase convention (e.g. styles.petCard, not styles['pet-card']).
+Sources:
+  - Confluence onboarding guide: Code Style section
+  - Slack #engineering 2024-06-03: Tim tells Jill "CSS modules mostly...
+    camelCase for the module classes"
+Established by: Tim
+
+
+--- PATTERN FILE-2: Shared components in shared folder ---
+
+Detail:       Reusable UI components are moved to a shared components folder
+              (e.g. src/components/Toast/Toast.tsx) so other features can
+              import them.
+Sources:
+  - GitHub PR #39 review: Tim says "let's move [Toast] to the shared
+    components folder so we can reuse it elsewhere"
+Established by: Tim (enforced in code review)
+
+
+--- PATTERN FILE-3: Page folder structure ---
+
+Detail:       Each frontend page gets its own folder containing: the page
+              component, sub-components, a .module.css file, and a custom
+              hook for complex state logic.
+Sources (visible across all frontend PRs):
+  - PR #23: src/pages/AdoptionChooser/AdoptionChooser.tsx +
+            AdoptionChooser.module.css + usePetNavigation.ts
+  - PR #47: src/pages/Donate/Donate.tsx + DonationForm.tsx +
+            PetDedicationSelector.tsx + Donate.module.css
+  - PR #49: src/pages/ShelterEvents/ShelterEvents.tsx + EventCard.tsx +
+            ShelterEvents.module.css
+Established by: Tim (implicit convention across all frontend work)
+
+
+--- PATTERN FILE-4: API file structure ---
+
+Detail:       Each backend feature gets a controller, a route file, a model,
+              and controller tests following a consistent naming pattern.
+Sources (visible across all backend PRs):
+  - PR #35: src/controllers/supplyController.ts + src/routes/supplies.ts +
+            src/models/Supply.ts + tests/controllers/supplyController.test.ts
+  - PR #52: src/controllers/volunteerController.ts +
+            src/routes/volunteers.ts + src/models/Volunteer.ts
+Established by: Matt (implicit convention across all backend work)
+
+
+--- PATTERN FILE-5: Migrations in /db/migrations, timestamped ---
+
+Detail:       Database migrations live in /db/migrations. Each migration file
+              is timestamped. Create with: npm run db:migrate:create --
+              --name your_migration_name.
+Sources:
+  - Confluence onboarding guide
+  - Slack #engineering 2024-01-22: Matt confirms "/db/migrations — each one
+    is timestamped"
+Established by: Matt
+
+
+================================================================================
+CATEGORY 8: TESTING
+================================================================================
+
+
+--- PATTERN TEST-1: Vitest + React Testing Library for frontend ---
+
+Detail:       Frontend unit/component tests use Vitest as the test runner
+              and React Testing Library for component testing.
+Sources:
+  - Confluence onboarding guide: Testing section
+Established by: Team standard (likely Tim)
+
+
+--- PATTERN TEST-2: Jest for backend ---
+
+Detail:       Backend unit/integration tests use Jest.
+Sources:
+  - Confluence onboarding guide: Testing section
+Established by: Team standard (likely Matt)
+
+
+--- PATTERN TEST-3: Playwright for E2E (known flaky) ---
+
+Detail:       End-to-end tests use Playwright. Known to be flaky with async
+              content and map interactions. Use longer timeouts or lazy-load
+              heavy elements to mitigate.
+Sources:
+  - Confluence onboarding guide: Testing section
+  - Slack #engineering 2023-09-11: Tim complains about flaky Playwright
+    tests with map interactions
+  - Jira PAW-10: "Fix flaky CI tests"
+Established by: Team standard
+
+
+================================================================================
+CATEGORY 9: PROCESS AND REVIEW
+================================================================================
+
+
+--- PATTERN PROC-1: Matt reviews backend, Tim reviews frontend ---
+
+Detail:       All backend PRs are reviewed by Matt. All frontend PRs are
+              reviewed by Tim. Consistent across all PRs in the data.
+Sources:
+  - Observable from every PR: Matt reviews Jack's backend PRs (#27, #35,
+    #52, #58). Tim reviews frontend PRs (#18, #39, #43, #55, #61).
+Established by: Team convention
+
+
+--- PATTERN PROC-2: PR description requirements ---
+
+Detail:       PR descriptions must include: what the feature/fix does, any
+              design decisions worth noting, and screenshots for UI changes.
+Sources:
+  - Confluence onboarding guide: PR Process section
+Established by: Team standard
+
+
+--- PATTERN PROC-3: Squash merge to main, auto-deploy to staging ---
+
+Detail:       All PRs are squash-merged to main. CI/CD automatically deploys
+              to staging on merge.
+Sources:
+  - Confluence onboarding guide: PR Process section
+Established by: Team standard
+
+
+--- PATTERN PROC-4: Large table migrations reviewed by Matt ---
+
+Detail:       After the May 2024 database migration incident, all future
+              migrations on tables over 10K rows must be reviewed by Matt
+              before deploying. CI pipeline flags ALTER TABLE on large tables.
+Sources:
+  - Confluence "Incident Postmortem — Database Migration Failure"
+  - Jira PAW-29
+Established by: Matt (post-incident rule)
+
+
+================================================================================
+CATEGORY 10: DATA MODEL AND INFRASTRUCTURE
+================================================================================
+
+
+--- PATTERN DATA-1: Pet data fields ---
+
+Detail:       Pet objects from the shelter partner integration include: name,
+              species, breed, age, gender, medical status (vaccinated,
+              spayed/neutered, special needs), temperament notes, photos
+              (URLs hosted by shelter or uploaded to CDN), availability status.
+Sources:
+  - Confluence "Shelter Partner Integration Spec"
+Established by: Documented in spec
+
+
+--- PATTERN DATA-2: 12 shelter partners across 3 states ---
+
+Detail:       PawFinder currently has 12 partner shelters across 3 states.
+              This is a small, bounded list.
+Sources:
+  - Confluence "Shelter Partner Integration Spec"
+Established by: Documented in spec
+
+
+--- PATTERN DATA-3: Existing pet API endpoints ---
+
+Detail:       The following pet API endpoints already exist:
+              - GET /api/v1/pets (list with filters for species, gender, age)
+              - GET /api/v1/pets/:id (individual pet profile)
+              - GET /api/v1/pets/adoptable (adoptable pets only)
+Sources:
+  - Jira PAW-3: "Build API endpoints for pet data"
+  - GitHub PR #18: pet profile cards consume these endpoints
+Established by: Matt (API), Tim (frontend consumption)
+
+
+--- PATTERN DATA-4: 15-minute sync cycle for shelter data ---
+
+Detail:       Shelter data (including pet availability) is synced every 15
+              minutes via a polling scheduler. Pet availability may be up to
+              15 minutes stale.
+Sources:
+  - Confluence "Shelter Partner Integration Spec"
+Established by: Documented in spec
+
+
+================================================================================
+PATTERN ID SUMMARY TABLE
+================================================================================
+
+ID        Short Name                              Category
+--------  --------------------------------------  -------------------------
+IMG-1     Lazy loading for pet photos             Image Loading
+IMG-2     Skeleton loading states                 Image Loading
+IMG-3     Species-specific image fallback         Image Loading
+GRID-1    Responsive grid breakpoints             Grid / Responsiveness
+GRID-2    44px minimum touch targets              Grid / Responsiveness
+GRID-3    Bottom nav bar on mobile                Grid / Responsiveness
+GRID-4    Hamburger menu at 768px                 Grid / Responsiveness
+COMP-1    React.memo + useCallback for grids      Component Architecture
+COMP-2    Promise.all for parallel API calls      Component Architecture
+COMP-3    Shared Toast component                  Component Architecture
+COMP-4    200ms CSS fade transition               Component Architecture
+NAV-1     Vertical sidebar for selection          Navigation / Layout
+NAV-2     Horizontal columns for comparison       Navigation / Layout
+NAV-3     Scrollable sidebar with max-height      Navigation / Layout
+NAV-4     1/3 left panel, 2/3 content split       Navigation / Layout
+NAV-5     Light yellow for differing values       Navigation / Layout
+NAV-6     Single column for forms                 Navigation / Layout
+API-1     Response envelope { data, meta }        API Design
+API-2     No pagination under ~20 items           API Design
+API-3     Cursor-based pagination for large lists API Design
+API-4     Parse DB strings into objects           API Design
+API-5     ISO 8601 for all dates                  API Design
+API-6     Idempotent DELETE                       API Design
+API-7     Stay on /api/v1                         API Design
+API-8     Validate uniqueness before insert       API Design
+API-9     Capacity check with 422                 API Design
+COLOR-1   Pink accent for female pets             Color / Visual Design
+COLOR-2   Blue accent for male pets               Color / Visual Design
+COLOR-3   Green for financial CTAs only           Color / Visual Design
+COLOR-4   White background for payment sections   Color / Visual Design
+COLOR-5   Blues/grays for non-financial pages      Color / Visual Design
+COLOR-6   Neutral blue for non-financial buttons  Color / Visual Design
+FILE-1    CSS Modules with camelCase              File / Folder Conventions
+FILE-2    Shared components in shared folder      File / Folder Conventions
+FILE-3    Page folder structure                   File / Folder Conventions
+FILE-4    API file structure                      File / Folder Conventions
+FILE-5    Migrations timestamped in /db/migrations File / Folder Conventions
+TEST-1    Vitest + RTL for frontend               Testing
+TEST-2    Jest for backend                        Testing
+TEST-3    Playwright E2E (known flaky)            Testing
+PROC-1    Matt reviews backend, Tim reviews FE    Process / Review
+PROC-2    PR description requirements             Process / Review
+PROC-3    Squash merge, auto-deploy to staging    Process / Review
+PROC-4    Large table migrations reviewed by Matt Process / Review
+DATA-1    Pet data fields                         Data Model
+DATA-2    12 shelters across 3 states             Data Model
+DATA-3    Existing pet API endpoints              Data Model
+DATA-4    15-minute sync cycle                    Data Model
+
+Total: 48 patterns
+================================================================================

@@ -541,7 +541,22 @@ export const attributeCompletionStep: StepFunction = async (ctx) => {
         let usageData: { promptTokens: number; completionTokens: number } | null = null;
         const result = await structuredGenerate({
           model,
-          system: "You generate concise entity descriptions from source excerpts. Be factual and specific. Each description should be 1-2 sentences.",
+          system: `You write short, useful descriptions that explain what something IS and WHY it matters.
+
+BANNED PATTERNS (never start with these or anything similar):
+- "A Jira ticket for...", "Ticket for...", "Ticket to..."
+- "A Confluence page about...", "Page about..."
+- "A Slack message regarding..."
+- "This entity represents...", "This is a..."
+- "An initiative to...", "A project to..."
+Never mention the source system (Jira, Confluence, Slack, GitHub) in the description. Never start with "Ticket" or "Task" -- describe the WORK itself.
+
+GOOD EXAMPLES:
+- "Backend REST API endpoints for user registration, session management, and profile updates. Requirements cover OAuth integration and rate limiting."
+- "Responsive grid layout displaying item cards with thumbnails, titles, and key metadata. Users can filter by category, sort by date, and paginate results."
+- "Consistent accent color applied to all payment-related CTAs to create a clear visual signal for financial actions across the platform."
+
+Each description: 3-5 sentences, active voice, plain English. Focus on WHAT it does, WHY it exists, what key technical decisions are involved, and what depends on it.`,
           prompt,
           schema: DescriptionSchema,
           logger,

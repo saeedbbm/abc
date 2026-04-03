@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import { buildNodeOwnerMap, getNodeOwnerNames } from "@/src/application/lib/kb2/owner-resolution";
+import { buildVerifyIssueLabel, cleanEntityTitle } from "@/src/application/lib/kb2/title-cleanup";
 import type {
   KB2ClaimType,
   KB2GraphNodeType,
@@ -95,6 +97,10 @@ const CONVENTION_FALLBACK_RE =
   /\b(convention|pattern|semantic color|color coding|vertical navigation|sidebar navigation|client-side|pagination|browse flow)\b/i;
 const PRIORITY_CONVENTION_RE =
   /\b(color|semantic color|green|vertical navigation|sidebar navigation|client-side|pagination|browse)\b/i;
+const BAD_ISSUE_SEED_RE = /\b(customer feedback ticket|kb item)\b/i;
+const DANGLING_ISSUE_END_RE = /\b(is|are|was|were|has|have|had|which|that|where|when|named|external|automated|no|with|to)\b$/i;
+const BAD_FINAL_ISSUE_START_RE = /^(is|was|were|are|has|have|had|does|did)\b/i;
+const BAD_FINAL_ISSUE_END_RE = /\b(is|are|was|were|has|have|had|no|with|to|on|entirely|explicitly)\b$/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -126,6 +132,217 @@ function getNodeAttributeList(node: KB2GraphNodeType | undefined, key: string): 
   return [];
 }
 
+function uniqueNames(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function normalizeTitleKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function hasStrongWordOverlap(left: string, right: string): boolean {
+  const leftWords = normalizeTitleKey(left).split(/\s+/).filter((word) => word.length > 2);
+  const rightWords = new Set(normalizeTitleKey(right).split(/\s+/).filter((word) => word.length > 2));
+  if (leftWords.length === 0 || rightWords.size === 0) return false;
+  const overlap = leftWords.filter((word) => rightWords.has(word)).length;
+  return overlap >= Math.min(2, leftWords.length) || overlap / leftWords.length >= 0.6;
+}
+
+function simplifyIssueSeed(issueSeed: string, entityTitle: string): string {
+  const fragments = issueSeed
+    .split(/\s+[—–-]\s+|:\s+/)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean);
+  if (fragments.length < 2) return issueSeed.trim();
+  for (let i = fragments.length - 1; i >= 0; i -= 1) {
+    const fragment = fragments[i];
+    if (!hasStrongWordOverlap(fragment, entityTitle)) {
+      return fragment;
+    }
+  }
+  return fragments[fragments.length - 1];
+}
+
+function normalizeIssueText(value: string | null | undefined): string {
+  if (!value) return "";
+  return value.replace(/\s+/g, " ").replace(/[?]+$/g, "").trim();
+}
+
+function firstOtherAffectedEntityName(
+  entityTitle: string,
+  affectedEntityNames: string[],
+): string | null {
+  const entityKey = normalizeTitleKey(entityTitle);
+  for (const name of affectedEntityNames) {
+    const cleaned = cleanEntityTitle(name);
+    if (!cleaned) continue;
+    const key = normalizeTitleKey(cleaned);
+    if (key && key !== entityKey) return cleaned;
+  }
+  return null;
+}
+
+function deriveIssueLabelFromSignals(params: {
+  entityTitle: string;
+  candidate: RawCandidate;
+  rawTitle: string;
+  node?: KB2GraphNodeType;
+  page?: KB2EntityPageType;
+  verificationQuestion?: string;
+  requiredData?: string[];
+  missingEvidence?: string[];
+  affectedEntityNames?: string[];
+}): { subjectTitle: string; issueLabel: string | null } {
+  const subjectTitle = params.entityTitle;
+  const affectedEntityNames = params.affectedEntityNames ?? [];
+  const question = normalizeIssueText(params.verificationQuestion);
+  const combinedText = normalizeIssueText([
+    params.rawTitle,
+    params.candidate.raw_text,
+    question,
+    ...(params.requiredData ?? []),
+    ...(params.missingEvidence ?? []),
+    ...affectedEntityNames,
+  ].join(" "));
+
+  const explicitProjectRoleMatch =
+    question.match(/^Did\s+(.+?)\s+propose\s+the\s+(.+?)\s+project\b/i)
+    ?? question.match(/^Has\s+(.+?)\s+been formally assigned to\b.*?\bto the\s+(.+?)(?:\s+Project)?(?:,|\?|$)/i)
+    ?? question.match(/^(?:Does|Did)\s+(.+?)\s+have\b.*?\bon the\s+(.+?)(?:,|\?|$)/i);
+  if (explicitProjectRoleMatch) {
+    const personName = cleanEntityTitle(explicitProjectRoleMatch[1]);
+    const projectTitle = cleanEntityTitle(explicitProjectRoleMatch[2], "project");
+    if (personName && projectTitle) {
+      const roleLabel =
+        /\bassigned\b|\bassignee\b/i.test(question)
+          ? "Confirm Project Assignee"
+          : /\bpropose|owner|owned|initiated|attribut(?:ed|ion)\b/i.test(question)
+            ? "Confirm Project Owner"
+            : `Confirm ${personName}'s Role`;
+      return {
+        subjectTitle: projectTitle,
+        issueLabel: buildVerifyIssueLabel(roleLabel),
+      };
+    }
+  }
+
+  const alternateSubject =
+    params.node?.type === "team_member" || params.page?.node_type === "team_member"
+      ? firstOtherAffectedEntityName(params.entityTitle, affectedEntityNames)
+      : null;
+
+  if (
+    alternateSubject &&
+    /\b(propose|proposed|assigned|assignment|role|owner|assignee|attribut(?:ed|ion)|initiated)\b/i.test(combinedText)
+  ) {
+    const roleLabel =
+      /\bassigned\b|\bassignee\b/i.test(combinedText)
+        ? "Confirm Project Assignee"
+        : /\bpropose|owner|initiated|attribut(?:ed|ion)\b/i.test(combinedText)
+          ? "Confirm Project Owner"
+          : `Confirm ${params.entityTitle}'s role`;
+    return {
+      subjectTitle: alternateSubject,
+      issueLabel: buildVerifyIssueLabel(roleLabel),
+    };
+  }
+
+  const directRules: Array<{ re: RegExp; label: string }> = [
+    { re: /\bjavascript framework\b|\bfrontend framework\b|\bnext\.js\b|\breact\b|\bvue\b|\bangular\b/i, label: "Confirm Frontend Framework" },
+    { re: /\bpayment processor\b|\bpayment gateway\b|\bstripe\b|\bbraintree\b|\bpaypal\b|\bpci\b/i, label: "Confirm Payment Processor" },
+    { re: /\bmap service\b|\bmap provider\b|\bmapbox\b|\bgoogle maps\b|\bleaflet\b|\bopenstreetmap\b/i, label: "Confirm Map Provider" },
+    { re: /\bfallback color\b|\bfallback style\b|\bunknown gender\b|\bnon-binary\b|\bwithout a binary gender value\b|\bgender is not male or female\b/i, label: "Fallback for Unknown Gender" },
+    { re: /\bpet adoption chooser\b|\b8.?15\b|\bhard business constraint\b|\bdataset size\b|\bupper bound\b|\bclient-side pagination\b/i, label: "Confirm Pet Count Limit" },
+    { re: /\bconsidered and rejected\b|\bdiscussed and rejected\b|\brejected\b.*\balternative\b|\balternative\b.*\brejected\b|\bnever formally considered\b/i, label: "Confirm Rejected Alternative" },
+    { re: /\bintegration between\b|\bintegration with\b|\bconfirmed technical requirement\b|\bconfirmed requirement\b|\bconfirmed integration plan\b|\bteam confirmed\b.*\bintegrate\b|\bintegrate directly\b|\bformally require(?:s|d)? integration\b|\bformally planned and ticketed\b|\bscoped in a ticket\b|\bcustomer-suggested flow\b|\bcustomer suggestion\b|\bdesign doc\b/i, label: "Confirm Planned Integration" },
+    { re: /\bformally scoped or ticketed\b|\bformalized into tickets\b|\bproject scope\b/i, label: "Confirm Ticketed Scope" },
+    { re: /\bstandard\b.*\bfinalized\b|\bplanning to adopt\b|\badopt(?:ed|ion|ing)?\b|\bscheduled adoption\b/i, label: "Confirm Standard Adoption" },
+    { re: /\bdocumented process\b|\bwritten documentation\b|\bwhere is it\b/i, label: "Confirm Documented Process" },
+    { re: /\blisted as affected\b|\bwhat does ['"].+['"] refer to\b|\baffected by a card styling rule\b/i, label: "Confirm Affected Scope" },
+    { re: /\blazy loading\b.*\bimplemented\b|\bimplementation status\b|\bstill pending\b|\bresolved another way\b/i, label: "Confirm Implementation Status" },
+    { re: /\bstale\b|\bstaleness criteria\b|\bdocumented definition\b|\bwhat qualifies\b/i, label: "Confirm Staleness Criteria" },
+    { re: /\bowner\b|\bassignee\b|\bassigned to\b/i, label: "Confirm Owner" },
+  ];
+
+  for (const rule of directRules) {
+    if (rule.re.test(combinedText)) {
+      return { subjectTitle, issueLabel: buildVerifyIssueLabel(rule.label) };
+    }
+  }
+
+  if (question) {
+    const questionRules: Array<{ re: RegExp; label: string }> = [
+      { re: /^What\s+JavaScript framework\b|^What\s+frontend framework\b/i, label: "Confirm Frontend Framework" },
+      { re: /^Which\s+payment processor\b/i, label: "Confirm Payment Processor" },
+      { re: /^Which\s+map service(?: or library)?\b/i, label: "Confirm Map Provider" },
+      { re: /^Is\s+there\s+(?:a\s+)?defined fallback (?:color|style)\b/i, label: "Fallback for Unknown Gender" },
+      { re: /^Is\s+the\b.*\b(?:dataset size|upper bound|constraint)\b/i, label: "Confirm Pet Count Limit" },
+      { re: /^Was\s+passing raw database date formats\b/i, label: "Confirm Rejected Alternative" },
+      { re: /^Was\s+raw DB date pass-through\b/i, label: "Confirm Rejected Alternative" },
+      { re: /^Is\s+the integration between\b|^Is\s+integration with\b/i, label: "Confirm Planned Integration" },
+      { re: /^Has\s+the integration between\b/i, label: "Confirm Planned Integration" },
+      { re: /^Has\s+the team confirmed that\b.*\bintegrate\b/i, label: "Confirm Planned Integration" },
+      { re: /^Have\b.*\bbeen formally scoped or ticketed\b/i, label: "Confirm Ticketed Scope" },
+      { re: /^Has\s+the\b.*\bbeen finalized\b/i, label: "Confirm Standard Adoption" },
+      { re: /^Has\s+the PetSync data standard\b/i, label: "Confirm Standard Adoption" },
+      { re: /^Does\s+a documented process exist\b/i, label: "Confirm Documented Process" },
+      { re: /^Does\b.*\blisted as affected\b|^What does ['"].+['"] refer to\b/i, label: "Confirm Affected Scope" },
+      { re: /^Was\b.*\bimplemented\b/i, label: "Confirm Implementation Status" },
+      { re: /^Is\s+there\s+a documented definition or criteria\b.*\bstale\b/i, label: "Confirm Staleness Criteria" },
+    ];
+    for (const rule of questionRules) {
+      if (rule.re.test(question)) {
+        return { subjectTitle, issueLabel: buildVerifyIssueLabel(rule.label) };
+      }
+    }
+
+    const whichThing = question.match(/^Which\s+(.+?)\s+(?:does|do|is|are|was|were)\b/i)?.[1];
+    if (whichThing) {
+      return {
+        subjectTitle,
+        issueLabel: buildVerifyIssueLabel(`Confirm ${whichThing}`),
+      };
+    }
+  }
+
+  const primaryRequiredData = normalizeIssueText((params.requiredData ?? [])[0]);
+  if (primaryRequiredData) {
+    const requiredRules: Array<{ re: RegExp; label: string }> = [
+      { re: /\bfrontend framework\b|\bjavascript framework\b|\bnext\.js\b|\breact\b|\bvue\b|\bangular\b/i, label: "Confirm Frontend Framework" },
+      { re: /\bpayment processor\b|\bpayment gateway\b|\bstripe\b|\bbraintree\b|\bpaypal\b/i, label: "Confirm Payment Processor" },
+      { re: /\bmap service\/library name\b|\bmap service\b/i, label: "Confirm Map Provider" },
+      { re: /\bfallback color or style\b|\bnon-binary\b|\bunknown gender\b/i, label: "Fallback for Unknown Gender" },
+      { re: /\bremain small\b|\b8.?15\b|\bdataset size\b/i, label: "Confirm Pet Count Limit" },
+      { re: /\brejected\b|\balternative\b|\bformally considered\b/i, label: "Confirm Rejected Alternative" },
+      { re: /\bplanned\b|\bconfirmed integration plan\b|\bconfirmed technical requirement\b|\bconfirmed requirement\b|\bintegration plan\b|\bintegration with\b|\brequire integration\b|\bticket\b|\bcustomer suggestion\b|\bdesign doc\b/i, label: "Confirm Planned Integration" },
+      { re: /\bformalized into tickets\b|\bproject scope\b/i, label: "Confirm Ticketed Scope" },
+      { re: /\bcurrent status\b.*\bstandard\b|\badopt(?:ed|ion|ing)?\b/i, label: "Confirm Standard Adoption" },
+      { re: /\bwritten documentation\b|\bdocumented\b/i, label: "Confirm Documented Process" },
+      { re: /\baffected\b|\brefer to in this context\b/i, label: "Confirm Affected Scope" },
+      { re: /\bimplementation status\b|\bimplemented\b|\brejected\b|\bpending\b/i, label: "Confirm Implementation Status" },
+      { re: /\bdefinition of ['"]?stale['"]?\b|\bstaleness\b/i, label: "Confirm Staleness Criteria" },
+      { re: /\bowner\b|\bassignee\b/i, label: "Confirm Owner" },
+    ];
+    for (const rule of requiredRules) {
+      if (rule.re.test(primaryRequiredData)) {
+        return { subjectTitle, issueLabel: buildVerifyIssueLabel(rule.label) };
+      }
+    }
+  }
+
+  return { subjectTitle, issueLabel: null };
+}
+
 function getSourceTitles(sourceRefs: KB2EvidenceRefType[]): string[] {
   return Array.from(
     new Set(
@@ -134,6 +351,49 @@ function getSourceTitles(sourceRefs: KB2EvidenceRefType[]): string[] {
         .filter((title): title is string => Boolean(title)),
     ),
   ).slice(0, 4);
+}
+
+function normalizeEvidenceRef(
+  ref: Partial<KB2EvidenceRefType> | Record<string, unknown> | undefined,
+): KB2EvidenceRefType | null {
+  if (!ref) return null;
+  const sourceType = typeof ref.source_type === "string" ? ref.source_type : "";
+  const docId = typeof ref.doc_id === "string" ? ref.doc_id.trim() : "";
+  const title = typeof ref.title === "string" ? ref.title.trim() : "";
+  if (!sourceType || !docId || !title) return null;
+  const excerpt = typeof ref.excerpt === "string" ? ref.excerpt : "";
+  const sectionHeading = typeof ref.section_heading === "string" && ref.section_heading.trim().length > 0
+    ? ref.section_heading.trim()
+    : undefined;
+  return {
+    source_type: sourceType as KB2EvidenceRefType["source_type"],
+    doc_id: docId,
+    title,
+    excerpt,
+    ...(sectionHeading ? { section_heading: sectionHeading } : {}),
+  };
+}
+
+function dedupeEvidenceRefs(
+  sourceRefs: Array<Partial<KB2EvidenceRefType> | Record<string, unknown> | undefined>,
+): KB2EvidenceRefType[] {
+  const seen = new Set<string>();
+  const out: KB2EvidenceRefType[] = [];
+  for (const ref of sourceRefs) {
+    const normalized = normalizeEvidenceRef(ref);
+    if (!normalized) continue;
+    const key = [
+      normalized.source_type,
+      normalized.doc_id,
+      normalized.title,
+      normalized.section_heading ?? "",
+      normalized.excerpt,
+    ].join("::");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out;
 }
 
 function collectPageText(page: KB2EntityPageType): string {
@@ -203,6 +463,125 @@ function extractLikelyOwnerNames(
   return Array.from(names);
 }
 
+function fallbackIssueLabel(candidate: RawCandidate): string {
+  const missingSection = candidate.raw_text.match(/Missing "([^"]+)"/i)?.[1];
+  switch (candidate.type) {
+    case "unknown_owner":
+      return "Missing Owner";
+    case "missing_must":
+      return missingSection
+        ? `Missing ${buildVerifyIssueLabel(missingSection)}`
+        : "Missing Required Section";
+    case "low_confidence":
+      return "Confirm Key Detail";
+    case "inferred_claim":
+      return "Confirm Supporting Evidence";
+    case "duplicate_cluster":
+      return "Possible Duplicate";
+    case "conflict":
+      return "Conflicting Facts";
+    case "edit_proposal":
+      return "Review Proposed Edit";
+    default:
+      return "Needs Review";
+  }
+}
+
+function normalizeVerifyCardTitle(params: {
+  candidate: RawCandidate;
+  rawTitle: string;
+  node?: KB2GraphNodeType;
+  page?: KB2EntityPageType;
+  verificationQuestion?: string;
+  requiredData?: string[];
+  missingEvidence?: string[];
+  affectedEntityNames?: string[];
+}): string {
+  const entityTitle = cleanEntityTitle(
+    params.page?.title ??
+      params.node?.display_name ??
+      params.candidate.entity_name ??
+      params.candidate.page_title ??
+      "KB Item",
+    params.node?.type,
+  );
+  const cleanedRawTitle = cleanEntityTitle(params.rawTitle);
+  const derived = deriveIssueLabelFromSignals({
+    entityTitle,
+    candidate: params.candidate,
+    rawTitle: params.rawTitle,
+    node: params.node,
+    page: params.page,
+    verificationQuestion: params.verificationQuestion,
+    requiredData: params.requiredData,
+    missingEvidence: params.missingEvidence,
+    affectedEntityNames: params.affectedEntityNames,
+  });
+  const entityPrefix = new RegExp(`^${escapeRegExp(entityTitle)}\\s*[—:-]\\s*`, "i");
+  let issueSeed = cleanedRawTitle.replace(entityPrefix, "").trim();
+  issueSeed = simplifyIssueSeed(issueSeed, entityTitle);
+  let issueLabel = derived.issueLabel ?? (params.candidate.type === "unknown_owner"
+    ? "Missing Owner"
+    : issueSeed
+      ? buildVerifyIssueLabel(issueSeed)
+      : "");
+  const quoteCount = (issueSeed.match(/['"]/g) ?? []).length;
+  const entityKey = normalizeTitleKey(entityTitle);
+  const issueKey = normalizeTitleKey(issueSeed);
+
+  if (!derived.issueLabel && params.node?.type === "team_member" && /\bproposed\b|\battributed\b/i.test(issueSeed)) {
+    issueLabel = "Project Attribution";
+  } else if (!derived.issueLabel && /\brequires integration with\b/i.test(issueSeed)) {
+    issueLabel = "Needs Integration Detail";
+  }
+
+  if (
+    !derived.issueLabel && (
+      !issueLabel ||
+      issueLabel.toLowerCase() === entityTitle.toLowerCase() ||
+      /[.!?]/.test(issueSeed) ||
+      BAD_ISSUE_SEED_RE.test(issueSeed) ||
+      DANGLING_ISSUE_END_RE.test(issueSeed) ||
+      quoteCount % 2 === 1 ||
+      issueKey === entityKey
+    )
+  ) {
+    issueLabel = fallbackIssueLabel(params.candidate);
+  }
+
+  if (
+    !issueLabel ||
+    (!derived.issueLabel && hasStrongWordOverlap(issueLabel, entityTitle)) ||
+    BAD_FINAL_ISSUE_START_RE.test(issueLabel) ||
+    BAD_FINAL_ISSUE_END_RE.test(issueLabel) ||
+    /\bcontingent on\b/i.test(issueLabel)
+  ) {
+    issueLabel = fallbackIssueLabel(params.candidate);
+  }
+
+  return `${derived.subjectTitle} — ${issueLabel}`;
+}
+
+function inferAssignedOwners(
+  node: KB2GraphNodeType | undefined,
+  ownerSignals: string[],
+  teamMemberNames: string[],
+  ownershipMap: Map<string, string[]>,
+  edgesByNode: Map<string, { edge: KB2GraphEdgeType; other: KB2GraphNodeType | undefined }[]>,
+): string[] {
+  const graphOwners = getNodeOwnerNames(node, ownershipMap);
+  if (graphOwners.length > 0) return graphOwners;
+  if (node) {
+    const relatedOwners = uniqueNames(
+      (edgesByNode.get(node.node_id) ?? [])
+        .filter((entry) => entry.edge.type === "RELATED_TO")
+        .flatMap((entry) => getNodeOwnerNames(entry.other, ownershipMap)),
+    );
+    if (relatedOwners.length > 0) return relatedOwners;
+  }
+  return extractLikelyOwnerNames(node, ownerSignals, teamMemberNames);
+}
+
 function buildForcedConventionOwnershipCard(params: {
   executionId: string;
   runId: string;
@@ -225,13 +604,13 @@ function buildForcedConventionOwnershipCard(params: {
     execution_id: params.executionId,
     card_type: "unknown_owner",
     severity: "S1",
-    title: `${params.node.display_name} — confirm ${params.likelyOwner} is the named decision maker/owner`,
+    title: `${cleanEntityTitle(params.node.display_name, "decision")} — Missing Owner`,
     explanation:
-      `The "${params.node.display_name}" convention is applied across multiple browse flows, but the KB does not store a canonical owner/decision maker. ` +
-      `Page evidence points to ${params.likelyOwner}; if that attribution is missing or wrong, downstream answers about why this convention exists and who set it will be unreliable.`,
+      `The "${params.node.display_name}" convention is missing canonical owner metadata. ` +
+      `Page evidence points to ${params.likelyOwner}; if that attribution is wrong, downstream explanations about who established this convention will be unreliable.`,
     problem_explanation:
-      `The "${params.node.display_name}" convention is applied across multiple browse flows, but the KB does not store a canonical owner/decision maker. ` +
-      `Page evidence points to ${params.likelyOwner}; if that attribution is missing or wrong, downstream answers about why this convention exists and who set it will be unreliable.`,
+      `The "${params.node.display_name}" convention is missing canonical owner metadata. ` +
+      `Page evidence points to ${params.likelyOwner}; if that attribution is wrong, downstream explanations about who established this convention will be unreliable.`,
     supporting_evidence: supportingEvidence,
     missing_evidence: [
       `Confirm whether ${params.likelyOwner} is the primary decision maker for "${params.node.display_name}".`,
@@ -246,7 +625,7 @@ function buildForcedConventionOwnershipCard(params: {
       "Confirm the convention owner and update the canonical convention node/page with explicit attribution metadata.",
     page_occurrences: [{ page_id: params.page.page_id, page_type: "entity", page_title: params.page.title }],
     source_refs: params.sourceRefs,
-    assigned_to: [],
+    assigned_to: [params.likelyOwner],
     claim_ids: [],
     status: "open",
     discussion: [],
@@ -410,17 +789,30 @@ SEVERITY RUBRIC:
 - S3 (Medium): Organizational/process claims, team membership, project status
 - S4 (Low): Nice-to-know, cosmetic, low-impact gaps like missing optional info
 
-RULES:
+TITLE RULES (MANDATORY):
+- Max 10 words. Entity name first, then the issue. Example: "PostgreSQL — Missing Connection Config"
+- No hedging in titles: never use "may", "potentially", "appears to", "based on evidence", "it seems that"
+- No sentences in titles. Use entity-dash-issue format: "[Entity Name] — [Issue]"
+- Hedging and nuance belong ONLY in verification_question and problem_explanation, never in the title
+- The issue must name the specific fact/field to verify. Good: "Confirm Map Provider", "Missing Owner", "Confirm Pet Count Limit"
+- Never use generic issue labels like "Needs Verification", "Inferred Claim", "Confirm Convention Attribution", or "Confirm Request Synthesis"
+
+CONTENT RULES:
 - Filter out noise: if a candidate is trivially true, obvious, or would waste a reviewer's time, set keep: false
-- Write a specific, human-friendly title (not generic like "Inferred claim needs verification")
-- Write a description that explains what's at stake if this is wrong
+- problem_explanation: 2-3 sentences max. First sentence: what's wrong. Second: why it matters. No filler.
+- verification_question: One specific question the reviewer can answer quickly. Not a paragraph.
+- supporting_evidence: Only include if genuinely useful. Omit raw chat quotes that don't add clarity.
+- missing_evidence: Short bullet phrases, not full sentences. Example: "Owner's full name" not "The full name of the team member who owns this"
+- required_data: Only what the reviewer actually needs to provide. Skip if not applicable.
+- recommended_action: One short sentence. Example: "Confirm with the team lead" not "It is recommended that a team member reach out to confirm..."
 - Missing section cards for sections unlikely to have data should be S4 or filtered
 - Unknown owner cards for minor libraries or tools should be S4 or filtered
 - Inferred claims about critical systems (payments, auth, databases) should be S1 or S2
 - Discovery items (truth_status=inferred, from conversation analysis) should only get S1/S2 cards if they represent critical factual claims. Most discovery items are S3 or should be filtered.
 - Convention/pattern entities are inherently inferred — do NOT create cards questioning their existence. Only create cards if a specific factual claim within them is questionable.
+- Do NOT create a card just because a page or project was synthesized from multiple signals. Keep a card only when there is a concrete unresolved fact a human can answer.
 - Missing canonical owner/decision-maker attribution on a cross-cutting convention or pattern is high-signal and should usually be S1 or S2.
-- Uncertainty around proposed or undocumented project status can mislead roadmap and how-to guidance, so those cards should usually be S2 when the project appears important.`;
+- Write like a knowledgeable teammate: short, direct, plain English. No filler intros or AI-style summaries.`;
 
   const claimsExecId = await ctx.getStepExecutionId("pass1", 17);
   const claimsFilter = claimsExecId ? { execution_id: claimsExecId } : { run_id: ctx.runId };
@@ -458,7 +850,7 @@ RULES:
   for (const ep of entityPages) pageByNodeId.set(ep.node_id, ep);
 
   const edgesByNode = new Map<string, { edge: KB2GraphEdgeType; other: KB2GraphNodeType | undefined }[]>();
-  const ownershipMap = new Map<string, string[]>();
+  const ownershipMap = buildNodeOwnerMap(nodes, edges);
   for (const edge of edges) {
     const srcEntry = edgesByNode.get(edge.source_node_id) ?? [];
     srcEntry.push({ edge, other: nodeById.get(edge.target_node_id) });
@@ -467,17 +859,6 @@ RULES:
     const tgtEntry = edgesByNode.get(edge.target_node_id) ?? [];
     tgtEntry.push({ edge, other: nodeById.get(edge.source_node_id) });
     edgesByNode.set(edge.target_node_id, tgtEntry);
-
-    if (edge.type === "OWNED_BY" || edge.type === "LEADS") {
-      const target = nodeById.get(edge.target_node_id);
-      if (target?.type === "team_member") {
-        const existing = ownershipMap.get(edge.source_node_id) ?? [];
-        if (!existing.includes(target.display_name)) {
-          existing.push(target.display_name);
-          ownershipMap.set(edge.source_node_id, existing);
-        }
-      }
-    }
   }
 
   // ------ Phase 1: Gather all candidates ------
@@ -700,11 +1081,18 @@ RULES:
   for (const entry of finalEntries) {
     const { llmCard, candidate, page, node } = entry;
 
-    let assignedTo: string[] = [];
-    if (page) {
-      assignedTo = ownershipMap.get(page.node_id) ?? [];
-    } else if (node) {
-      assignedTo = ownershipMap.get(node.node_id) ?? [];
+    const assignedTo = inferAssignedOwners(
+      page ? nodeById.get(page.node_id) ?? node : node,
+      entry.ownerSignals,
+      teamMemberNames,
+      ownershipMap,
+      edgesByNode,
+    );
+    if (node?.type === "customer_feedback" && assignedTo.length === 0) {
+      continue;
+    }
+    if (!page && !node && assignedTo.length === 0) {
+      continue;
     }
 
     const affectedEntities: { entity_name: string; entity_type?: string; relationship?: string }[] = [];
@@ -719,7 +1107,16 @@ RULES:
       execution_id: ctx.executionId,
       card_type: candidate.type,
       severity: entry.adjustedSeverity,
-      title: llmCard.title,
+      title: normalizeVerifyCardTitle({
+        candidate,
+        rawTitle: llmCard.title,
+        page,
+        node,
+        verificationQuestion: llmCard.verification_question,
+        requiredData: llmCard.required_data,
+        missingEvidence: llmCard.missing_evidence,
+        affectedEntityNames: llmCard.affected_entity_names,
+      }),
       explanation: llmCard.problem_explanation ?? llmCard.title,
       problem_explanation: llmCard.problem_explanation,
       supporting_evidence: llmCard.supporting_evidence ?? [],
@@ -791,7 +1188,7 @@ RULES:
       page_title: page.title,
       source_titles: getSourceTitles(forcedCard.source_refs),
       claim_ids: [],
-      assigned_to: [],
+      assigned_to: forcedCard.assigned_to,
       owner_signals: ownerSignals.slice(0, 2),
       verification_question: forcedCard.verification_question ?? null,
       explanation: (forcedCard.problem_explanation ?? forcedCard.explanation).slice(0, 260),
@@ -801,6 +1198,36 @@ RULES:
     cardSamples.unshift(sample);
     if (cardSamples.length > 5) cardSamples.pop();
   }
+
+  // ------ Phase 5: Deduplicate cards ------
+  const seenTitleKeys = new Set<string>();
+  const seenEntityTypeKeys = new Set<string>();
+  const deduplicatedCards: KB2VerificationCardType[] = [];
+  for (const card of finalCards) {
+    const titleKey = card.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const words = titleKey.split(/\s+/).sort().join(" ");
+    if (seenTitleKeys.has(words)) continue;
+    seenTitleKeys.add(words);
+
+    if (card.card_type === "duplicate_cluster") {
+      const entities = (card.affected_entities ?? []).map(e => e.entity_name).sort();
+      const pairKey = `dup:${entities.join("|")}`;
+      if (seenTitleKeys.has(pairKey)) continue;
+      seenTitleKeys.add(pairKey);
+    }
+
+    const pageId = card.page_occurrences?.[0]?.page_id;
+    if (pageId) {
+      const entityTypeKey = `${card.card_type}:${pageId}`;
+      if (seenEntityTypeKeys.has(entityTypeKey)) continue;
+      seenEntityTypeKeys.add(entityTypeKey);
+    }
+
+    deduplicatedCards.push(card);
+  }
+  const deduped = finalCards.length - deduplicatedCards.length;
+  finalCards.length = 0;
+  finalCards.push(...deduplicatedCards);
 
   const keptCandidateIndexes = new Set(finalEntries.map((entry) => entry.candidateIndex));
   const filteredCandidateSamples = candidates
@@ -848,11 +1275,12 @@ RULES:
     byType["duplicate_cluster"] = existingDupCards.length;
   }
 
-  await ctx.onProgress(`Created ${totalCards} verification cards (${filteredOut} filtered as noise)`, 100);
+  await ctx.onProgress(`Created ${totalCards} verification cards (${filteredOut} filtered, ${deduped} deduped)`, 100);
   return {
     total_cards: totalCards,
     candidates_gathered: candidates.length,
     filtered_out: filteredOut,
+    deduplicated: deduped,
     by_type: byType,
     by_severity: finalCards.reduce((acc, c) => {
       acc[c.severity] = (acc[c.severity] || 0) + 1;

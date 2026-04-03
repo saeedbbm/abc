@@ -19,40 +19,82 @@ judge_should_look_at:
   - sampled how-to guides
   - whether guides cover the right proposed targets
   - whether guides reference actual conventions, decisions, and related entities
+  - whether guides cite direct source artifacts for concrete implementation claims
+  - whether guides surface related-project implementation patterns beyond high-level convention names
 
 must_do:
   - generate guides for the right proposed work items
   - include convention guidance when APPLIES_TO edges or equivalent evidence exist
   - provide concrete implementation guidance rather than generic product advice
   - stay grounded in existing systems, patterns, and constraints from the KB
+  - mention source artifacts when making concrete implementation claims
+  - turn relevant convention evidence into feature-specific implementation choices
+  - reuse related-project implementation patterns when the sources show a similar surface or component pattern
 
 must_not_do:
   - exclude proposed projects or features just because they are not ticket-shaped
   - invent conventions that are missing from the graph
   - generate generic how-tos that ignore discovered team patterns
+  - cite vague non-artifacts like "existing patterns" when a real source title is available
+  - collapse convention guidance down to naming the convention without the implementation choice it implies
 
 success_signals:
   - guides are specific enough to implement against
   - proposed feature guides inherit the right conventions from the graph
   - sampled guides mention relevant existing pages, systems, and risks
+  - sampled guides name the convention owner when applying an owner-backed convention
+  - sampled guides cite real PRs, Slack threads, or ticket keys for concrete implementation steps
+  - sampled guides include company-specific prescriptions that would not appear in a generic implementation plan
 
 failure_signals:
   - guides are generated only for ticket-like discoveries
   - important proposed features are skipped
   - convention-aware guidance is missing despite graph evidence
+  - guides mention a convention name but never explain the concrete implementation choice it requires
+  - concrete implementation claims appear without direct source artifacts
+  - guides sound plausible but could have been produced without the company's KB
 
 deterministic_checks:
   - key: howto_count_positive_when_proposed_work_exists
     description: Proposed work should yield how-to guides.
     mode: gte
     target: 1
+  - key: direct_technical_source_count_positive
+    description: How-to generation should use direct technical source evidence.
+    mode: gte
+    target: 1
+  - key: convention_reference_coverage_pct
+    description: When convention constraints exist, a healthy share should be referenced in the generated guides.
+    mode: gte
+    target: 60
+  - key: step_evidence_coverage_pct
+    description: A healthy share of implementation steps should retain source evidence.
+    mode: gte
+    target: 60
+  - key: implementation_reference_count_positive
+    description: Related-project implementation patterns should be surfaced when available.
+    mode: gte
+    target: 1
   - key: sampled_howtos_reference_real_entities
     description: Sampled guides should cite actual KB entities, patterns, or systems.
+    mode: eq
+    target: 1
+  - key: sampled_howtos_name_ownered_conventions
+    description: Sampled guides should name the owner when applying owner-backed conventions.
+    mode: eq
+    target: 1
+  - key: sampled_howtos_include_kb_specific_prescriptions
+    description: Sampled guides should include concrete prescriptions that could only come from the KB.
+    mode: eq
+    target: 1
+  - key: sampled_howtos_cite_real_artifacts
+    description: Sampled guides should cite real PR, Slack, or ticket artifacts rather than vague references.
     mode: eq
     target: 1
 
 go_no_go:
   proceed_when:
-    - proposed-work guides are concrete and convention-aware
+    - proposed-work guides are concrete, convention-aware, and artifact-grounded
   block_when:
     - important proposed features are skipped or guides are generic
+    - concrete guidance is present without direct source grounding

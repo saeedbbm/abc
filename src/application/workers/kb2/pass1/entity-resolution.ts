@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getTenantCollections } from "@/lib/mongodb";
 import { getFastModel, getFastModelName, getReasoningModel, getReasoningModelName, calculateCostUsd } from "@/lib/ai-model";
 import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import { getNodeAttributeOwnerNames } from "@/src/application/lib/kb2/owner-resolution";
 import { appendUniqueSourceRefs } from "@/src/application/lib/kb2/pass1-v2-artifacts";
 import type { KB2GraphNodeType, KB2VerificationCardType } from "@/src/entities/models/kb2-types";
 import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
@@ -1079,6 +1080,10 @@ ${summarizeNodeEvidence(pair.nodeB)}`;
           (p.nodeA.display_name === decision.entity_b && p.nodeB.display_name === decision.entity_a),
         );
         if (pair && !mergedNodeIds.has(pair.nodeA.node_id) && !mergedNodeIds.has(pair.nodeB.node_id)) {
+          const assignedTo = [...new Set([
+            ...getNodeAttributeOwnerNames(pair.nodeA),
+            ...getNodeAttributeOwnerNames(pair.nodeB),
+          ])];
           ambiguousCards.push({
             card_id: randomUUID(),
             run_id: ctx.runId,
@@ -1104,7 +1109,7 @@ ${summarizeNodeEvidence(pair.nodeB)}`;
             }),
             page_occurrences: [],
             source_refs: [...pair.nodeA.source_refs.slice(0, 3), ...pair.nodeB.source_refs.slice(0, 3)],
-            assigned_to: [],
+            assigned_to: assignedTo,
             claim_ids: [],
             status: "open",
             discussion: [],

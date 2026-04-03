@@ -26,7 +26,7 @@ const COMPANY_OVERVIEW_FALLBACK_TYPES = ["repository", "project", "team", "team_
 const GeneratedHumanPageSchema = z.object({
   paragraphs: z.array(z.object({
     heading: z.string(),
-    body: z.string(),
+    body: z.string().describe("1-2 context sentences then bullet points (- item). NEVER a single block of prose. Use \\n between lines."),
     entity_refs: z.array(z.string()),
     used_items: z.array(z.object({
       entity_name: z.string(),
@@ -148,10 +148,26 @@ export const generateHumanPagesStep: StepFunction = async (ctx) => {
     }
     let filteredRelatedPages = relatedPages;
     if (hpDef.category === "hidden_conventions") {
-      filteredRelatedPages = relatedPages.filter((ep) => {
+      const conventionPages = relatedPages.filter((ep) => {
         const node = nodeById.get(ep.node_id);
         return node?.type === "team_member" || node?.attributes?.is_convention === true;
       });
+      if (conventionPages.length > 0) {
+        filteredRelatedPages = conventionPages;
+      } else {
+        filteredRelatedPages = relatedPages.filter((ep) => {
+          const node = nodeById.get(ep.node_id);
+          if (!node) return false;
+          if (node.type === "team_member") return true;
+          if (node.type === "decision") {
+            const attrs = node.attributes as Record<string, any> | undefined;
+            return attrs?.is_convention === true
+              || typeof attrs?.pattern_rule === "string"
+              || typeof attrs?.established_by === "string";
+          }
+          return false;
+        });
+      }
     }
     let cappedPages = filteredRelatedPages.slice(0, MAX_ENTITY_PAGES);
 
@@ -224,8 +240,20 @@ Layer: ${hpDef.layer}
 Purpose: ${hpDef.description}
 ${conventionCategoryPrompt}
 Rules:
-- Write clear, professional prose paragraphs (not bullet lists).
+- Write like a knowledgeable colleague explaining things to a new team member. Short sentences, active voice, plain English.
+- FORMATTING IS CRITICAL: Every paragraph MUST follow this structure:
+  1. Start with 1-2 short sentences that set context.
+  2. Then list the key details as bullet points, one fact per bullet. Use "- " as the bullet marker.
+  3. NEVER write a paragraph as one continuous block of text. Always break facts into bullets.
+  Example:
+    The platform connects users with partner locations.
+    - 12 active partners across 3 regions
+    - Supports browsing, applications, and transactions
+    - Staff manage data through a dedicated dashboard
 - Each paragraph should have a descriptive heading.
+- No filler intros ("Based on the analysis...", "This section covers..."). Get to the content directly.
+- No hedge words ("may", "potentially", "appears to") unless the source material itself is uncertain.
+- Name people, teams, and systems specifically using the names from the AI entity pages. Do not use vague phrases like "a team member established a pattern" — use the actual person and convention names from the data.
 - For entity_refs: list the DISPLAY NAMES (e.g. "Priya Nair", "brewgo-api", "PostgreSQL") of entities mentioned in the paragraph. NEVER use IDs or UUIDs — only human-readable names from the "##" headers of the AI entity pages.
 - ONLY include information from the provided AI entity pages — do not invent facts.
 - Write 3-8 paragraphs depending on available information.
