@@ -65,11 +65,11 @@ const defaultClientTemplate = {
   excludeRules: "Internal team details.",
   enabled: true,
   sections: [
-    { name: "Identity", intent: "Name, type (B2B company / B2C segment), account tier, platform (iOS/Android/web). Include client_category: user_segment, business, or individual.", requirement: "MUST" as const, maxBullets: 5 },
-    { name: "Products Used", intent: "Which of our products/services they use", requirement: "MUST_IF_PRESENT" as const, maxBullets: 6 },
-    { name: "Key Contacts", intent: "Client-side contacts + internal point of contact", requirement: "MUST_IF_PRESENT" as const, maxBullets: 6 },
-    { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT" as const, maxBullets: 8 },
-    { name: "Special Arrangements", intent: "Custom configs, SLAs, pricing", requirement: "OPTIONAL" as const, maxBullets: 5 },
+    { name: "Identity", intent: "Name, type (B2B company / B2C segment), account tier, platform (iOS/Android/web). Include client_category: user_segment, business, or individual.", requirement: "MUST", maxBullets: 5 },
+    { name: "Products Used", intent: "Which of our products/services they use", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+    { name: "Key Contacts", intent: "Client-side contacts + internal point of contact", requirement: "MUST_IF_PRESENT", maxBullets: 6 },
+    { name: "Feedback Themes", intent: "Recurring feedback patterns and feature requests", requirement: "MUST_IF_PRESENT", maxBullets: 8 },
+    { name: "Special Arrangements", intent: "Custom configs, SLAs, pricing", requirement: "OPTIONAL", maxBullets: 5 },
   ],
 };
 

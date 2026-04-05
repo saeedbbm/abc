@@ -44,11 +44,11 @@ export default function Landing() {
           Pidrax turns scattered Slack threads, Jira tickets, and Confluence pages into a verified, searchable knowledge base your team actually uses.
         </p>
         <div className="flex items-center justify-center gap-3">
-          <Button variant="hero" size="lg" onClick={() => router.push('/pawfinder/docs')}>
+          <Button variant="hero" size="lg" onClick={() => router.push('/pawfinder2/docs')}>
             <Play className="h-4 w-4" />
             Watch Demo
           </Button>
-          <Button variant="hero-outline" size="lg" onClick={() => router.push('/pawfinder/docs')}>
+          <Button variant="hero-outline" size="lg" onClick={() => router.push('/pawfinder2/docs')}>
             Try the Interactive Sandbox
             <ArrowRight className="h-4 w-4" />
           </Button>

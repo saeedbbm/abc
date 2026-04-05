@@ -107,7 +107,7 @@ export function MarketingTopNav() {
           </Link>
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/pawfinder/docs">Demo</Link>
+              <Link href="/pawfinder2/docs">Demo</Link>
             </Button>
             <Button size="sm" onClick={() => setWaitlistOpen(true)}>
               Join Waitlist
