@@ -13,17 +13,18 @@ import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
+const SingleConventionSchema = z.object({
+  convention_name: z.string(),
+  summary: z.string(),
+  pattern_rule: z.string(),
+  established_by: z.string(),
+  confidence: z.enum(["high", "medium", "low"]),
+  documentation_level: z.enum(["undocumented", "partially_documented", "documented"]),
+});
+
 const ConventionResultSchema = z.object({
-  create: z.boolean(),
+  conventions: z.array(SingleConventionSchema).describe("One or more conventions found. Return an empty array if no conventions are supported by the evidence."),
   reject_reason: z.string().optional(),
-  convention: z.object({
-    convention_name: z.string(),
-    summary: z.string(),
-    pattern_rule: z.string(),
-    established_by: z.string(),
-    confidence: z.enum(["high", "medium", "low"]),
-    documentation_level: z.enum(["undocumented", "partially_documented", "documented"]),
-  }).optional(),
 });
 
 const CONVENTION_PROMPT = `You synthesize cross-cutting engineering conventions from repeated evidence packs.
@@ -36,6 +37,8 @@ Rules:
 - Repeated UI rules, layout choices, and implementation habits across multiple documents should normally become conventions when the same owner repeatedly drives them.
 - convention_name must be a concise canonical title suitable for an entity page heading, not a raw quote, sentence fragment, or truncated excerpt.
 - Preserve concrete implementation prescriptions in summary and pattern_rule when the evidence supports them, including exact colors, layout direction, breakpoints, thresholds, and loading behavior.
+- The evidence pack may contain MULTIPLE distinct conventions by the same person. If so, return each as a separate convention object. For example, one person may have a layout convention AND a data-loading convention — these are separate conventions.
+- Each convention must be backed by evidence from at least 2 distinct sources.
 `;
 
 function deriveConventionDocumentationLevel(
@@ -130,7 +133,9 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
       );
     }
 
-    if (!result.create || !result.convention) {
+    const conventions = result.conventions ?? [];
+
+    if (conventions.length === 0) {
       const fallbackEligible =
         candidate.confidence === "high" &&
         candidate.owner_hint.trim().length > 0 &&
@@ -187,53 +192,67 @@ ${candidate.evidence_refs.map((ref) => `[${ref.source_type}] ${ref.title}: ${ref
       continue;
     }
 
-    const documentationLevel = deriveConventionDocumentationLevel(
-      candidate.evidence_refs,
-      result.convention.documentation_level,
-    );
-    const cleanedConventionName = cleanEntityTitle(
-      result.convention.convention_name || fallbackConventionName,
-      "decision",
-    );
-    const node: KB2GraphNodeType = {
-      node_id: randomUUID(),
-      run_id: ctx.runId,
-      execution_id: ctx.executionId,
-      type: "decision",
-      display_name: cleanedConventionName,
-      aliases: [],
-      attributes: {
-        is_convention: true,
-        pattern_rule: result.convention.pattern_rule,
-        summary: result.convention.summary,
-        established_by: result.convention.established_by,
+    for (const conv of conventions) {
+      const documentationLevel = deriveConventionDocumentationLevel(
+        candidate.evidence_refs,
+        conv.documentation_level,
+      );
+      const cleanedConventionName = cleanEntityTitle(
+        conv.convention_name || fallbackConventionName,
+        "decision",
+      );
+      const ruleTokens = new Set(
+        (conv.pattern_rule + " " + conv.convention_name)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .split(" ")
+          .filter((t) => t.length >= 4),
+      );
+      const filteredConstituents = relatedDecisions.filter((name) => {
+        const nameTokens = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter((t) => t.length >= 4);
+        const overlap = nameTokens.filter((t) => ruleTokens.has(t)).length;
+        return overlap >= 2 || nameTokens.length <= 2;
+      });
+      const node: KB2GraphNodeType = {
+        node_id: randomUUID(),
+        run_id: ctx.runId,
+        execution_id: ctx.executionId,
+        type: "decision",
+        display_name: cleanedConventionName,
+        aliases: [],
+        attributes: {
+          is_convention: true,
+          pattern_rule: conv.pattern_rule,
+          summary: conv.summary,
+          established_by: conv.established_by,
+          constituent_decisions: filteredConstituents,
+          supporting_observation_ids: candidate.observation_ids,
+          combined_evidence: candidate.evidence_refs.map((ref) => ref.excerpt).join("\n\n"),
+          status: "decided",
+          documentation_level: documentationLevel,
+          description: conv.summary,
+        },
+        source_refs: candidate.evidence_refs,
+        truth_status: "inferred",
+        confidence: conv.confidence,
+      };
+      conventionNodes.push(node);
+      phase3Conventions.push({
+        convention_name: cleanedConventionName,
+        established_by: conv.established_by,
+        pattern_rule: conv.pattern_rule,
         constituent_decisions: relatedDecisions,
-        supporting_observation_ids: candidate.observation_ids,
-        combined_evidence: candidate.evidence_refs.map((ref) => ref.excerpt).join("\n\n"),
-        status: "decided",
         documentation_level: documentationLevel,
-        description: result.convention.summary,
-      },
-      source_refs: candidate.evidence_refs,
-      truth_status: "inferred",
-      confidence: result.convention.confidence,
-    };
-    conventionNodes.push(node);
-    phase3Conventions.push({
-      convention_name: cleanedConventionName,
-      established_by: result.convention.established_by,
-      pattern_rule: result.convention.pattern_rule,
-      constituent_decisions: relatedDecisions,
-      documentation_level: documentationLevel,
-      confidence: result.convention.confidence,
-      evidence_count: candidate.evidence_refs.length,
-      evidence_sources: candidate.evidence_refs.map((ref) => `${ref.source_type}:${ref.title}`).slice(0, 6),
-      source_refs: candidate.evidence_refs.slice(0, 6).map((ref) => ({
-        source_type: ref.source_type,
-        title: ref.title,
-        excerpt: ref.excerpt,
-      })),
-    });
+        confidence: conv.confidence,
+        evidence_count: candidate.evidence_refs.length,
+        evidence_sources: candidate.evidence_refs.map((ref) => `${ref.source_type}:${ref.title}`).slice(0, 6),
+        source_refs: candidate.evidence_refs.slice(0, 6).map((ref) => ({
+          source_type: ref.source_type,
+          title: ref.title,
+          excerpt: ref.excerpt,
+        })),
+      });
+    }
   }
 
   if (conventionNodes.length > 0) {

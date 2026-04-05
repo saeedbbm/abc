@@ -8,6 +8,16 @@ import { Send, Bot, User, Loader2 } from "lucide-react";
 import { KB2RightPanel } from "./KB2RightPanel";
 import { SplitLayout } from "./SplitLayout";
 
+const EMOJI_RE = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
+
+function stripEmojis(text: string): string {
+  return text
+    .replace(EMOJI_RE, "")
+    .replace(/[^\S\r\n]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 interface SourceRef {
   source_type: string;
   doc_id: string;
@@ -147,15 +157,15 @@ export function KB2ChatPage({ companySlug }: { companySlug: string }) {
                     </div>
                   )}
                   <div
-                    className={`max-w-lg rounded-lg px-4 py-2 ${
+                    className={`rounded-lg px-4 py-3 ${
                       msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
+                        ? "max-w-lg bg-primary text-primary-foreground"
+                        : "max-w-2xl bg-muted"
                     }`}
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:mb-2 [&_p]:last:mb-0 [&_ol]:mb-2 [&_ul]:mb-2 [&_li]:mb-0.5 [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-medium [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_code]:text-xs [&_code]:bg-muted-foreground/10 [&_code]:px-1 [&_code]:rounded">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown>{stripEmojis(msg.content)}</ReactMarkdown>
                       </div>
                     ) : (
                       <p className="text-sm whitespace-pre-wrap">{msg.content}</p>

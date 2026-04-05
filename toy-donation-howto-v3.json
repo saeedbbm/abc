@@ -1,0 +1,667 @@
+﻿{
+    "_id":  "69cf938cdcbdafb3a6c66f47",
+    "howto_id":  "7ec1e8cd-9271-40a6-b1ac-918701af2152",
+    "run_id":  "c5111e40-5b76-41f1-b6af-ce65bc84bb7a",
+    "execution_id":  "61e1abb3-a016-4e91-ad9b-0621ab6173b2",
+    "ticket_id":  null,
+    "project_node_id":  "f4e2e23c-478a-4497-9db3-804735659af5",
+    "title":  "Plan: Toy Donation Program Feature",
+    "sections":  [
+                     {
+                         "section_name":  "Overview",
+                         "content":  "The Toy Donation Program Feature enables users to contribute toys they no longer need to shelter pets through the website. This feature addresses customer demand for alternative ways to support animals beyond monetary donations, allowing the community to contribute physical items that directly benefit shelter pets awaiting adoption.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "customer_feedback",
+                                                 "doc_id":  "3",
+                                                 "title":  "Toys for shelter pets",
+                                                 "excerpt":  "Do you guys have like a gift shop or something where we could buy toys and\nhave them donated to the pets at the shelters? My kids saw the animals on\nyour site and they really want to do something nice for them. We were thinking\nabout gettin",
+                                                 "source_author":  "Rachel Torres",
+                                                 "source_timestamp":  "2025-03-22"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Context",
+                         "content":  "This feature builds on the existing donation infrastructure established in Phase 3 (Q1-Q2 2024), which implemented the donation page with payment processing and pet dedication options. The feature aligns with Kim\u0027s green color convention for money-related UI elements and must follow Matt\u0027s ISO 8601 date format standard for any date-related API responses. Customer feedback shows strong interest in toy donations, gift shop functionality, and targeted giving to specific animals, indicating this feature addresses real user needs.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "the main \"Complete Donation\" button is green"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Decision title: Green Color for Money-Related UI Elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Donation page with Complete Donation button and payment form interface"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Requirements",
+                         "content":  "Must comply with Kim\u0027s convention for green color on money-related UI elements for any purchase/transaction buttons. Must follow Matt\u0027s ISO 8601 date format standard for all API date responses. Must apply Tim\u0027s vertical navigation pattern when users are choosing toy categories (not comparing). Must implement Matt\u0027s max-height with scroll pattern for toy listing areas to prevent page layout disruption. The feature must allow users to donate physical toys, dedicate toy donations to specific pets, and provide confirmation of successful donations.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Decision title: Green Color for Money-Related UI Elements"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Implementation Steps",
+                         "content":  "1. Create Toy Donation Database Schema\nNew work to define: Design database tables for toy donations including toy categories, donation records, and pet-toy associations. No existing evidence covers toy donation data structures.\n\n2. Build Toy Category Selection Interface\nImplement vertical navigation for toy category selection following Tim\u0027s convention for user choice interfaces. Use vertical nav on the left side with category content updating on the right, keeping selection persistent and visible while users browse toy options.\n\n3. Design Toy Listing with Scroll Overflow\nApply Matt\u0027s max-height with scroll pattern to toy listing areas. Set max-height to 600px with overflow-y scroll to prevent pushing the page down when there are many toy options available, future-proofing against expanding content lists.\n\n4. Implement Pet Dedication Feature\nReuse the existing pet dedication pattern from the donation page implementation. Include an optional \u0027dedicate to a pet\u0027 toggle that shows a pet selector loading all adoptable pets. Display selected pet cards with standard gender-colored accents (pink for female, blue for male).\n\n5. Style Action Buttons with Green Color\nApply Kim\u0027s green color convention to all money-related action buttons including \u0027Complete Toy Donation\u0027 and any purchase-related CTAs. Use green for financial actions to maintain consistency with existing Sponsor Me buttons and Complete Donation buttons, ensuring green pops against neutral backgrounds.\n\n6. Build Toy Donation API Endpoints\nNew work to define: Create API endpoints for toy donation submission, category retrieval, and donation history. Ensure all date fields return ISO 8601 format per Matt\u0027s standard, normalizing dates in the service layer before response.\n\n7. Implement Payment Processing Integration\nLeverage existing payment infrastructure from the donation page. Use the same payment form pattern with credit card processing (card number, expiry, CVV) and clean white background for the payment section to minimize visual noise during transaction.\n\n8. Create Confirmation and Receipt Flow\nNew work to define: Design confirmation page and receipt generation for toy donations. No existing evidence covers toy donation confirmation flows, though monetary donation receipts exist as precedent.",
+                         "steps":  [
+                                       {
+                                           "title":  "Create Toy Donation Database Schema",
+                                           "content":  "New work to define: Design database tables for toy donations including toy categories, donation records, and pet-toy associations. No existing evidence covers toy donation data structures."
+                                       },
+                                       {
+                                           "title":  "Build Toy Category Selection Interface",
+                                           "content":  "Implement vertical navigation for toy category selection following Tim\u0027s convention for user choice interfaces. Use vertical nav on the left side with category content updating on the right, keeping selection persistent and visible while users browse toy options.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                                   "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                                   "excerpt":  "so I\u0027m putting the category list as a vertical menu on the left side",
+                                                                   "section_heading":  "#engineering Message 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                                   "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                                   "excerpt":  "keeps the selection persistent and visible while they browse",
+                                                                   "section_heading":  "#engineering Message 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                                   "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                                   "excerpt":  "**Tim**: so I\u0027m putting the category list as a vertical menu on the left side",
+                                                                   "section_heading":  "#engineering Message 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                                   "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                                   "excerpt":  "**Matt**: yeah that works. keeps the selection persistent and visible while they browse",
+                                                                   "section_heading":  "#engineering Message 3"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Design Toy Listing with Scroll Overflow",
+                                           "content":  "Apply Matt\u0027s max-height with scroll pattern to toy listing areas. Set max-height to 600px with overflow-y scroll to prevent pushing the page down when there are many toy options available, future-proofing against expanding content lists.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "\u003e a max-height with scroll instead of pushing the page down when there",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3",
+                                                                   "pr_author":  "Matt [2023-09-22]",
+                                                                   "pr_reviewers":  [
+                                                                                        "Matt"
+                                                                                    ],
+                                                                   "comment_author":  "Matt [2023-09-22]"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "the shelter list panel should probably have a max-height with scroll instead of pushing the page down when there are lots of results",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "Good call, done. Set max-height to 600px with overflow-y scroll.",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "Matt [2023-09-22]: the shelter list panel should probably have a max-height with scroll",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "a max-height with scroll instead of pushing the page down when there are lots of results",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "instead of pushing the page down when there are lots of results",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "Set max-height to 600px with overflow-y scroll",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "Good call, done. Set max-height to 600px with overflow-y scroll",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "a max-height with scroll instead of pushing the page down when there",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                                   "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                                   "excerpt":  "Tim [2023-09-23]: Good call, done. Set max-height to 600px with overflow-y scroll",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Implement Pet Dedication Feature",
+                                           "content":  "Reuse the existing pet dedication pattern from the donation page implementation. Include an optional \u0027dedicate to a pet\u0027 toggle that shows a pet selector loading all adoptable pets. Display selected pet cards with standard gender-colored accents (pink for female, blue for male).",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related"
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Pet profile cards on browse page with Sponsor Me buttons"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Style Action Buttons with Green Color",
+                                           "content":  "Apply Kim\u0027s green color convention to all money-related action buttons including \u0027Complete Toy Donation\u0027 and any purchase-related CTAs. Use green for financial actions to maintain consistency with existing Sponsor Me buttons and Complete Donation buttons, ensuring green pops against neutral backgrounds.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                                   "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                                   "excerpt":  "The donate button is styled green (per Kim\u0027s designs)."
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related"
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "the main \"Complete Donation\" button is green. Green for the donation CTA keeps things consistent with our other financial actions (like the Sponsor button on pet cards)"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "the green pops against the neutral card background"
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Key Decisions",
+                                                                   "item_text":  "Green color scheme for the \u0027Donate\u0027 button for consistency with other financial actions."
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Identity",
+                                                                   "item_text":  "Scope applies to Sponsor Me buttons, Complete Donation buttons, and all money-related call-to-action elements"
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Decision",
+                                                                   "item_text":  "Chose green color for all money-related call-to-action buttons and UI elements due to natural association with financial concepts"
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Decision",
+                                                                   "item_text":  "Green provides visual prominence that makes donation buttons stand out against neutral card backgrounds"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Build Toy Donation API Endpoints",
+                                           "content":  "New work to define: Create API endpoints for toy donation submission, category retrieval, and donation history. Ensure all date fields return ISO 8601 format per Matt\u0027s standard, normalizing dates in the service layer before response.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2024-08-19-3-45-pm",
+                                                                   "title":  "#engineering | 2024-08-19 3:45 PM",
+                                                                   "excerpt":  "yes, always return ISO 8601 from the API.",
+                                                                   "section_heading":  "#engineering Message 2",
+                                                                   "slack_speaker":  "Matt",
+                                                                   "source_timestamp":  "3:48 PM"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2024-08-19-3-45-pm",
+                                                                   "title":  "#engineering | 2024-08-19 3:45 PM",
+                                                                   "excerpt":  "yes, always return ISO 8601 from the API. normalize in the service layer before it hits the response",
+                                                                   "section_heading":  "#engineering Message 2"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2024-08-19-3-45-pm",
+                                                                   "title":  "#engineering | 2024-08-19 3:45 PM",
+                                                                   "excerpt":  "Matt: yes, always return ISO 8601 from the API.",
+                                                                   "section_heading":  "#engineering Message 2"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-engineering-2024-08-19-3-45-pm",
+                                                                   "title":  "#engineering | 2024-08-19 3:45 PM",
+                                                                   "excerpt":  "normalize in the service layer before it hits the response",
+                                                                   "section_heading":  "#engineering Message 2"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Implement Payment Processing Integration",
+                                           "content":  "Leverage existing payment infrastructure from the donation page. Use the same payment form pattern with credit card processing (card number, expiry, CVV) and clean white background for the payment section to minimize visual noise during transaction.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "jira",
+                                                                   "doc_id":  "PAW-15",
+                                                                   "title":  "PAW-15: Build donation page",
+                                                                   "section_heading":  "PAW-15 Description",
+                                                                   "excerpt":  "Payment form (credit card)"
+                                                               },
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                                   "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                                   "excerpt":  "Payment section has a clean white background."
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "the main \"Complete Donation\" button is green"
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Scope",
+                                                                   "item_text":  "Includes a payment form for credit card transactions."
+                                                               },
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Key Decisions",
+                                                                   "item_text":  "Incorporated a clean design for the payment section to minimize user distraction."
+                                                               },
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Systems Affected",
+                                                                   "item_text":  "Integration with credit card processing services."
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Donation page with Complete Donation button and payment form interface"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Create Confirmation and Receipt Flow",
+                                           "content":  "New work to define: Design confirmation page and receipt generation for toy donations. No existing evidence covers toy donation confirmation flows, though monetary donation receipts exist as precedent."
+                                       }
+                                   ],
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "jira",
+                                                 "doc_id":  "PAW-15",
+                                                 "title":  "PAW-15: Build donation page",
+                                                 "section_heading":  "PAW-15 Description",
+                                                 "excerpt":  "Payment form (credit card)"
+                                             },
+                                             {
+                                                 "source_type":  "github",
+                                                 "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                 "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                 "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                 "excerpt":  "The donate button is styled green (per Kim\u0027s designs)."
+                                             },
+                                             {
+                                                 "source_type":  "github",
+                                                 "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                 "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                 "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                 "excerpt":  "Payment section has a clean white background."
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "the main \"Complete Donation\" button is green. Green for the donation CTA keeps things consistent with our other financial actions (like the Sponsor button on pet cards)"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "The \"Visit\" CTA button on shelter cards is blue (not green, since it\u0027s not a financial action)"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "the green pops against the neutral card background"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "Green for the donation CTA keeps things consistent with our other financial actions (like the Sponsor button on pet cards)"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "the main \"Complete Donation\" button is green"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                 "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                 "excerpt":  "so I\u0027m putting the category list as a vertical menu on the left side",
+                                                 "section_heading":  "#engineering Message 3"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                 "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                 "excerpt":  "keeps the selection persistent and visible while they browse",
+                                                 "section_heading":  "#engineering Message 3"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                 "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                 "excerpt":  "**Tim**: so I\u0027m putting the category list as a vertical menu on the left side",
+                                                 "section_heading":  "#engineering Message 3"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                 "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                 "excerpt":  "**Matt**: yeah that works. keeps the selection persistent and visible while they browse",
+                                                 "section_heading":  "#engineering Message 3"
+                                             },
+                                             {
+                                                 "source_type":  "github",
+                                                 "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                 "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                 "excerpt":  "\u003e a max-height with scroll instead of pushing the page down when there",
+                                                 "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3",
+                                                 "pr_author":  "Matt [2023-09-22]",
+                                                 "pr_reviewers":  [
+                                                                      "Matt"
+                                                                  ],
+                                                 "comment_author":  "Matt [2023-09-22]"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Scope",
+                                                 "item_text":  "Includes a payment form for credit card transactions."
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Key Decisions",
+                                                 "item_text":  "Green color scheme for the \u0027Donate\u0027 button for consistency with other financial actions."
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Key Decisions",
+                                                 "item_text":  "Incorporated a clean design for the payment section to minimize user distraction."
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Systems Affected",
+                                                 "item_text":  "Integration with credit card processing services."
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Scope applies to Sponsor Me buttons, Complete Donation buttons, and all money-related call-to-action elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Context",
+                                                 "item_text":  "Required distinction between financial actions and other types of user interface buttons"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Chose green color for all money-related call-to-action buttons and UI elements due to natural association with financial concepts"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Green provides visual prominence that makes donation buttons stand out against neutral card backgrounds"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Decision ensures consistency across Sponsor Me buttons on pet cards and Complete Donation buttons on payment forms"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Pet profile cards on browse page with Sponsor Me buttons"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Donation page with Complete Donation button and payment form interface"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "7f3316a3-b33a-42c4-93e0-28fee34d9bbc",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision Makers",
+                                                 "item_text":  "Kim established the convention during pet profile card design work"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Testing Plan",
+                         "content":  "Test toy category navigation with vertical layout, ensuring selection persistence. Verify green button styling matches existing financial CTAs like Sponsor Me buttons. Test pet dedication flow reusing adoption chooser endpoint. Validate ISO 8601 date formatting in API responses. Test max-height scroll behavior with large toy catalogs (\u003e20 items). Test payment processing integration with existing credit card infrastructure. Verify mobile responsiveness of vertical navigation pattern. Test edge cases: no available pets for dedication, network failures during payment, empty toy categories.",
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "f78ff649-065c-4fa7-ba93-dc2c085485fc",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Systems Affected",
+                                                 "item_text":  "Integration with credit card processing services."
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Risks and Considerations",
+                         "content":  "No existing toy inventory management system exists, requiring new infrastructure for tracking physical items. Payment processing integration may need modification for non-monetary transactions. Shipping logistics for toy donations are undefined and may require third-party integration. Pet dedication feature may create expectations for real-time pet availability that doesn\u0027t match shelter operations. Vertical navigation pattern may need responsive adjustments for mobile devices. Database schema changes require careful migration planning to avoid disrupting existing donation functionality."
+                     }
+                 ],
+    "linked_entity_ids":  [
+                              "f4e2e23c-478a-4497-9db3-804735659af5",
+                              "7295461a-4f78-4689-a407-696af632c707",
+                              "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0"
+                          ],
+    "created_at":  "2026-04-03T10:15:38.884Z",
+    "updated_at":  "2026-04-03T10:15:38.884Z",
+    "plan_status":  "draft",
+    "owner_name":  "",
+    "reviewers":  [
+
+                  ],
+    "discussion":  [
+
+                   ]
+}

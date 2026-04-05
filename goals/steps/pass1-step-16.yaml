@@ -21,6 +21,8 @@ judge_should_look_at:
   - whether guides reference actual conventions, decisions, and related entities
   - whether guides cite direct source artifacts for concrete implementation claims
   - whether guides surface related-project implementation patterns beyond high-level convention names
+  - evidence pack diagnostics: convention_source_count, precedent_source_count, source_type_mix, fallback_usage
+  - whether each implementation step is classified as evidence-backed or new-work-to-define
 
 must_do:
   - generate guides for the right proposed work items
@@ -30,6 +32,10 @@ must_do:
   - mention source artifacts when making concrete implementation claims
   - turn relevant convention evidence into feature-specific implementation choices
   - reuse related-project implementation patterns when the sources show a similar surface or component pattern
+  - build a structured evidence pack BEFORE LLM generation, not post-hoc
+  - use pull_request entities as first-class implementation precedent sources
+  - distinguish evidence-backed steps from new-work-to-define gaps for proposed features
+  - emit evidence pack diagnostics in the step artifact for inspectability
 
 must_not_do:
   - exclude proposed projects or features just because they are not ticket-shaped
@@ -37,6 +43,10 @@ must_not_do:
   - generate generic how-tos that ignore discovered team patterns
   - cite vague non-artifacts like "existing patterns" when a real source title is available
   - collapse convention guidance down to naming the convention without the implementation choice it implies
+  - inject hardcoded carry-forward prose or canned sentences into LLM output
+  - attach evidence post-hoc by fuzzy-matching generated prose to entity pages
+  - strip evidence-backed API paths, component names, or technical identifiers from output
+  - invent exact endpoints or contracts for proposed features without evidence
 
 success_signals:
   - guides are specific enough to implement against
@@ -91,6 +101,22 @@ deterministic_checks:
     description: Sampled guides should cite real PR, Slack, or ticket artifacts rather than vague references.
     mode: eq
     target: 1
+  - key: evidence_pack_convention_source_count
+    description: Evidence pack should include sources from at least 3 convention-related artifacts.
+    mode: gte
+    target: 3
+  - key: evidence_pack_precedent_source_count
+    description: Evidence pack should include sources from at least 3 implementation precedent artifacts.
+    mode: gte
+    target: 3
+  - key: evidence_pack_source_type_diversity
+    description: Evidence pack should draw from at least 3 distinct source types.
+    mode: gte
+    target: 3
+  - key: evidence_pack_fallback_ratio_low
+    description: Fallback (non-edge-based) evidence should be less than 30% of total evidence items.
+    mode: lte
+    target: 30
 
 go_no_go:
   proceed_when:

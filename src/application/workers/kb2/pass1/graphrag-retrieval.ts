@@ -22,6 +22,7 @@ export interface RetrievalPack {
   graph_context: string[];
   doc_snippets: string[];
   vector_snippets: string[];
+  raw_source_units?: string[];
 }
 
 function getCriticalSamplePriority(
@@ -119,16 +120,28 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
       const ep = plan as EntityPagePlan & { page_type: "entity" };
       const node = nodeById.get(ep.node_id);
       if (node) {
-        isCriticalPage =
+        const needsExtendedSnippets =
           node.attributes?.is_convention === true ||
           ["proposed_projects", "past_undocumented", "ongoing_undocumented"].includes(ep.project_category ?? "");
+        isCriticalPage = needsExtendedSnippets;
+        const effectiveSnippetLength = needsExtendedSnippets ? 2000 : DOC_SNIPPET_LENGTH;
 
         graphContext.push(`Entity: ${node.display_name} [${node.type}]`);
         if (node.aliases.length > 0) graphContext.push(`Aliases: ${node.aliases.join(", ")}`);
 
+        const rawSourceUnits: string[] = [];
+
         for (const ref of node.source_refs.slice(0, DOC_SNIPPETS_LIMIT)) {
           if (ref.excerpt?.trim()) {
             pushDocSnippet(`[${ref.source_type}] ${ref.title}: ${ref.excerpt}`);
+            if (needsExtendedSnippets) {
+              const fullDoc = docs.find(
+                (doc) => doc.id === ref.doc_id || doc.sourceId === ref.doc_id || doc.title === ref.title,
+              );
+              if (fullDoc) {
+                rawSourceUnits.push(`[${fullDoc.provider}] ${fullDoc.title}:\n${fullDoc.content.slice(0, 4000)}`);
+              }
+            }
             continue;
           }
 
@@ -137,8 +150,11 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
           );
           if (matchedDoc) {
             pushDocSnippet(
-              `[${matchedDoc.provider}] ${matchedDoc.title}: ${matchedDoc.content.slice(0, DOC_SNIPPET_LENGTH)}`,
+              `[${matchedDoc.provider}] ${matchedDoc.title}: ${matchedDoc.content.slice(0, effectiveSnippetLength)}`,
             );
+            if (needsExtendedSnippets) {
+              rawSourceUnits.push(`[${matchedDoc.provider}] ${matchedDoc.title}:\n${matchedDoc.content.slice(0, 4000)}`);
+            }
           }
         }
 
@@ -156,14 +172,14 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
         const expandedConventionIds = new Set<string>();
         if (node.attributes?.is_convention === true) {
           expandedConventionIds.add(node.node_id);
-          gatherConventionMultiHop(node, edges, nodeById, graphContext, docs, docSnippets, DOC_SNIPPET_LENGTH);
+          gatherConventionMultiHop(node, edges, nodeById, graphContext, docs, docSnippets, effectiveSnippetLength, rawSourceUnits);
         }
         for (const edge of neighborEdges) {
           const otherId = edge.source_node_id === node.node_id ? edge.target_node_id : edge.source_node_id;
           const other = nodeById.get(otherId);
           if (!other || other.attributes?.is_convention !== true || expandedConventionIds.has(other.node_id)) continue;
           graphContext.push(`  Convention path via: ${other.display_name} [${other.type}]`);
-          gatherConventionMultiHop(other, edges, nodeById, graphContext, docs, docSnippets, DOC_SNIPPET_LENGTH);
+          gatherConventionMultiHop(other, edges, nodeById, graphContext, docs, docSnippets, effectiveSnippetLength, rawSourceUnits);
           expandedConventionIds.add(other.node_id);
         }
 
@@ -171,8 +187,22 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
         for (const doc of docs) {
           const contentLower = doc.content.toLowerCase();
           if (searchNames.some((n) => contentLower.includes(n.toLowerCase()))) {
-            pushDocSnippet(`[${doc.provider}] ${doc.title}: ${doc.content.slice(0, DOC_SNIPPET_LENGTH)}`);
+            pushDocSnippet(`[${doc.provider}] ${doc.title}: ${doc.content.slice(0, effectiveSnippetLength)}`);
+            if (needsExtendedSnippets && rawSourceUnits.length < 10) {
+              rawSourceUnits.push(`[${doc.provider}] ${doc.title}:\n${doc.content.slice(0, 4000)}`);
+            }
           }
+        }
+
+        if (needsExtendedSnippets && rawSourceUnits.length > 0) {
+          const seen = new Set<string>();
+          const deduped = rawSourceUnits.filter((u) => {
+            const key = u.slice(0, 200);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          (plan as any)._rawSourceUnits = deduped.slice(0, 10);
         }
       }
     } else {
@@ -230,7 +260,7 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
       // Qdrant might not be available; proceed without vector results
     }
 
-    packs.push({
+    const pack: RetrievalPack = {
       page_id: plan.page_id,
       page_type: plan.page_type,
       title: plan.page_type === "entity"
@@ -239,7 +269,12 @@ export const graphragRetrievalStep: StepFunction = async (ctx) => {
       graph_context: graphContext,
       doc_snippets: docSnippets.slice(0, DOC_SNIPPETS_LIMIT),
       vector_snippets: vectorSnippets,
-    });
+    };
+    if ((plan as any)._rawSourceUnits) {
+      pack.raw_source_units = (plan as any)._rawSourceUnits;
+      delete (plan as any)._rawSourceUnits;
+    }
+    packs.push(pack);
 
     if (isCriticalPage) {
       criticalPackSamples.push({
@@ -282,10 +317,10 @@ function gatherConventionMultiHop(
   docs: KB2ParsedDocument[],
   docSnippets: string[],
   snippetLength: number,
+  rawSourceUnits?: string[],
 ): void {
   const outEdges = edges.filter((e) => e.source_node_id === node.node_id);
 
-  // Convention -> CONTAINS -> constituent decisions -> their source_refs
   const containsEdges = outEdges.filter((e) => e.type === "CONTAINS");
   for (const ce of containsEdges) {
     const decision = nodeById.get(ce.target_node_id);
@@ -295,11 +330,13 @@ function gatherConventionMultiHop(
       const doc = docs.find((d) => d.title === ref.title);
       if (doc) {
         docSnippets.push(`[convention-decision-source] ${doc.title}: ${doc.content.slice(0, snippetLength)}`);
+        if (rawSourceUnits && rawSourceUnits.length < 10) {
+          rawSourceUnits.push(`[${doc.provider}] ${doc.title}:\n${doc.content.slice(0, 4000)}`);
+        }
       }
     }
   }
 
-  // Convention -> PROPOSED_BY -> team member -> related work
   const proposedByEdges = outEdges.filter((e) => e.type === "PROPOSED_BY");
   for (const pe of proposedByEdges) {
     const member = nodeById.get(pe.target_node_id);
@@ -316,7 +353,6 @@ function gatherConventionMultiHop(
     }
   }
 
-  // Convention -> APPLIES_TO -> features -> feature context
   const appliesToEdges = outEdges.filter((e) => e.type === "APPLIES_TO");
   for (const ae of appliesToEdges) {
     const feature = nodeById.get(ae.target_node_id);

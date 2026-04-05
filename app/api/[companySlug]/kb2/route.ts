@@ -297,11 +297,16 @@ export async function GET(
         const latestVCExecIds = baseRunIdFromState
           ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-18"])
           : [];
-        const cards = await tc.verification_cards.find(
-          latestVCExecIds.length > 0
-            ? buildExecutionScopedFilter(stateFilter, latestVCExecIds, true)
-            : stateFilter,
-        ).toArray();
+        const scopedFilter = latestVCExecIds.length > 0
+          ? buildExecutionScopedFilter(stateFilter, latestVCExecIds, true)
+          : stateFilter;
+        const baseRunVCFilter = latestVCExecIds.length > 0 && baseRunIdFromState
+          ? { run_id: baseRunIdFromState, execution_id: { $in: latestVCExecIds }, demo_state_id: { $exists: false } }
+          : null;
+        const combinedVCFilter = baseRunVCFilter
+          ? { $or: [scopedFilter, baseRunVCFilter] }
+          : scopedFilter;
+        const cards = await tc.verification_cards.find(combinedVCFilter).toArray();
         return Response.json({ cards });
       }
       let effectiveVCRunId = runId ?? baseRunIdFromState ?? undefined;
@@ -342,11 +347,16 @@ export async function GET(
         const latestEntityPagesExecIds = baseRunIdFromState
           ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-14"])
           : [];
-        const pages = await tc.entity_pages.find(
-          latestEntityPagesExecIds.length > 0
-            ? buildExecutionScopedFilter(stateFilter, latestEntityPagesExecIds)
-            : stateFilter,
-        ).toArray();
+        const scopedEPFilter = latestEntityPagesExecIds.length > 0
+          ? buildExecutionScopedFilter(stateFilter, latestEntityPagesExecIds)
+          : stateFilter;
+        const baseRunEPFilter = latestEntityPagesExecIds.length > 0 && baseRunIdFromState
+          ? { run_id: baseRunIdFromState, execution_id: { $in: latestEntityPagesExecIds }, demo_state_id: { $exists: false } }
+          : null;
+        const combinedEPFilter = baseRunEPFilter
+          ? { $or: [scopedEPFilter, baseRunEPFilter] }
+          : scopedEPFilter;
+        const pages = await tc.entity_pages.find(combinedEPFilter).toArray();
         return Response.json({ pages });
       }
       const epFilter: Record<string, any> = {};
@@ -429,6 +439,23 @@ export async function GET(
         const tickets = await tc.tickets.find({ execution_id: executionId, demo_state_id: { $exists: false } }).sort({ created_at: -1 }).toArray();
         if (tickets.length > 0) return Response.json({ tickets });
       }
+      if (!runId && !executionId && isWorkspaceLikeState(activeDemoState)) {
+        const stateFilter = buildStateFilter(activeDemoState.state_id) as Record<string, any>;
+        const latestTicketExecIds = baseRunIdFromState
+          ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-15"])
+          : [];
+        const scopedTFilter = latestTicketExecIds.length > 0
+          ? buildExecutionScopedFilter(stateFilter, latestTicketExecIds, true)
+          : stateFilter;
+        const baseRunTFilter = latestTicketExecIds.length > 0 && baseRunIdFromState
+          ? { run_id: baseRunIdFromState, execution_id: { $in: latestTicketExecIds }, demo_state_id: { $exists: false } }
+          : null;
+        const combinedTFilter = baseRunTFilter
+          ? { $or: [scopedTFilter, baseRunTFilter] }
+          : scopedTFilter;
+        const tickets = await tc.tickets.find(combinedTFilter).sort({ created_at: -1 }).toArray();
+        return Response.json({ tickets });
+      }
       const tFilter: Record<string, any> = {};
       const effectiveRunId =
         runId
@@ -451,11 +478,39 @@ export async function GET(
         const latestHowtoExecIds = baseRunIdFromState
           ? await getLatestStepExecutionIds(baseRunIdFromState, ["pass1-step-16"])
           : [];
-        const howtos = await tc.howto.find(
-          latestHowtoExecIds.length > 0
-            ? buildExecutionScopedFilter(stateFilter, latestHowtoExecIds, true)
-            : stateFilter,
-        ).sort({ created_at: -1 }).toArray();
+        const scopedFilter = latestHowtoExecIds.length > 0
+          ? buildExecutionScopedFilter(stateFilter, latestHowtoExecIds, true)
+          : stateFilter;
+        const baseRunExecFilter = latestHowtoExecIds.length > 0 && baseRunIdFromState
+          ? { run_id: baseRunIdFromState, execution_id: { $in: latestHowtoExecIds }, demo_state_id: { $exists: false } }
+          : null;
+        const combinedFilter = baseRunExecFilter
+          ? { $or: [scopedFilter, baseRunExecFilter] }
+          : scopedFilter;
+        const allHowtos = await tc.howto.find(combinedFilter).sort({ created_at: -1 }).toArray();
+        const seen = new Map<string, typeof allHowtos[0]>();
+        for (const h of allHowtos) {
+          const projId = typeof (h as any).project_node_id === "string" ? (h as any).project_node_id.trim() : "";
+          const tktId = typeof (h as any).ticket_id === "string" ? (h as any).ticket_id.trim() : "";
+          const key = projId || tktId || (h as any).howto_id;
+          const existing = seen.get(key);
+          if (!existing || new Date((h as any).created_at).getTime() > new Date((existing as any).created_at).getTime()) {
+            seen.set(key, h);
+          }
+        }
+        const hasSourcedHowtos = [...seen.values()].some((h) => {
+          const p = typeof (h as any).project_node_id === "string" ? (h as any).project_node_id.trim() : "";
+          const t = typeof (h as any).ticket_id === "string" ? (h as any).ticket_id.trim() : "";
+          return p || t;
+        });
+        const howtos = [...seen.values()]
+          .filter((h) => {
+            if (!hasSourcedHowtos) return true;
+            const p = typeof (h as any).project_node_id === "string" ? (h as any).project_node_id.trim() : "";
+            const t = typeof (h as any).ticket_id === "string" ? (h as any).ticket_id.trim() : "";
+            return !!(p || t);
+          })
+          .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime());
         return Response.json({ howtos });
       }
       let effectiveHowtoRunId = runId ?? baseRunIdFromState ?? undefined;

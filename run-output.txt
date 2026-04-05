@@ -1,0 +1,271 @@
+﻿data: {"type":"progress","detail":"[pass1 Step 7/18] Starting: Graph Enrichment","percent":0,"step_id":"pass1-step-7"}
+
+data: {"type":"step_started","step_id":"pass1-step-7","step_number":7,"total_steps":18,"step_name":"Graph Enrichment","pass":"pass1","started_at":"2026-04-03T08:47:08.696Z","steps_remaining":11}
+
+data: {"type":"progress","detail":"Mining repeated patterns from 24 observations...","percent":0,"step_percent":5,"step_id":"pass1-step-7"}
+
+data: {"type":"progress","detail":"Pattern mining produced 6 candidate evidence packs","percent":8,"step_percent":100,"step_id":"pass1-step-7"}
+
+data: {"type":"progress","detail":"[pass1 Step 7/18] Completed: Graph Enrichment (0.0s)","percent":8,"step_id":"pass1-step-7"}
+
+data: {"type":"step_completed","step_id":"pass1-step-7","step_number":7,"total_steps":18,"step_name":"Graph Enrichment","pass":"pass1","duration_ms":23,"summary":"Discovered +0 relationships across 23 entities","steps_remaining":11,"metrics":{"llm_calls":0,"input_tokens":0,"output_tokens":0,"cost_usd":0}}
+
+data: {"type":"progress","detail":"[pass1 Step 8/18] Starting: Project & Ticket Discovery","percent":8,"step_id":"pass1-step-8"}
+
+data: {"type":"step_started","step_id":"pass1-step-8","step_number":8,"total_steps":18,"step_name":"Project & Ticket Discovery","pass":"pass1","started_at":"2026-04-03T08:47:08.747Z","steps_remaining":10}
+
+data: {"type":"progress","detail":"Generating discovery hypotheses from 148 observations...","percent":8,"step_percent":5,"step_id":"pass1-step-8"}
+
+data: {"type":"progress","detail":"Discovery created 3 evidence-backed hypotheses","percent":17,"step_percent":100,"step_id":"pass1-step-8"}
+
+data: {"type":"progress","detail":"[pass1 Step 8/18] Completed: Project & Ticket Discovery (2.3s)","percent":17,"step_id":"pass1-step-8"}
+
+data: {"type":"step_completed","step_id":"pass1-step-8","step_number":8,"total_steps":18,"step_name":"Project & Ticket Discovery","pass":"pass1","duration_ms":2266,"summary":"Discovered 3 new items using 1 LLM calls â 1 proposed from feedback, 1 past undocumented, 1 ongoing undocumented","steps_remaining":10,"metrics":{"llm_calls":1,"input_tokens":876,"output_tokens":72,"cost_usd":0.003708}}
+
+data: {"type":"progress","detail":"[pass1 Step 9/18] Starting: Attribute Completion","percent":17,"step_id":"pass1-step-9"}
+
+data: {"type":"step_started","step_id":"pass1-step-9","step_number":9,"total_steps":18,"step_name":"Attribute Completion","pass":"pass1","started_at":"2026-04-03T08:47:11.087Z","steps_remaining":9}
+
+data: {"type":"progress","detail":"Processing 96 entities for attribute completion...","percent":17,"step_percent":5,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Promoted 0 descriptions","percent":18,"step_percent":10,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Generating descriptions for 59 entities via LLM...","percent":18,"step_percent":12,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Generated 59 descriptions","percent":19,"step_percent":20,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Filled 88 documentation levels","percent":19,"step_percent":30,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Inferring status for 3 ambiguous entities via LLM...","percent":20,"step_percent":35,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Status: 20 Jira-deterministic, 22 LLM-filled, 0 corrected","percent":21,"step_percent":55,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Evaluating 8 decision attributes via LLM (corrective mode)...","percent":22,"step_percent":60,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Decisions: 6 filled, 0 corrected, 0 confirmed","percent":23,"step_percent":80,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Cross-checking 4 high-impact decided_by owners...","percent":24,"step_percent":82,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Cross-check done: 8 decisions verified","percent":24,"step_percent":88,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"Attribute completion done","percent":25,"step_percent":100,"step_id":"pass1-step-9"}
+
+data: {"type":"progress","detail":"[pass1 Step 9/18] Completed: Attribute Completion (201.5s)","percent":25,"step_id":"pass1-step-9"}
+
+data: {"type":"step_completed","step_id":"pass1-step-9","step_number":9,"total_steps":18,"step_name":"Attribute Completion","pass":"pass1","duration_ms":201477,"summary":"Completed attributes for 96 entities (0 descriptions, 22 statuses, 6 decided_by)","steps_remaining":9,"metrics":{"llm_calls":11,"input_tokens":16783,"output_tokens":7205,"cost_usd":0.158424}}
+
+data: {"type":"progress","detail":"[pass1 Step 10/18] Starting: Pattern Synthesis","percent":25,"step_id":"pass1-step-10"}
+
+data: {"type":"step_started","step_id":"pass1-step-10","step_number":10,"total_steps":18,"step_name":"Pattern Synthesis","pass":"pass1","started_at":"2026-04-03T08:50:32.624Z","steps_remaining":8}
+
+data: {"type":"progress","detail":"Synthesizing conventions from 6 evidence packs...","percent":25,"step_percent":5,"step_id":"pass1-step-10"}
+
+data: {"type":"progress","detail":"Created 4 convention entities","percent":33,"step_percent":100,"step_id":"pass1-step-10"}
+
+data: {"type":"progress","detail":"[pass1 Step 10/18] Completed: Pattern Synthesis (21.4s)","percent":33,"step_id":"pass1-step-10"}
+
+data: {"type":"step_completed","step_id":"pass1-step-10","step_number":10,"total_steps":18,"step_name":"Pattern Synthesis","pass":"pass1","duration_ms":21388,"summary":"Found 4 cross-cutting conventions from 8 decisions","steps_remaining":8,"metrics":{"llm_calls":6,"input_tokens":5694,"output_tokens":905,"cost_usd":0.030657}}
+
+data: {"type":"progress","detail":"[pass1 Step 11/18] Starting: Graph Re-enrichment","percent":33,"step_id":"pass1-step-11"}
+
+data: {"type":"step_started","step_id":"pass1-step-11","step_number":11,"total_steps":18,"step_name":"Graph Re-enrichment","pass":"pass1","started_at":"2026-04-03T08:50:54.060Z","steps_remaining":7}
+
+data: {"type":"progress","detail":"Connecting discovery hypotheses...","percent":34,"step_percent":10,"step_id":"pass1-step-11"}
+
+data: {"type":"progress","detail":"Connected 3 discovery edges. Wiring convention edges...","percent":35,"step_percent":25,"step_id":"pass1-step-11"}
+
+data: {"type":"progress","detail":"Matching conventions to discovery hypotheses...","percent":38,"step_percent":55,"step_id":"pass1-step-11"}
+
+data: {"type":"progress","detail":"Graph re-enrichment complete: 21 new edges","percent":42,"step_percent":100,"step_id":"pass1-step-11"}
+
+data: {"type":"progress","detail":"[pass1 Step 11/18] Completed: Graph Re-enrichment (3.8s)","percent":42,"step_id":"pass1-step-11"}
+
+data: {"type":"step_completed","step_id":"pass1-step-11","step_number":11,"total_steps":18,"step_name":"Graph Re-enrichment","pass":"pass1","duration_ms":3761,"summary":"Added 21 edges (5 discovery, 9 convention, 7 applies-to) Traversal QA 0/6","steps_remaining":7,"metrics":{"llm_calls":1,"input_tokens":1529,"output_tokens":204,"cost_usd":0.007647}}
+
+data: {"type":"progress","detail":"[pass1 Step 12/18] Starting: Page Plan","percent":42,"step_id":"pass1-step-12"}
+
+data: {"type":"step_started","step_id":"pass1-step-12","step_number":12,"total_steps":18,"step_name":"Page Plan","pass":"pass1","started_at":"2026-04-03T08:50:57.852Z","steps_remaining":6}
+
+data: {"type":"progress","detail":"Planning pages for 100 deduplicated entities...","percent":43,"step_percent":10,"step_id":"pass1-step-12"}
+
+data: {"type":"progress","detail":"Planning human concept pages...","percent":46,"step_percent":50,"step_id":"pass1-step-12"}
+
+data: {"type":"progress","detail":"Syncing ticket nodes to kb2_tickets...","percent":48,"step_percent":80,"step_id":"pass1-step-12"}
+
+data: {"type":"progress","detail":"Planned 64 pages (50 entity + 14 human), synced 35 tickets","percent":50,"step_percent":100,"step_id":"pass1-step-12"}
+
+data: {"type":"progress","detail":"[pass1 Step 12/18] Completed: Page Plan (0.2s)","percent":50,"step_id":"pass1-step-12"}
+
+data: {"type":"step_completed","step_id":"pass1-step-12","step_number":12,"total_steps":18,"step_name":"Page Plan","pass":"pass1","duration_ms":159,"summary":"Planned 64 pages (50 entity + 14 human)","steps_remaining":6,"metrics":{"llm_calls":0,"input_tokens":0,"output_tokens":0,"cost_usd":0}}
+
+data: {"type":"progress","detail":"[pass1 Step 13/18] Starting: GraphRAG Retrieval","percent":50,"step_id":"pass1-step-13"}
+
+data: {"type":"step_started","step_id":"pass1-step-13","step_number":13,"total_steps":18,"step_name":"GraphRAG Retrieval","pass":"pass1","started_at":"2026-04-03T08:50:58.082Z","steps_remaining":5}
+
+data: {"type":"progress","detail":"Retrieving context for 64 pages...","percent":50,"step_percent":5,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 5/64 pages","percent":51,"step_percent":12,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 10/64 pages","percent":52,"step_percent":19,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 15/64 pages","percent":52,"step_percent":26,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 20/64 pages","percent":53,"step_percent":33,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 25/64 pages","percent":53,"step_percent":40,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 30/64 pages","percent":54,"step_percent":47,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 35/64 pages","percent":54,"step_percent":54,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 40/64 pages","percent":55,"step_percent":61,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 45/64 pages","percent":55,"step_percent":68,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 50/64 pages","percent":56,"step_percent":75,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 55/64 pages","percent":57,"step_percent":82,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 60/64 pages","percent":57,"step_percent":89,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieved context for 64/64 pages","percent":58,"step_percent":95,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"Retrieval complete for 64 pages","percent":58,"step_percent":100,"step_id":"pass1-step-13"}
+
+data: {"type":"progress","detail":"[pass1 Step 13/18] Completed: GraphRAG Retrieval (23.5s)","percent":58,"step_id":"pass1-step-13"}
+
+data: {"type":"step_completed","step_id":"pass1-step-13","step_number":13,"total_steps":18,"step_name":"GraphRAG Retrieval","pass":"pass1","duration_ms":23533,"summary":"total_packs: 64, entity_packs: 50, human_packs: 14, expected_total_packs: 64, critical_pack_samples: 8 items","steps_remaining":5,"metrics":{"llm_calls":0,"input_tokens":0,"output_tokens":0,"cost_usd":0}}
+
+data: {"type":"progress","detail":"[pass1 Step 14/18] Starting: Generate Entity Pages","percent":58,"step_id":"pass1-step-14"}
+
+data: {"type":"step_started","step_id":"pass1-step-14","step_number":14,"total_steps":18,"step_name":"Generate Entity Pages","pass":"pass1","started_at":"2026-04-03T08:51:21.693Z","steps_remaining":4}
+
+data: {"type":"progress","detail":"Generating 50 entity pages...","percent":58,"step_percent":5,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 5/50 entity pages","percent":59,"step_percent":14,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 10/50 entity pages","percent":60,"step_percent":23,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 15/50 entity pages","percent":61,"step_percent":32,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 20/50 entity pages","percent":62,"step_percent":41,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 25/50 entity pages","percent":63,"step_percent":50,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 30/50 entity pages","percent":63,"step_percent":59,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 35/50 entity pages","percent":64,"step_percent":68,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 40/50 entity pages","percent":65,"step_percent":77,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 45/50 entity pages","percent":66,"step_percent":86,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 50/50 entity pages","percent":67,"step_percent":95,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"Generated 50 entity pages","percent":67,"step_percent":100,"step_id":"pass1-step-14"}
+
+data: {"type":"progress","detail":"[pass1 Step 14/18] Completed: Generate Entity Pages (692.9s)","percent":67,"step_id":"pass1-step-14"}
+
+data: {"type":"step_completed","step_id":"pass1-step-14","step_number":14,"total_steps":18,"step_name":"Generate Entity Pages","pass":"pass1","duration_ms":692915,"summary":"Generated 50 pages using 50 LLM calls","steps_remaining":4,"metrics":{"llm_calls":50,"input_tokens":101532,"output_tokens":43605,"cost_usd":0.958671}}
+
+data: {"type":"progress","detail":"[pass1 Step 15/18] Starting: Generate Human Pages","percent":67,"step_id":"pass1-step-15"}
+
+data: {"type":"step_started","step_id":"pass1-step-15","step_number":15,"total_steps":18,"step_name":"Generate Human Pages","pass":"pass1","started_at":"2026-04-03T09:02:54.717Z","steps_remaining":3}
+
+data: {"type":"progress","detail":"Generating 14 human pages from AI pages...","percent":67,"step_percent":5,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 3/14 human pages","percent":69,"step_percent":24,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 6/14 human pages","percent":71,"step_percent":44,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 9/14 human pages","percent":72,"step_percent":63,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 12/14 human pages","percent":74,"step_percent":82,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 14/14 human pages","percent":75,"step_percent":95,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"Generated 14 human pages","percent":75,"step_percent":100,"step_id":"pass1-step-15"}
+
+data: {"type":"progress","detail":"[pass1 Step 15/18] Completed: Generate Human Pages (238.2s)","percent":75,"step_id":"pass1-step-15"}
+
+data: {"type":"step_completed","step_id":"pass1-step-15","step_number":15,"total_steps":18,"step_name":"Generate Human Pages","pass":"pass1","duration_ms":238249,"summary":"Generated 14 pages using 13 LLM calls","steps_remaining":3,"metrics":{"llm_calls":13,"input_tokens":40947,"output_tokens":13558,"cost_usd":0.326211}}
+
+data: {"type":"progress","detail":"[pass1 Step 16/18] Starting: Generate How-To Guides","percent":75,"step_id":"pass1-step-16"}
+
+data: {"type":"step_started","step_id":"pass1-step-16","step_number":16,"total_steps":18,"step_name":"Generate How-To Guides","pass":"pass1","started_at":"2026-04-03T09:06:53.060Z","steps_remaining":2}
+
+data: {"type":"progress","detail":"Generating plans for 4 project targets...","percent":75,"step_percent":5,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 3/4 plans","percent":81,"step_percent":73,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 4/4 plans","percent":83,"step_percent":95,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 4 plans","percent":83,"step_percent":100,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"[pass1 Step 16/18] Completed: Generate How-To Guides (128.3s)","percent":83,"step_id":"pass1-step-16"}
+
+data: {"type":"step_completed","step_id":"pass1-step-16","step_number":16,"total_steps":18,"step_name":"Generate How-To Guides","pass":"pass1","duration_ms":128281,"summary":"total_howtos: 4, llm_calls: 4, target_node_count: 4, target_nodes: 4 items, howto_titles: 4 items","steps_remaining":2,"metrics":{"llm_calls":4,"input_tokens":9118,"output_tokens":6279,"cost_usd":0.12153900000000001}}
+
+data: {"type":"progress","detail":"[pass1 Step 17/18] Starting: Extract Claims","percent":83,"step_id":"pass1-step-17"}
+
+data: {"type":"step_started","step_id":"pass1-step-17","step_number":17,"total_steps":18,"step_name":"Extract Claims","pass":"pass1","started_at":"2026-04-03T09:09:01.439Z","steps_remaining":1}
+
+data: {"type":"progress","detail":"Extracting claims from 50 entity pages...","percent":83,"step_percent":5,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 10/50 entity pages","percent":84,"step_percent":13,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 20/50 entity pages","percent":85,"step_percent":21,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 30/50 entity pages","percent":86,"step_percent":29,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 40/50 entity pages","percent":86,"step_percent":37,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 50/50 entity pages","percent":87,"step_percent":45,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracting claims from 14 human pages via LLM...","percent":88,"step_percent":50,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 3/14 human pages","percent":88,"step_percent":60,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 6/14 human pages","percent":89,"step_percent":69,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 9/14 human pages","percent":90,"step_percent":79,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 12/14 human pages","percent":91,"step_percent":89,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 14/14 human pages","percent":92,"step_percent":95,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted 980 total claims","percent":92,"step_percent":100,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"[pass1 Step 17/18] Completed: Extract Claims (197.6s)","percent":92,"step_id":"pass1-step-17"}
+
+data: {"type":"step_completed","step_id":"pass1-step-17","step_number":17,"total_steps":18,"step_name":"Extract Claims","pass":"pass1","duration_ms":197585,"summary":"Extracted 980 claims using 14 LLM calls","steps_remaining":1,"metrics":{"llm_calls":14,"input_tokens":8332,"output_tokens":10429,"cost_usd":0.181431}}
+
+data: {"type":"progress","detail":"[pass1 Step 18/18] Starting: Create Verify Cards","percent":92,"step_id":"pass1-step-18"}
+
+data: {"type":"step_started","step_id":"pass1-step-18","step_number":18,"total_steps":18,"step_name":"Create Verify Cards","pass":"pass1","started_at":"2026-04-03T09:12:19.066Z","steps_remaining":0}
+
+data: {"type":"progress","detail":"Phase 1: Gathering verification candidates...","percent":92,"step_percent":5,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 1 complete: 29 raw candidates","percent":94,"step_percent":20,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: LLM filtering and rewriting...","percent":94,"step_percent":25,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: processed 25/29 candidates","percent":97,"step_percent":59,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: processed 29/29 candidates","percent":97,"step_percent":65,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2 complete: 0/29 cards kept","percent":97,"step_percent":65,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 3: Attaching source references...","percent":98,"step_percent":70,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 4: Auto-assigning...","percent":98,"step_percent":80,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Created 0 verification cards (29 filtered, 0 deduped)","percent":100,"step_percent":100,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"[pass1 Step 18/18] Completed: Create Verify Cards (15.1s)","percent":100,"step_id":"pass1-step-18"}
+
+data: {"type":"step_completed","step_id":"pass1-step-18","step_number":18,"total_steps":18,"step_name":"Create Verify Cards","pass":"pass1","duration_ms":15133,"summary":"Created 0 verification cards","steps_remaining":0,"metrics":{"llm_calls":2,"input_tokens":3735,"output_tokens":761,"cost_usd":0.02262}}
+
+data: {"type":"done","runId":"c5111e40-5b76-41f1-b6af-ce65bc84bb7a","status":"completed"}
+
+

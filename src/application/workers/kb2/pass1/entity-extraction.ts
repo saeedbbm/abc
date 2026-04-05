@@ -52,9 +52,9 @@ const CONFLUENCE_UMBRELLA_RE = /\b(phase\s+\d+|website redesign|roadmap)\b/i;
 const INITIATIVE_RE = /\b(phase|initiative|priority|biggest new feature|goal of|ongoing effort|feature work|started this effort|distinct feature|living document)\b/i;
 const DECISION_TRIGGER_RE = /\b(decided|decision|prefer|instead of|tradeoff|going with|makes more sense|standardize|suggested|opted)\b/i;
 const PROCESS_TRIGGER_RE = /\b(process|workflow|runbook|playbook|checklist|triage|handoff|manual process|review flow|deployment pipeline|daily|weekly|every \d+)\b/i;
-const PATTERN_TRIGGER_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|instead of|always|never)\b/i;
+const PATTERN_TRIGGER_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|instead of|always|never)\b|can you (?:memoize|use|add|move)|use the same\b|fixed with\b|let(?:'s| us) (?:move|use|add)|put .+ on the (?:left|right)|single[- ]column|vertical (?:nav|sidebar)/i;
 const WEAK_DECISION_FEEDBACK_RE = /\blooks so much better\b|\bwhere we started\b/i;
-const IMPLEMENTATION_CONTEXT_RE = /\b(ui|ux|button|cta|card|layout|menu|navigation|sidebar|filter|pagination|page|modal|drawer|grid|tab|tabs|table|form|search|sort|cache|caching|load|loading|client side|server side|api|schema|color|accent|style|responsive|mobile)\b/i;
+const IMPLEMENTATION_CONTEXT_RE = /\b(ui|ux|button|cta|card|layout|menu|navigation|sidebar|filter|pagination|page|modal|drawer|grid|tab|tabs|table|form|search|sort|cache|caching|load|loading|client side|server side|api|schema|color|accent|style|responsive|mobile|memo(?:ize)?|useCallback|useMemo|React\.memo|css.?module|camelCase|skeleton|toast|transition|vertical.?(?:nav|sidebar|menu|panel)|single.?column|max-height|overflow-y|scroll(?:able)?|cursor.?(?:based|pagination)|Promise\.all|lazy.?load|fallback)\b/i;
 const IMPLEMENTATION_ACTION_RE = /\b(use|using|keep|put|place|load|store|filter|sort|paginate|render|show|hide|stack)\b/i;
 
 const EXTRACTION_PROMPT = `You are extracting evidence-backed observations and candidate entities from already-structured enterprise source units.

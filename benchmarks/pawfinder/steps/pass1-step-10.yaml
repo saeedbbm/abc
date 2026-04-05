@@ -12,6 +12,8 @@ benchmark_must_fit:
   - Synthesize benchmark-critical convention nodes for Kim, Tim, and Matt.
   - Preserve enough repeated evidence to explain why each convention exists.
   - Avoid fragmenting one broad convention into several narrow near-duplicates.
+  - Each convention must have pattern_rule containing concrete prescriptions (exact colors, breakpoints, thresholds, component patterns) not just abstract names.
+  - Each convention must have established_by set to the correct person based on provenance, not the implementer.
 
 benchmark_watchouts:
   - Kim convention disappears entirely

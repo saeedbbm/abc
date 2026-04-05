@@ -13,6 +13,7 @@ benchmark_must_fit:
   - "Repository entity pages should include `pawfinder-web` and `pawfinder-api` or an obviously equivalent normalized title."
   - "GT-critical projects such as `Pet Adoption Chooser`, `Site Navigation Improvements`, `Event Calendar for Shelter Pages`, and `Toy Donation Feature` should not be absent."
   - Convention and person pages should still be grounded, but not at the expense of missing core repo/project coverage.
+  - Convention entity pages must contain specific implementation prescriptions (exact colors, pixel sizes, breakpoints, thresholds, component patterns) not collapsed to vague one-liners.
 
 benchmark_watchouts:
   - repository pages missing entirely

@@ -10,11 +10,101 @@ import { getLatestCompletedRunId } from "@/src/application/lib/kb2/run-scope";
 import { resolveActiveDemoState, buildBaselineRunFilter, buildStateFilter, isWorkspaceLikeState } from "@/src/application/lib/kb2/demo-state";
 
 const KB2_COLLECTION = "kb2_embeddings";
+const CHAT_EMOJI_RE = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
+const DEFAULT_CHAT_SYSTEM_PROMPT = `You answer questions about this company using ONLY the provided knowledge base context.
+
+FORMAT RULES (strict):
+- NO emojis. None. Zero. Never use any emoji character.
+- NO bold text. Do not use ** markdown bold.
+- Do not use numbered lists (1. 2. 3.). Use bullet lists (- item) only.
+- Use plain text. Use \`backticks\` only for code identifiers like API paths, component names, or config values.
+- Keep answers concise. Short sentences, plain English, active voice.
+- Organize with bullet lists and short paragraphs. No headings unless the answer covers 3+ distinct topics.
+- Do NOT list sources or references at the end — sources are shown separately in the UI.
+
+CONTENT RULES:
+- Answer ONLY from the provided context. Never fabricate facts, processes, or people.
+- If the context lacks relevant information, say: "I don't have information about that in the knowledge base."
+- Never reference any company, product, or project that isn't in the context.
+- Never tell the user to go ask someone else or check with a colleague. Answer from the KB or say you don't have the information.
+- Reference tickets (e.g. PAW-19), PRs, and people by name naturally in your text.
+- No filler intros. Get to the answer directly.
+- No hedge-padding ("may", "potentially", "it appears that") unless the source itself is uncertain.
+- When the context includes conventions or patterns, state them as concrete prescriptions: who established it, the exact rule, and what it means for the feature. Include specific values (colors, sizes, breakpoints, response shapes) when available.`;
+const CHAT_LAYOUT_APPENDIX = `
+
+RESPONSE LAYOUT RULES (strict):
+- Return valid multiline markdown. Never place markdown headings or bullets inline inside a paragraph.
+- Put every section label on its own line.
+- Leave a blank line before a bullet list.
+- Use "-" bullets only. Do not use numbered headings like "### 1. Foo".
+- Prefer this structure for convention or pattern answers:
+
+Short answer paragraph.
+
+## Conventions to Follow
+- Convention name: exact rule and what it means here.
+- Convention name: exact rule and what it means here.
+
+## Related Context
+- Relevant project, page, or dependency.
+- Relevant project, page, or dependency.
+
+- Keep the tone professional and polished.`;
 
 interface ContextItem {
   type: string;
   id: string;
   title: string;
+}
+
+function stripChatEmojis(text: string): string {
+  return text.replace(CHAT_EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function formatChatAnswer(text: string): string {
+  let normalized = stripChatEmojis(text).replace(/\r\n/g, "\n").trim();
+  if (!normalized) return normalized;
+
+  normalized = normalized
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\s+---\s+/g, "\n\n---\n\n")
+    .replace(/([^\n])\s+(##\s+)/g, "$1\n\n$2")
+    .replace(/([^\n])\s+(###\s*(?:\d+\.\s*)?)/g, "$1\n\n$2")
+    .replace(/([:.!?])\s+-\s+/g, "$1\n\n- ")
+    .replace(/([:.!?])\s+\*\s+/g, "$1\n\n- ")
+    .replace(/(?:^|\n)\s*###\s*(?:\d+\.\s*)?/g, "\n- ")
+    .replace(/(?:^|\n)\s*\*\s+/g, "\n- ");
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, index, arr) => line.length > 0 || arr[index - 1]?.length > 0);
+
+  const formatted: string[] = [];
+  for (const line of lines) {
+    if (line === "---" || line.startsWith("## ")) {
+      if (formatted.at(-1) !== "") formatted.push("");
+      formatted.push(line);
+      formatted.push("");
+      continue;
+    }
+
+    if (line.startsWith("- ")) {
+      if (formatted.length > 0 && formatted.at(-1) !== "" && !formatted.at(-1)?.startsWith("- ")) {
+        formatted.push("");
+      }
+      formatted.push(line);
+      continue;
+    }
+
+    formatted.push(line);
+  }
+
+  return formatted
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function extractSearchTerms(question: string): string[] {
@@ -303,21 +393,11 @@ export async function POST(
     content: m.content,
   }));
 
+  const systemPrompt = `${config?.prompts?.chat?.system ?? DEFAULT_CHAT_SYSTEM_PROMPT}${CHAT_LAYOUT_APPENDIX}`;
+
   const { text } = await generateText({
     model: getFastModel(config?.pipeline_settings?.models),
-    system: config?.prompts?.chat?.system ?? `You are a knowledgeable teammate who answers questions about this company using ONLY the provided knowledge base context. Write like a real person — short sentences, active voice, plain English.
-
-Rules:
-- Answer ONLY from the provided context. Never fabricate facts, processes, or people.
-- If the context lacks relevant information, say: "I don't have information about that in the knowledge base."
-- Never reference or answer about any other company, product, or project that isn't in the context.
-- NEVER tell the user to go ask someone else, check with a colleague, or talk to a team member. You ARE the knowledge base — answer from it or say you don't have the information.
-- Do NOT list sources/references at the end — sources are displayed separately in the UI.
-- Use bold sparingly for key terms only. Use bullet points and short paragraphs.
-- Reference tickets (e.g. PAW-19) and people naturally in your text.
-- No filler intros ("Based on the available knowledge base context..."). Get to the answer directly.
-- No hedge-padding ("may", "potentially", "it appears that") unless the source material itself is uncertain.
-- When the context includes conventions or patterns, explain them concretely with their owner and how they apply.`,
+    system: systemPrompt,
     messages: [
       ...historyMessages,
       { role: "user" as const, content: `Context:\n${ragContext}\n\nQuestion: ${message}` },
@@ -325,5 +405,5 @@ Rules:
     maxOutputTokens: config?.pipeline_settings?.chat?.max_output_tokens ?? 2048,
   });
 
-  return Response.json({ answer: text, input_sources: inputSources, kb_sources: kbSources });
+  return Response.json({ answer: formatChatAnswer(text), input_sources: inputSources, kb_sources: kbSources });
 }

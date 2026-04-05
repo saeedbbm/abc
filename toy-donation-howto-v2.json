@@ -1,0 +1,377 @@
+﻿{
+    "_id":  "69cf83addcbdafb3a6c661dd",
+    "howto_id":  "08948b7b-0865-4bb0-af21-ba92580ed3df",
+    "run_id":  "c5111e40-5b76-41f1-b6af-ce65bc84bb7a",
+    "execution_id":  "e0cca9a8-3d64-471d-8e2a-1eef23ab0c36",
+    "ticket_id":  null,
+    "project_node_id":  "f4e2e23c-478a-4497-9db3-804735659af5",
+    "title":  "Plan: Toy Donation Program Feature",
+    "sections":  [
+                     {
+                         "section_name":  "Overview",
+                         "content":  "The Toy Donation Program Feature allows users to donate physical toys to shelter pets through the website. This feature addresses customer requests for material donations and provides an alternative to monetary donations, enabling users to contribute toys they no longer need directly to animals awaiting adoption.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Toy Donation Program Feature implementing green for monetary UI elements"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Context",
+                         "content":  "This feature builds upon the existing donation infrastructure established in the completed Donation Page project. It follows Kim\u0027s established design convention of using green color for money-related UI elements, which must be applied to any financial transaction buttons. The existing donation page provides patterns for payment processing and user experience flows that can be adapted for toy purchases. Customer feedback shows clear demand for toy donation capabilities, with multiple inquiries about donating gently used toys and purchasing toys directly for shelter animals.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Context",
+                                                 "item_text":  "Green provides natural association with financial concepts and money"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Requirements",
+                         "content":  "- Users must be able to browse available toys for donation/purchase\n- Payment processing must be integrated for toy purchases\n- Toy selection must allow dedication to specific pets (similar to existing monetary donations)\n- All money-related UI elements must use green color per Kim\u0027s convention\n- Feature must integrate with existing pet browsing and selection patterns\n- Confirmation and receipt functionality must be provided\n- Feature must handle both purchased new toys and coordination of used toy donations",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Decision title: Green Color for Money-Related UI Elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Apply green color to all money-related call-to-action buttons and UI elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Toy Donation Program Feature implementing green for monetary UI elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision Makers",
+                                                 "item_text":  "Kim proposed and designed the green color choice for money-related elements"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Implementation Steps",
+                         "content":  "1. Design toy browsing interface following existing donation page\nCreate toy catalog page using the same clean design approach as the existing donation page. Apply Kim\u0027s green color convention to all purchase/donate buttons. Use neutral gray for toy selection buttons and green for the final \u0027Purchase Toys\u0027 or \u0027Complete Toy Donation\u0027 button, maintaining consistency with the existing \u0027Complete Donation\u0027 button styling.\n\n2. Implement toy-to-pet dedication feature\nAdapt the existing \u0027dedicate to a pet\u0027 functionality from the monetary donation page. When users select to dedicate toys to a specific pet, show the pet selector that loads all adoptable pets using the same endpoint as the adoption chooser. Display selected pet cards with the standard pink/blue gender accent system established in the pet profile cards.\n\n3. New work to define: Create toy inventory management\nNew work to define: Design and implement backend systems for managing toy inventory, including catalog management, stock tracking, and integration with shelter fulfillment processes. This includes defining API contracts for toy CRUD operations and inventory management.\n\n4. Integrate payment processing for toy purchases\nExtend the existing credit card payment form from the donation page to handle toy purchases. Maintain the clean white background for the payment section to avoid visual noise during card entry. Ensure the payment flow follows the same UX patterns as monetary donations.\n\n5. New work to define: Implement used toy donation\nNew work to define: Create workflow for users donating gently used toys, including submission forms, quality guidelines, drop-off coordination, and shelter notification systems. This addresses customer requests for donating existing toys they no longer need.\n\n6. New work to define: Create database schema for\nNew work to define: Design database tables for toy inventory, donation records, and pet-toy associations. Include migration scripts and ensure proper indexing for toy browsing and reporting functionality.",
+                         "steps":  [
+                                       {
+                                           "title":  "Design toy browsing interface following existing donation page",
+                                           "content":  "Create toy catalog page using the same clean design approach as the existing donation page. Apply Kim\u0027s green color convention to all purchase/donate buttons. Use neutral gray for toy selection buttons and green for the final \u0027Purchase Toys\u0027 or \u0027Complete Toy Donation\u0027 button, maintaining consistency with the existing \u0027Complete Donation\u0027 button styling.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "jira",
+                                                                   "doc_id":  "PAW-15",
+                                                                   "title":  "PAW-15: Build donation page",
+                                                                   "section_heading":  "PAW-15 Description",
+                                                                   "excerpt":  "Use Kim\u0027s designs (green donate button, clean payment section)."
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                                               },
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-pawfinder-website-redesign",
+                                                                   "title":  "PawFinder Website Redesign",
+                                                                   "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                                   "excerpt":  "the main \"Complete Donation\" button is green"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related, feels natural"
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "a2d0dc9d-1885-498b-a37e-95115e500e55",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Key Decisions",
+                                                                   "item_text":  "Decision to use Kim\u0027s designs for the donation page interface, focusing on a clean layout."
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Decision",
+                                                                   "item_text":  "Apply green color to all money-related call-to-action buttons and UI elements"
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Donation Page featuring \"Complete Donation\" button in green"
+                                                               },
+                                                               {
+                                                                   "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                                   "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                                   "page_title":  "Green Color for Money-Related UI Elements",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Pet profile cards on browse page with green \"Sponsor Me\" buttons"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Implement toy-to-pet dedication feature",
+                                           "content":  "Adapt the existing \u0027dedicate to a pet\u0027 functionality from the monetary donation page. When users select to dedicate toys to a specific pet, show the pet selector that loads all adoptable pets using the same endpoint as the adoption chooser. Display selected pet cards with the standard pink/blue gender accent system established in the pet profile cards.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                                   "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                                   "excerpt":  "Optional \u0027dedicate to a pet\u0027 toggle that shows a pet selector.",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #47 Description"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "New work to define: Create toy inventory management",
+                                           "content":  "New work to define: Design and implement backend systems for managing toy inventory, including catalog management, stock tracking, and integration with shelter fulfillment processes. This includes defining API contracts for toy CRUD operations and inventory management."
+                                       },
+                                       {
+                                           "title":  "Integrate payment processing for toy purchases",
+                                           "content":  "Extend the existing credit card payment form from the donation page to handle toy purchases. Maintain the clean white background for the payment section to avoid visual noise during card entry. Ensure the payment flow follows the same UX patterns as monetary donations.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "github",
+                                                                   "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                                   "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                                   "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                                   "excerpt":  "...and a payment form (card number, expiry, CVV)."
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "a2d0dc9d-1885-498b-a37e-95115e500e55",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Scope",
+                                                                   "item_text":  "Includes: A credit card payment form for secure transactions."
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "New work to define: Implement used toy donation",
+                                           "content":  "New work to define: Create workflow for users donating gently used toys, including submission forms, quality guidelines, drop-off coordination, and shelter notification systems. This addresses customer requests for donating existing toys they no longer need."
+                                       },
+                                       {
+                                           "title":  "New work to define: Create database schema for",
+                                           "content":  "New work to define: Design database tables for toy inventory, donation records, and pet-toy associations. Include migration scripts and ensure proper indexing for toy browsing and reporting functionality."
+                                       }
+                                   ],
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "github",
+                                                 "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                 "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                 "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                 "excerpt":  "...and a payment form (card number, expiry, CVV)."
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "Kim suggested green for any money-related call-to-action and it works well"
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-pawfinder-website-redesign",
+                                                 "title":  "PawFinder Website Redesign",
+                                                 "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                 "excerpt":  "the main \"Complete Donation\" button is green"
+                                             },
+                                             {
+                                                 "source_type":  "jira",
+                                                 "doc_id":  "PAW-15",
+                                                 "title":  "PAW-15: Build donation page",
+                                                 "section_heading":  "PAW-15 Description",
+                                                 "excerpt":  "Use Kim\u0027s designs (green donate button, clean payment section)."
+                                             },
+                                             {
+                                                 "source_type":  "github",
+                                                 "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                 "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                 "excerpt":  "Optional \u0027dedicate to a pet\u0027 toggle that shows a pet selector.",
+                                                 "section_heading":  "pawfinder/pawfinder-web PR #47 Description"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "a2d0dc9d-1885-498b-a37e-95115e500e55",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Scope",
+                                                 "item_text":  "Includes: A credit card payment form for secure transactions."
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Context",
+                                                 "item_text":  "Required color choice for \"Sponsor Me\" buttons on pet profile cards"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Apply green color to all money-related call-to-action buttons and UI elements"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Donation Page featuring \"Complete Donation\" button in green"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Pet profile cards on browse page with green \"Sponsor Me\" buttons"
+                                             },
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Toy Donation Program Feature implementing green for monetary UI elements"
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "a2d0dc9d-1885-498b-a37e-95115e500e55",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Key Decisions",
+                                                 "item_text":  "Decision to use Kim\u0027s designs for the donation page interface, focusing on a clean layout."
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Testing Plan",
+                         "content":  "- Test toy browsing and selection UI across responsive breakpoints\n- Verify green color application on all financial action buttons per Kim\u0027s convention\n- Test pet dedication functionality with the existing pet selector endpoint\n- Validate payment processing integration with various card types and amounts\n- Test toy-to-pet association and confirmation flows\n- Edge case testing: out-of-stock toys, payment failures, invalid pet selections\n- Cross-browser testing for payment form security and UX\n- Test integration with existing donation receipt/confirmation systems",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "7295461a-4f78-4689-a407-696af632c707",
+                                                 "page_id":  "fbbf0f67-f935-435a-9639-e27fb975a275",
+                                                 "page_title":  "Green Color for Money-Related UI Elements",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Context",
+                                                 "item_text":  "Green provides natural association with financial concepts and money"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Risks and Considerations",
+                         "content":  "- Inventory management complexity could impact development timeline\n- Used toy donation coordination requires operational processes beyond software\n- Payment processing fees will apply to toy purchases, affecting cost structure\n- Shelter fulfillment capabilities may limit available toy options\n- Quality control for used toy donations presents liability considerations\n- Integration complexity with existing donation infrastructure\n- Need to maintain design consistency with Kim\u0027s established financial UI patterns while creating new toy-specific interfaces"
+                     }
+                 ],
+    "linked_entity_ids":  [
+                              "f4e2e23c-478a-4497-9db3-804735659af5",
+                              "7295461a-4f78-4689-a407-696af632c707",
+                              "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0"
+                          ],
+    "created_at":  "2026-04-03T09:07:59.914Z",
+    "updated_at":  "2026-04-03T09:07:59.914Z",
+    "plan_status":  "draft",
+    "owner_name":  "",
+    "reviewers":  [
+
+                  ],
+    "discussion":  [
+
+                   ]
+}

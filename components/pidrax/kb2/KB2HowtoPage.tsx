@@ -683,8 +683,8 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
   const [entityPages, setEntityPages] = useState<EntityPage[]>([]);
   const [leftSidebarTab, setLeftSidebarTab] = useState<LeftSidebarTab>("plans");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editingSection, setEditingSection] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState("");
+
+
   const [commentText, setCommentText] = useState("");
   const [sourceTab, setSourceTab] = useState<SourceTab>("tickets");
   const [viewMode, setViewMode] = useState<"plan" | "prompt">("plan");
@@ -743,22 +743,8 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
     setReviewersDraft((selected.reviewers ?? []).join(", "));
   }, [selected]);
 
-  const handleSectionSave = async (sectionName: string, content: string) => {
-    if (!selected) return;
-    await fetch(`/api/${companySlug}/kb2?type=howto`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "howto",
-        howto_id: selected.howto_id,
-        section_name: sectionName,
-        content,
-      }),
-    });
-    setEditingSection(null);
-    setEditContent("");
-    await fetchData();
-  };
+
+
 
   const handleAddComment = async () => {
     if (!selected || !commentText.trim()) return;
@@ -1864,33 +1850,8 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="pb-3">
-                      {editingSection === sec.section_name ? (
-                        <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
-                          <Textarea
-                            autoFocus
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            className="text-sm min-h-[100px] font-mono"
-                          />
-                          <div className="flex gap-2">
-                            <Button size="sm" className="h-7 text-xs" onClick={() => handleSectionSave(sec.section_name, editContent)}>
-                              Save
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setEditingSection(null); setEditContent(""); }}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            selectHowtoSection(sec);
-                            setEditingSection(sec.section_name);
-                            setEditContent(sec.content);
-                          }}
-                          className="cursor-pointer rounded p-2 hover:bg-accent/50 transition-colors"
-                        >
+                        <div className="rounded p-2">
+
                           {sectionHasVisibleContent(sec) ? (
                             sec.section_name === "Implementation Steps" && getHowtoSectionSteps(sec).length > 0 ? (
                               <div className="space-y-2">
@@ -1945,10 +1906,9 @@ export function KB2HowtoPage({ companySlug }: { companySlug: string }) {
                               </div>
                             )
                           ) : (
-                            <span className="text-muted-foreground italic">Click to edit...</span>
+                            <span className="text-muted-foreground italic">No content</span>
                           )}
                         </div>
-                      )}
                     </CardContent>
                   </Card>
                 );

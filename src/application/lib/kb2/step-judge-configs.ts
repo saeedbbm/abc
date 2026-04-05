@@ -810,6 +810,38 @@ function extractMetricFromArtifact(artifact: Record<string, unknown>, key: strin
       });
       return looksClean ? 1 : 0;
     }
+    case "evidence_pack_convention_source_count": {
+      const epSamples = Array.isArray(artifact.evidence_pack_samples)
+        ? artifact.evidence_pack_samples as Record<string, unknown>[]
+        : [];
+      if (epSamples.length === 0) return Number(artifact.evidence_pack_convention_source_count ?? 0);
+      return Math.max(...epSamples.map(s => Number(s.convention_source_count ?? 0)), 0);
+    }
+    case "evidence_pack_precedent_source_count": {
+      const epSamples2 = Array.isArray(artifact.evidence_pack_samples)
+        ? artifact.evidence_pack_samples as Record<string, unknown>[]
+        : [];
+      if (epSamples2.length === 0) return Number(artifact.evidence_pack_precedent_source_count ?? 0);
+      return Math.max(...epSamples2.map(s => Number(s.precedent_source_count ?? 0)), 0);
+    }
+    case "evidence_pack_source_type_diversity": {
+      const epSamples3 = Array.isArray(artifact.evidence_pack_samples)
+        ? artifact.evidence_pack_samples as Record<string, unknown>[]
+        : [];
+      if (epSamples3.length === 0) return Number(artifact.evidence_pack_source_type_diversity ?? 0);
+      return Math.max(...epSamples3.map(s => {
+        const mix = s.source_type_mix as Record<string, unknown> | undefined;
+        return mix ? Object.keys(mix).length : 0;
+      }), 0);
+    }
+    case "evidence_pack_fallback_ratio_low": {
+      const epSamples4 = Array.isArray(artifact.evidence_pack_samples)
+        ? artifact.evidence_pack_samples as Record<string, unknown>[]
+        : [];
+      if (epSamples4.length === 0) return Number(artifact.evidence_pack_fallback_ratio_pct ?? 0);
+      const ratios = epSamples4.map(s => Number(s.fallback_ratio_pct ?? 0));
+      return ratios.length > 0 ? Math.round(ratios.reduce((a, b) => a + b, 0) / ratios.length) : 0;
+    }
     case "total_cards_positive_when_candidates_exist": {
       const candidates = Number(artifact.candidates_gathered ?? 0);
       if (candidates <= 0) return 1;

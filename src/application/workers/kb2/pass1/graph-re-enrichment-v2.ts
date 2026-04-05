@@ -175,17 +175,30 @@ function buildSyntheticDecisionSpecs(convention: KB2GraphNodeType): Array<{ name
 }
 
 function scoreConventionFit(hypothesis: KB2GraphNodeType, convention: KB2GraphNodeType): number {
-  const hypothesisText = normalizeLookupText(buildHypothesisText(hypothesis));
+  const hypothesisAttrs = (hypothesis.attributes ?? {}) as Record<string, unknown>;
+  const hypothesisParts = [
+    hypothesis.display_name,
+    String(hypothesisAttrs.description ?? ""),
+    ...(hypothesis.source_refs ?? []).map((ref) => ref.excerpt ?? ""),
+  ];
+  const hypothesisText = normalizeLookupText(hypothesisParts.join("\n"));
   const conventionText = normalizeLookupText(buildHypothesisText(convention));
 
+  const stopwords = new Set(["this", "that", "with", "from", "have", "been", "should", "could", "would", "also", "more", "some", "when", "they", "will", "into"]);
   const conventionTokens = conventionText
     .split(" ")
-    .filter((t) => t.length >= 4 && !["this", "that", "with", "from", "have", "been", "should", "could", "would"].includes(t));
+    .filter((t) => t.length >= 4 && !stopwords.has(t));
 
   const uniqueTokens = [...new Set(conventionTokens)];
+  const hypothesisTokens = hypothesisText.split(" ").filter((t) => t.length >= 4);
+
   let matches = 0;
-  for (const token of uniqueTokens) {
-    if (hypothesisText.includes(token)) matches++;
+  for (const ct of uniqueTokens) {
+    if (hypothesisText.includes(ct)) {
+      matches++;
+    } else if (hypothesisTokens.some((ht) => ct.startsWith(ht) || ht.startsWith(ct))) {
+      matches += 0.5;
+    }
   }
 
   if (matches >= 3) return 2;
@@ -512,15 +525,29 @@ export const graphReEnrichmentStepV2: StepFunction = async (ctx) => {
 ${conventionNodes.map((node) => `- "${node.display_name}": ${(node.attributes as Record<string, unknown>).pattern_rule ?? (node.attributes as Record<string, unknown>).summary ?? ""}`).join("\n")}
 
 FEATURES OR HYPOTHESES:
-${featureCandidates.map((node) => `- "${node.display_name}": ${(node.attributes as Record<string, unknown>).description ?? ""}`).join("\n")}
+${featureCandidates.map((node) => {
+      const attrs = node.attributes as Record<string, unknown>;
+      const desc = String(attrs.description ?? "");
+      const relatedNames = (Array.isArray(attrs.related_entities) ? (attrs.related_entities as string[]).join(", ") : "") || "";
+      return `- "${node.display_name}": ${desc}${relatedNames ? ` (Related: ${relatedNames})` : ""}`;
+    }).join("\n")}
 
-Return only convention-to-feature matches where the convention should clearly influence implementation.`;
+Match conventions to features. Think step by step about what UI components and data patterns each feature would need:
+- A toy donation feature needs: browsing interface, pet selection, payment form, checkout flow, API endpoints
+- A volunteer feature needs: registration form, scheduling interface, API endpoints
+- Any feature with a list of items users browse or choose from involves selection/browsing conventions
+- Any feature with forms involves form layout conventions
+- Any feature with payments or donations involves financial UI conventions
+- Any feature with API endpoints involves API response format conventions
+
+Include a match if the feature plausibly involves a UI surface, data pattern, or interaction that the convention governs.
+Be thorough — it is better to include a plausible match than to miss one.`;
 
     const startMs = Date.now();
     let usageData: { promptTokens: number; completionTokens: number } | null = null;
     const result = await structuredGenerate({
       model,
-      system: "You match implementation conventions to features. Only include high-confidence, implementation-relevant matches.",
+      system: "You match implementation conventions to features. Include any convention that would influence how the feature is implemented, even if the connection requires reasoning about shared UI surfaces or data patterns.",
       prompt,
       schema: AppliesToSchema,
       logger,

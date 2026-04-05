@@ -121,7 +121,11 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
     const entityTitle = resolveEntityPageTitle(node);
 
     const isConventionNode = node.attributes?.is_convention === true;
-    const useReasoning = node.type === "team_member" || isConventionNode;
+    const prSourceCount = (node.source_refs ?? []).filter(
+      (ref) => ref.source_type === "github" || ref.source_type === "pull_request" || ref.source_type === "code_review",
+    ).length;
+    const isPrRichProject = node.type === "project" && prSourceCount >= 3;
+    const useReasoning = node.type === "team_member" || isConventionNode || isPrRichProject;
     const pageModel = useReasoning ? getReasoningModel(ctx.config?.pipeline_settings?.models) : model;
     const pageModelName = useReasoning ? getReasoningModelName(ctx.config?.pipeline_settings?.models) : getFastModelName(ctx.config?.pipeline_settings?.models);
 
@@ -160,6 +164,14 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
       conventionContextLines.push("");
     }
 
+    const rawSourceUnitsBlock = isConventionNode && pack.raw_source_units?.length
+      ? [
+          "",
+          "## Raw Source Units (full text from key source documents — use these for exact values and quotes)",
+          ...pack.raw_source_units.slice(0, 8),
+        ]
+      : [];
+
     const context = [
       "## Graph Context",
       ...pack.graph_context,
@@ -173,6 +185,7 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
       "",
       "## Vector Search Results",
       ...pack.vector_snippets.slice(0, VECTOR_SNIPPETS),
+      ...rawSourceUnitsBlock,
     ].join("\n");
 
     const conventionSectionOverride = isConvention
@@ -186,18 +199,30 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
 `
       : "";
 
-    let entityPageSystemPrompt = `You generate structured entity reference pages for a knowledge base.
-Each page has sections with bullet-point items. Each item is a single factual statement.
+    const implementationPatternsSection = isPrRichProject
+      ? `\nThis project has multiple PR/code review sources. Include an "Implementation Patterns" section listing specific implementation patterns from PR reviews: component architecture choices (React.memo, useCallback), image loading strategies (lazy loading, skeleton states, fallback images), grid/layout decisions (responsive breakpoints, column counts), API design patterns (response envelopes, pagination strategy), file/folder conventions (CSS Modules, page folder structure), testing approaches (frameworks, known issues). Include exact values. Up to 15 items. Each item may be 2-3 sentences.`
+      : "";
 
-${effectiveTemplate ? `Include rules: ${effectiveTemplate.includeRules}\nExclude rules: ${effectiveTemplate.excludeRules}\n` : ""}${conventionSectionOverride}
+    const conventionItemRules = isConventionNode
+      ? `- Convention items may be 2-3 sentences when they carry specific values from evidence (exact colors, pixel sizes, breakpoints, thresholds, component patterns, API conventions). Preserve implementation specifics.
+- Evidence Trail: include up to 12 items. Applied On: include up to 10 items.
+- Quote exact values from sources: color names, hex codes, pixel sizes, breakpoints, response shapes, component names.`
+      : isPrRichProject
+        ? `- One fact per bullet, but implementation pattern items may be 2-3 sentences to capture exact values.`
+        : `- One fact per bullet. If a bullet has more than 2 sentences, split it.`;
+
+    let entityPageSystemPrompt = `You generate structured entity reference pages for a knowledge base.
+Each page has sections with bullet-point items. Each item is a factual statement.
+
+${effectiveTemplate ? `Include rules: ${effectiveTemplate.includeRules}\nExclude rules: ${effectiveTemplate.excludeRules}\n` : ""}${conventionSectionOverride}${implementationPatternsSection}
 Section layout:
 ${isConvention ? "Convention Rule, Established By, Evidence Trail, Applied On, Future Applications" : sectionInstructions}
 
 Rules:
-- Each item must be a standalone factual statement in one short sentence. Active voice, plain English.
+- Each item must be a standalone factual statement. Active voice, plain English.
 - No filler intros ("This entity represents...", "Based on the analysis..."). State the fact directly.
 - No hedge words in items unless the source material itself is uncertain. No "may", "potentially", "appears to".
-- One fact per bullet. If a bullet has more than 2 sentences, split it.
+${conventionItemRules}
 - For source_excerpts: you MUST list EVERY source document that supports this fact. For each, provide the document title (from "Available Source Documents") and an EXACT VERBATIM quote of 1-2 sentences copied directly from the Document Snippets or Vector Search Results that proves this fact. Do NOT paraphrase — copy the text exactly as it appears.
 - You MUST check ALL Document Snippets and Vector Search Results for mentions of each fact. If a fact appears in 3 documents, all 3 must be listed.
 - Rate confidence: high = multiple sources confirm, medium = single source, low = inferred/uncertain.

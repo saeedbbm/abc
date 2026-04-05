@@ -29,6 +29,8 @@ must_do:
   - retrieve context relevant to each planned page
   - include multi-hop graph context when it materially helps a page
   - keep retrieval focused enough to support factual generation
+  - use extended snippet lengths (2000+ chars) for convention and proposed-project retrieval packs
+  - include raw_source_units for convention packs containing PR review comments and design discussions
 
 must_not_do:
   - read the wrong upstream artifact
@@ -39,6 +41,7 @@ success_signals:
   - most planned pages have useful retrieval packs
   - convention packs include supporting decisions, owners, and applicable features when available
   - human page packs include the right cross-entity context
+  - convention retrieval packs include raw source text from PR reviews and Slack discussions, not just 500-char summaries
 
 failure_signals:
   - retrieval is missing for planned pages

@@ -1,0 +1,290 @@
+﻿{
+    "new_edges":  0,
+    "removed_by_verification":  0,
+    "upgraded_related_to":  0,
+    "link_relationship_edges":  0,
+    "total_nodes":  23,
+    "llm_calls":  0,
+    "added_edges":  [
+
+                    ],
+    "pattern_candidates":  [
+                               {
+                                   "pattern_id":  "f016380f-9894-452f-ab4a-f03b9b93c77f",
+                                   "owner_hint":  "Kim",
+                                   "title":  "Green",
+                                   "pattern_rule":  "going with green for that since it\u0027s money-related, feels natural",
+                                   "evidence_refs":  [
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                             "title":  "#design | 2023-03-14 11:05 AM",
+                                                             "excerpt":  "going with green for that since it\u0027s money-related, feels natural",
+                                                             "section_heading":  "#design Message 9",
+                                                             "slack_speaker":  "Kim",
+                                                             "source_timestamp":  "11:20 AM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                             "title":  "#design | 2023-10-02 2:00 PM",
+                                                             "excerpt":  "just a standard action button",
+                                                             "section_heading":  "#design Message 3",
+                                                             "slack_speaker":  "Kim",
+                                                             "source_timestamp":  "2:05 PM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                             "title":  "#design | 2023-10-02 2:00 PM",
+                                                             "excerpt":  "going with a neutral blue for that one.",
+                                                             "section_heading":  "#design Message 3",
+                                                             "slack_speaker":  "Kim",
+                                                             "source_timestamp":  "2:05 PM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                             "title":  "#design | 2024-02-19 3:15 PM",
+                                                             "excerpt":  "so for the donation form itself, I\u0027m going with a clean white background.",
+                                                             "section_heading":  "#design Message 3",
+                                                             "slack_speaker":  "Kim",
+                                                             "source_timestamp":  "3:20 PM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2025-03-10-11-30-am",
+                                                             "title":  "#design | 2025-03-10 11:30 AM",
+                                                             "excerpt":  "no financial stuff on this page so it\u0027s just our standard blues and grays",
+                                                             "section_heading":  "#design Message 1",
+                                                             "slack_speaker":  "Kim"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-design-2025-03-10-11-30-am",
+                                                             "title":  "#design | 2025-03-10 11:30 AM",
+                                                             "excerpt":  "just our standard accent colors for alerts and badges.",
+                                                             "section_heading":  "#design Message 3",
+                                                             "slack_speaker":  "Kim",
+                                                             "source_timestamp":  "11:35 AM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-engineering-2023-03-21-3-15-pm",
+                                                             "title":  "#engineering | 2023-03-21 3:15 PM",
+                                                             "excerpt":  "the user is choosing, not comparing, so vertical nav makes more sense to me than tabs across the top",
+                                                             "section_heading":  "#engineering Message 3",
+                                                             "slack_speaker":  "Tim",
+                                                             "source_timestamp":  "3:20 PM"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-engineering-2023-05-10-4-20-pm",
+                                                             "title":  "#engineering | 2023-05-10 4:20 PM",
+                                                             "excerpt":  "going to standardize everything",
+                                                             "section_heading":  "#engineering Message 1",
+                                                             "slack_speaker":  "Matt"
+                                                         },
+                                                         {
+                                                             "source_type":  "slack",
+                                                             "doc_id":  "slack-engineering-2024-08-19-3-45-pm",
+                                                             "title":  "#engineering | 2024-08-19 3:45 PM",
+                                                             "excerpt":  "yes, always return ISO 8601 from the API.",
+                                                             "section_heading":  "#engineering Message 2",
+                                                             "slack_speaker":  "Matt",
+                                                             "source_timestamp":  "3:48 PM"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-incident-postmortem-database-migration-failure-may-28-2024",
+                                                             "title":  "Incident Postmortem â Database Migration Failure (May 28, 2024)",
+                                                             "excerpt":  "The migration script used ALTER TABLE ...",
+                                                             "section_heading":  "Root Cause",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-incident-postmortem-database-migration-failure-may-28-2024",
+                                                             "title":  "Incident Postmortem â Database Migration Failure (May 28, 2024)",
+                                                             "excerpt":  "- Always check the database version\u0027s behavior for DDL statements",
+                                                             "section_heading":  "Lessons Learned",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-pawfinder-engineering-onboarding-guide",
+                                                             "title":  "PawFinder Engineering Onboarding Guide",
+                                                             "excerpt":  "- API responses use the standardized envelope format:",
+                                                             "section_heading":  "Code Style",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-pawfinder-website-redesign",
+                                                             "title":  "PawFinder Website Redesign",
+                                                             "excerpt":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                             "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-pawfinder-website-redesign",
+                                                             "title":  "PawFinder Website Redesign",
+                                                             "excerpt":  "suggested green for any money-related call-to-action and it works well â the",
+                                                             "section_heading":  "Phase 1 (Q1âQ2 2023) â Pet Profiles and Browse Page",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/12",
+                                                             "title":  "pawfinder-web PR #12: Fix auth token refresh timing",
+                                                             "excerpt":  "auth config was set to the token\u0027s full lifetime instead of a buffer before",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #12 Description",
+                                                             "pr_author":  "Matt",
+                                                             "pr_reviewers":  [
+                                                                                  "Tim"
+                                                                              ],
+                                                             "source_author":  "Matt"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/31",
+                                                             "title":  "pawfinder-web PR #31: Shelter locations page",
+                                                             "excerpt":  "\u003e a max-height with scroll instead of pushing the page down when there",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #31 Review Comment 3",
+                                                             "pr_author":  "Matt [2023-09-22]",
+                                                             "pr_reviewers":  [
+                                                                                  "Matt"
+                                                                              ],
+                                                             "comment_author":  "Matt [2023-09-22]"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/39",
+                                                             "title":  "pawfinder-web PR #39: Contact form page",
+                                                             "excerpt":  "Clean form implementation.",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #39 Review Comment 1",
+                                                             "pr_author":  "Tim [2024-06-11]",
+                                                             "pr_reviewers":  [
+                                                                                  "Tim"
+                                                                              ],
+                                                             "comment_author":  "Tim [2024-06-11]"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/43",
+                                                             "title":  "pawfinder-web PR #43: Shelter comparison feature",
+                                                             "excerpt":  "\u003e Looking at the data fetching â you\u0027re making a separate API call for each",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #43 Review Comment 3",
+                                                             "pr_author":  "Matt [2024-07-13]",
+                                                             "pr_reviewers":  [
+                                                                                  "Tim",
+                                                                                  "Matt"
+                                                                              ],
+                                                             "comment_author":  "Matt [2024-07-13]"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/47",
+                                                             "title":  "pawfinder-web PR #47: Donation page frontend",
+                                                             "excerpt":  "Donation page implementation.",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #47 Description",
+                                                             "pr_author":  "Tim",
+                                                             "pr_reviewers":  [
+                                                                                  "Matt"
+                                                                              ],
+                                                             "source_author":  "Tim"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/61",
+                                                             "title":  "pawfinder-web PR #61: Mobile navigation refactor",
+                                                             "excerpt":  "Refactored the main navigation for mobile devices.",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #61 Description",
+                                                             "pr_author":  "Jill",
+                                                             "pr_reviewers":  [
+                                                                                  "Tim"
+                                                                              ],
+                                                             "source_author":  "Jill"
+                                                         },
+                                                         {
+                                                             "source_type":  "github",
+                                                             "doc_id":  "pawfinder/pawfinder-web/pull/61",
+                                                             "title":  "pawfinder-web PR #61: Mobile navigation refactor",
+                                                             "excerpt":  "- Pet cards now stack vertically on mobile instead of the 2-col grid",
+                                                             "section_heading":  "pawfinder/pawfinder-web PR #61 Description",
+                                                             "pr_author":  "Jill",
+                                                             "pr_reviewers":  [
+                                                                                  "Tim"
+                                                                              ],
+                                                             "source_author":  "Jill"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-shelter-partner-integration-spec",
+                                                             "title":  "Shelter Partner Integration Spec",
+                                                             "excerpt":  "- Bulk API for shelters with large inventories",
+                                                             "section_heading":  "Future Plans",
+                                                             "source_author":  "Sarah"
+                                                         },
+                                                         {
+                                                             "source_type":  "confluence",
+                                                             "doc_id":  "confluence-volunteer-portal-product-spec",
+                                                             "title":  "Volunteer Portal Product Spec",
+                                                             "excerpt":  "on these pages, so the design is our standard blues and grays.",
+                                                             "section_heading":  "Design",
+                                                             "source_author":  "Sarah"
+                                                         }
+                                                     ],
+                                   "observation_ids":  [
+                                                           "090c5cbb-44c9-4208-a55e-3b8fe1df567a",
+                                                           "785b4873-baa4-474b-ae31-c609a07d35d8",
+                                                           "f2f322e7-5fc1-48fd-a427-77557ad38c03",
+                                                           "83da6412-f3ce-4065-a28d-588ac6160f88",
+                                                           "bfb80f15-94b4-407a-a619-c10b98561103",
+                                                           "ce2de80b-b7fc-4b48-9703-af4b17f2d201",
+                                                           "4d371462-839e-4f70-9292-7e96a29e9778",
+                                                           "69594306-c259-4f10-876f-236580c5417a",
+                                                           "a95e7ea5-4091-4708-a3ba-79300de88f0f",
+                                                           "30c0410d-5341-4b44-9dd8-6fcc6feccc18",
+                                                           "0f52f15f-481f-4d9d-99e5-254b66593fd1",
+                                                           "76aa8020-9823-4781-93bd-9281057525b1",
+                                                           "af05a38a-3ef2-4deb-84ad-3f0555b7d03d",
+                                                           "4db5a050-1c72-49b8-8665-67c25b8e4348",
+                                                           "570ee6e0-3f29-4c46-9081-913013cee271",
+                                                           "ddfe785e-602e-4d23-b5c0-3e5c12801774",
+                                                           "a276b5e3-7cf9-47e5-bd46-09d926b04938",
+                                                           "9999e0a4-3945-4729-8546-7b499a09f1d7",
+                                                           "f2a7b8d6-e010-4e10-a236-5710342f250f",
+                                                           "96b796ca-337d-4e4b-a2a9-87d26b93b4fc",
+                                                           "5cc82b74-ed27-4166-8fd6-306532157580",
+                                                           "6c8eb919-0d7d-40c2-8320-a37d3ee34811",
+                                                           "fae361f5-28d7-4f89-98a3-fe7576c7809c"
+                                                       ],
+                                   "source_unit_ids":  [
+                                                           "slack-design-2023-03-14-11-05-am:message:9",
+                                                           "slack-design-2023-10-02-2-00-pm:message:3",
+                                                           "slack-design-2024-02-19-3-15-pm:message:3",
+                                                           "slack-design-2025-03-10-11-30-am:message:1",
+                                                           "slack-design-2025-03-10-11-30-am:message:3",
+                                                           "slack-engineering-2023-03-21-3-15-pm:message:3",
+                                                           "slack-engineering-2023-05-10-4-20-pm:message:1",
+                                                           "slack-engineering-2024-08-19-3-45-pm:message:2",
+                                                           "confluence-incident-postmortem-database-migration-failure-may-28-2024:section:4",
+                                                           "confluence-incident-postmortem-database-migration-failure-may-28-2024:section:6",
+                                                           "confluence-pawfinder-engineering-onboarding-guide:section:6",
+                                                           "confluence-pawfinder-website-redesign:section:3",
+                                                           "github-pawfinder-pawfinder-web-pr-12:description",
+                                                           "github-pawfinder-pawfinder-web-pr-31:comment:3",
+                                                           "github-pawfinder-pawfinder-web-pr-39:comment:1",
+                                                           "github-pawfinder-pawfinder-web-pr-43:comment:3",
+                                                           "github-pawfinder-pawfinder-web-pr-47:description",
+                                                           "github-pawfinder-pawfinder-web-pr-61:description",
+                                                           "confluence-shelter-partner-integration-spec:section:8",
+                                                           "confluence-volunteer-portal-product-spec:section:6"
+                                                       ],
+                                   "confidence":  "high"
+                               }
+                           ],
+    "artifact_version":  "pass1_v2"
+}

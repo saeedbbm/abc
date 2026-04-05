@@ -25,6 +25,8 @@ must_do:
   - reflect key attributes and relationships on the page
   - treat convention entities as first-class pages rather than generic decision stubs
   - preserve traceability to sources and related entities
+  - for convention entities, allow multi-sentence items with exact values from evidence (colors, pixel sizes, breakpoints)
+  - increase maxBullets for convention evidence sections to capture full implementation detail
 
 must_not_do:
   - hallucinate unsupported details
@@ -36,6 +38,7 @@ success_signals:
   - sampled convention pages explain the rule, owner, evidence, and applications
   - sampled person pages surface conventions or decisions they established when relevant
   - repository pages and key project pages are present when they were planned
+  - convention entity pages contain specific prescriptions (exact colors, breakpoints, thresholds) not vague one-liners
 
 failure_signals:
   - pages are generic summaries disconnected from the graph

@@ -28,6 +28,8 @@ must_do:
   - consider recurring feedback as a signal for proposed features
   - attach useful descriptions and evidence packs to discovery nodes
   - deduplicate discoveries against existing canonical entities
+  - proposed feature nodes must have real source_refs from multiple customer feedback submissions
+  - proposed feature nodes should have related_entities linking to existing projects with similar surfaces
 
 must_not_do:
   - invent synthetic ticket-shaped noise from vague conversations or feedback

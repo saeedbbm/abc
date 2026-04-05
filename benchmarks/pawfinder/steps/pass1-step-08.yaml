@@ -13,6 +13,8 @@ benchmark_must_fit:
   - Discover the benchmark's undocumented work rather than mainly inventing ticket noise.
   - Group the three toy-donation feedback submissions into one `Toy Donation Feature`.
   - Preserve evidence from the underlying submissions or source docs.
+  - Toy Donation discovery node must have real source_refs from at least 2 customer feedback submissions.
+  - Discovery node should have useful related_entities linking to existing projects like Pet Profiles and Donation Page.
 
 benchmark_watchouts:
   - Converting single Jira tickets directly into project nodes

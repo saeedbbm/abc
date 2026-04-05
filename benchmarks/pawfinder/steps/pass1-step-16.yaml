@@ -12,6 +12,11 @@ benchmark_must_fit:
   - The Toy Donation Feature how-to should reference all 3 hidden conventions when the graph wires them through `APPLIES_TO`.
   - The guide should include concrete implementation choices backed by real source artifacts, not generic filler.
   - Related-project implementation patterns should appear when the KB contains strong evidence for similar surfaces or components.
+  - The guide must name Kim, Tim, and Matt as convention owners when prescribing their conventions.
+  - The guide must cite real PR numbers, Slack threads, or ticket keys for concrete implementation claims.
+  - The guide must include company-specific prescriptions (exact colors, breakpoints, component patterns, API envelopes) that could not come from generic AI.
+  - The guide must distinguish evidence-backed steps from "new work to define" gaps for proposed features.
+  - The evidence pack diagnostics must show convention_source_count >= 3, precedent_source_count >= 3, and at least 3 distinct source types in the mix.
 
 benchmark_watchouts:
   - The guide names conventions but never explains the concrete choice they require.

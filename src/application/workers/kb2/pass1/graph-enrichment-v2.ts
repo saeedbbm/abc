@@ -7,7 +7,7 @@ import { cleanEntityTitle } from "@/src/application/lib/kb2/title-cleanup";
 import { PrefixLogger } from "@/lib/utils";
 import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
 
-const PATTERN_DISCOVERY_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|better than|instead of|always|never|layout|navigation|sidebar|filter|pagination|load|loading|cache|button|ui|api|schema|responsive|mobile)\b/i;
+const PATTERN_DISCOVERY_RE = /\b(convention|pattern|standard(?:ize|ized)?|rule|default|prefer|preferred|better than|instead of|always|never|layout|navigation|sidebar|filter|pagination|load|loading|cache|button|ui|api|schema|responsive|mobile|memo(?:ize)?|useCallback|useMemo|React\.memo|css.?module|camelCase|skeleton|toast|transition|vertical.?(?:nav|sidebar|menu|panel)|single.?column|max-height|overflow-y|scroll(?:able)?|cursor.?(?:based|pagination)|Promise\.all|lazy.?load|fallback)\b/i;
 const PATTERN_STOPWORDS = new Set([
   "about",
   "after",
@@ -15,30 +15,50 @@ const PATTERN_STOPWORDS = new Set([
   "along",
   "also",
   "around",
+  "available",
   "because",
+  "been",
+  "before",
   "being",
   "build",
   "built",
+  "canonicalization",
   "change",
+  "choice",
+  "contains",
+  "convention",
   "decision",
   "default",
+  "describes",
   "doing",
+  "excerpt",
+  "explicit",
   "from",
   "have",
   "implementation",
+  "later",
   "like",
   "make",
   "more",
+  "observation",
   "pattern",
+  "remain",
+  "reusable",
+  "rule",
+  "should",
   "signal",
   "standard",
+  "survive",
+  "synthesis",
   "team",
+  "text",
   "that",
   "their",
   "there",
   "these",
   "this",
   "those",
+  "tradeoff",
   "using",
   "with",
 ]);
@@ -105,10 +125,10 @@ function buildPatternSignalFromObservation(observation: KB2Observation): Pattern
   const owner = ownerHintFromObservation(observation);
   if (!owner || owner.toLowerCase() === "unknown") return null;
 
-  const text = [observation.label, observation.reasoning, observation.evidence_excerpt]
+  const tokenText = [observation.label, observation.evidence_excerpt]
     .filter(Boolean)
     .join("\n");
-  const tokens = extractSignalTokens(text);
+  const tokens = extractSignalTokens(tokenText);
   if (tokens.length < 2) return null;
 
   return {
@@ -219,7 +239,7 @@ export const graphEnrichmentStepV2: StepFunction = async (ctx) => {
       const shared = sharedTokenCount(signal.tokens, clusterTokens);
       const similarity = clusterSimilarity(signal, cluster);
       const ownerMatch = cluster.some((entry) => entry.owner.toLowerCase() === signal.owner.toLowerCase());
-      const eligible = (ownerMatch && shared >= 2) || shared >= 3 || similarity >= 0.75;
+      const eligible = (ownerMatch && shared >= 2) || shared >= 4 || similarity >= 0.75;
       if (!eligible) continue;
       if (similarity > bestScore) {
         bestScore = similarity;
@@ -234,10 +254,59 @@ export const graphEnrichmentStepV2: StepFunction = async (ctx) => {
   }
 
   const patternCandidates: KB2PatternCandidate[] = [];
-  for (const cluster of clusters) {
-    const distinctDocs = new Set(cluster.map((signal) => signal.doc_id));
-    if (cluster.length < 2 || distinctDocs.size < 2) continue;
+  const promotedClusters: PatternSignal[][] = [];
+  const unclusteredSignals: PatternSignal[] = [];
 
+  for (const cluster of clusters) {
+    const distinctOwners = new Set(cluster.map((s) => s.owner.toLowerCase()));
+    if (distinctOwners.size >= 2) {
+      for (const ownerKey of distinctOwners) {
+        const ownerSubgroup = cluster.filter((s) => s.owner.toLowerCase() === ownerKey);
+        const subDocs = new Set(ownerSubgroup.map((s) => s.doc_id));
+        if (ownerSubgroup.length >= 2 && subDocs.size >= 2) {
+          promotedClusters.push(ownerSubgroup);
+        } else {
+          unclusteredSignals.push(...ownerSubgroup);
+        }
+      }
+    } else {
+      const distinctDocs = new Set(cluster.map((signal) => signal.doc_id));
+      if (cluster.length >= 2 && distinctDocs.size >= 2) {
+        promotedClusters.push(cluster);
+      } else {
+        unclusteredSignals.push(...cluster);
+      }
+    }
+  }
+
+  const ownerGroups = new Map<string, PatternSignal[]>();
+  for (const signal of unclusteredSignals) {
+    const key = signal.owner.replace(/\s*\[[^\]]+\]\s*$/g, "").trim().toLowerCase();
+    if (!ownerGroups.has(key)) ownerGroups.set(key, []);
+    ownerGroups.get(key)!.push(signal);
+  }
+  for (const [, group] of ownerGroups) {
+    const distinctDocs = new Set(group.map((s) => s.doc_id));
+    if (group.length >= 2 && distinctDocs.size >= 2) {
+      promotedClusters.push(group);
+    } else {
+      for (const signal of group) {
+        if (signal.source_ref.confidence === "high") {
+          const signalDocIds = new Set<string>();
+          signalDocIds.add(signal.doc_id);
+          const otherSameOwner = [...dedupedSignals.values()].filter(
+            (s) => s.owner.toLowerCase() === signal.owner.toLowerCase() && s.doc_id !== signal.doc_id,
+          );
+          for (const other of otherSameOwner) signalDocIds.add(other.doc_id);
+          if (signalDocIds.size >= 2) {
+            promotedClusters.push([signal]);
+          }
+        }
+      }
+    }
+  }
+
+  for (const cluster of promotedClusters) {
     const sortedCluster = [...cluster].sort((a, b) => a.source_ref.title.localeCompare(b.source_ref.title));
     const representative = chooseRepresentativeSignal(sortedCluster);
     const canonicalOwner = chooseClusterOwner(sortedCluster);
@@ -248,6 +317,7 @@ export const graphEnrichmentStepV2: StepFunction = async (ctx) => {
     const evidenceRefs = Array.from(
       new Map(sortedCluster.map((signal) => [`${signal.source_ref.title}::${signal.source_ref.excerpt}`, signal.source_ref])).values(),
     );
+    const distinctDocs = new Set(cluster.map((signal) => signal.doc_id));
 
     patternCandidates.push({
       pattern_id: randomUUID(),

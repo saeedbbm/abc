@@ -13,6 +13,8 @@ benchmark_must_fit:
   - Convention nodes should connect to constituent decisions and owners.
   - The graph should support a believable traversal from `Toy Donation Feature` to conventions and their owners.
   - Discovery nodes should not remain floating islands with zero useful links.
+  - Traversal QA must show paths from Toy Donation to each of the 3 conventions via APPLIES_TO and from conventions to owners via PROPOSED_BY.
+  - APPLIES_TO targets must be real feature-level entities, not ticket fragments or one-off tasks.
 
 benchmark_watchouts:
   - convention nodes exist but stay disconnected

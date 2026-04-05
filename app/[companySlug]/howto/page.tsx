@@ -1,11 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useParams } from "next/navigation";
-import { KB2HowtoPage } from "@/components/pidrax/kb2/KB2HowtoPage";
-import { useLatestCompletedRunAutoRefresh } from "@/components/pidrax/kb2/useLatestCompletedRunAutoRefresh";
-
-export default function HowtoPage() {
-  const { companySlug } = useParams<{ companySlug: string }>();
-  useLatestCompletedRunAutoRefresh(companySlug);
-  return <KB2HowtoPage companySlug={companySlug} />;
+export default async function HowtoRedirectPage({ params }: { params: Promise<{ companySlug: string }> }) {
+  const { companySlug } = await params;
+  redirect(`/${companySlug}/plans`);
 }

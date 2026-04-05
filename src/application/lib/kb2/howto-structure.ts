@@ -39,7 +39,11 @@ function normalizeLineBreaks(value: string): string {
 }
 
 function stripFencedCodeBlocks(value: string): string {
-  return value.replace(/```[\s\S]*?```/g, " ");
+  return value.replace(/```[\s\S]*?```/g, (match) => {
+    const lineCount = match.split("\n").length;
+    if (lineCount <= 10) return match;
+    return " ";
+  });
 }
 
 function stripInlineCode(value: string): string {
@@ -86,14 +90,10 @@ function normalizeWhitespace(value: string): string {
 
 function normalizeImplementationText(value: string): string {
   return normalizeWhitespace(
-    replaceHttpRouteSnippets(
-      stripInlineCode(
-        stripFencedCodeBlocks(normalizeLineBreaks(value)),
-      ),
+    stripInlineCode(
+      stripFencedCodeBlocks(normalizeLineBreaks(value)),
     ),
-  )
-    .replace(/\bthe existing the existing\b/gi, "the existing")
-    .replace(/\ba new a new\b/gi, "a new");
+  );
 }
 
 function normalizeStepTitle(value: string, index: number): string {

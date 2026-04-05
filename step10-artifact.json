@@ -1,0 +1,108 @@
+﻿{
+    "phase1_clusters":  [
+                            {
+                                "person":  "Kim",
+                                "decisions":  [
+                                                  "090c5cbb-44c9-4208-a55e-3b8fe1df567a",
+                                                  "785b4873-baa4-474b-ae31-c609a07d35d8",
+                                                  "f2f322e7-5fc1-48fd-a427-77557ad38c03",
+                                                  "83da6412-f3ce-4065-a28d-588ac6160f88",
+                                                  "bfb80f15-94b4-407a-a619-c10b98561103",
+                                                  "ce2de80b-b7fc-4b48-9703-af4b17f2d201",
+                                                  "4d371462-839e-4f70-9292-7e96a29e9778",
+                                                  "69594306-c259-4f10-876f-236580c5417a",
+                                                  "a95e7ea5-4091-4708-a3ba-79300de88f0f",
+                                                  "30c0410d-5341-4b44-9dd8-6fcc6feccc18",
+                                                  "0f52f15f-481f-4d9d-99e5-254b66593fd1",
+                                                  "76aa8020-9823-4781-93bd-9281057525b1",
+                                                  "af05a38a-3ef2-4deb-84ad-3f0555b7d03d",
+                                                  "4db5a050-1c72-49b8-8665-67c25b8e4348",
+                                                  "570ee6e0-3f29-4c46-9081-913013cee271",
+                                                  "ddfe785e-602e-4d23-b5c0-3e5c12801774",
+                                                  "a276b5e3-7cf9-47e5-bd46-09d926b04938",
+                                                  "9999e0a4-3945-4729-8546-7b499a09f1d7",
+                                                  "f2a7b8d6-e010-4e10-a236-5710342f250f",
+                                                  "96b796ca-337d-4e4b-a2a9-87d26b93b4fc",
+                                                  "5cc82b74-ed27-4166-8fd6-306532157580",
+                                                  "6c8eb919-0d7d-40c2-8320-a37d3ee34811",
+                                                  "fae361f5-28d7-4f89-98a3-fe7576c7809c"
+                                              ],
+                                "similarity_scores":  [
+
+                                                      ]
+                            }
+                        ],
+    "phase3_conventions":  [
+                               {
+                                   "convention_name":  "Semantic Color Assignment for Financial Actions",
+                                   "established_by":  "Kim",
+                                   "pattern_rule":  "Apply green colors to donation forms, financial call-to-action buttons, and money-related UI elements. Use neutral blue for standard action buttons. Use standard blues and grays for non-financial content and pages without financial components.",
+                                   "constituent_decisions":  [
+                                                                 "auth config was set to the token\u0027s full",
+                                                                 "a max-height with scroll instead of pushing the",
+                                                                 "going with green for that since it\u0027s money-related,",
+                                                                 "vertical nav over tabs",
+                                                                 "going to standardize everything",
+                                                                 "going with a neutral blue for that one",
+                                                                 "so for the donation form itself, I\u0027m going"
+                                                             ],
+                                   "documentation_level":  "partially_documented",
+                                   "confidence":  "high",
+                                   "evidence_count":  23,
+                                   "evidence_sources":  [
+                                                            "slack:#design | 2023-03-14 11:05 AM",
+                                                            "slack:#design | 2023-10-02 2:00 PM",
+                                                            "slack:#design | 2023-10-02 2:00 PM",
+                                                            "slack:#design | 2024-02-19 3:15 PM",
+                                                            "slack:#design | 2025-03-10 11:30 AM",
+                                                            "slack:#design | 2025-03-10 11:30 AM"
+                                                        ],
+                                   "source_refs":  [
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2023-03-14 11:05 AM",
+                                                           "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                                       },
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2023-10-02 2:00 PM",
+                                                           "excerpt":  "just a standard action button"
+                                                       },
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2023-10-02 2:00 PM",
+                                                           "excerpt":  "going with a neutral blue for that one."
+                                                       },
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2024-02-19 3:15 PM",
+                                                           "excerpt":  "so for the donation form itself, I\u0027m going with a clean white background."
+                                                       },
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2025-03-10 11:30 AM",
+                                                           "excerpt":  "no financial stuff on this page so it\u0027s just our standard blues and grays"
+                                                       },
+                                                       {
+                                                           "source_type":  "slack",
+                                                           "title":  "#design | 2025-03-10 11:30 AM",
+                                                           "excerpt":  "just our standard accent colors for alerts and badges."
+                                                       }
+                                                   ]
+                               }
+                           ],
+    "phase4_cross_check":  [
+
+                           ],
+    "phase5_consolidations":  [
+
+                              ],
+    "rejected_candidates":  [
+
+                            ],
+    "conventions_found":  1,
+    "documented_standards_filtered":  0,
+    "total_decisions_analyzed":  8,
+    "llm_calls":  1,
+    "artifact_version":  "pass1_v2"
+}
