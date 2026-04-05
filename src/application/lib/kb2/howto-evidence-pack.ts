@@ -452,7 +452,7 @@ function findImplementationPrecedents(args: {
       ).length;
       if (titleOverlap < 2) continue;
 
-      for (const unit of doc.units ?? []) {
+      for (const unit of (doc as any).units ?? []) {
         if (directRawUnits.length + supplementalUnits.length >= MAX_SOURCE_UNITS_PER_ITEM * 2) break;
         const text = (unit.text ?? "").trim();
         if (!text || text.length < 50) continue;

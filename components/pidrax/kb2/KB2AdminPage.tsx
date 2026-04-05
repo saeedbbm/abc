@@ -3277,17 +3277,17 @@ function EmbedDocumentsViewer({ artifact }: {
 
     const contentLen = typeof rawContentLen === "number"
       ? rawContentLen
-      : typeof rawContentLen === "string" && rawContentLen.trim().length > 0
+      : typeof rawContentLen === "string" && (rawContentLen as string).trim().length > 0
         ? Number(rawContentLen)
         : null;
     const sourceUnits = typeof rawSourceUnits === "number"
       ? rawSourceUnits
-      : typeof rawSourceUnits === "string" && rawSourceUnits.trim().length > 0
+      : typeof rawSourceUnits === "string" && (rawSourceUnits as string).trim().length > 0
         ? Number(rawSourceUnits)
         : 0;
     const chunkCount = typeof rawChunkCount === "number"
       ? rawChunkCount
-      : typeof rawChunkCount === "string" && rawChunkCount.trim().length > 0
+      : typeof rawChunkCount === "string" && (rawChunkCount as string).trim().length > 0
         ? Number(rawChunkCount)
         : 0;
 
