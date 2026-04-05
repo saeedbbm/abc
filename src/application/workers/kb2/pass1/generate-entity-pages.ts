@@ -122,7 +122,7 @@ export const generateEntityPagesStep: StepFunction = async (ctx) => {
 
     const isConventionNode = node.attributes?.is_convention === true;
     const prSourceCount = (node.source_refs ?? []).filter(
-      (ref) => ref.source_type === "github" || (ref.source_type as string) === "pull_request" || (ref.source_type as string) === "code_review",
+      (ref) => ref.source_type === "github" || ref.source_type === "pull_request" || ref.source_type === "code_review",
     ).length;
     const isPrRichProject = node.type === "project" && prSourceCount >= 3;
     const useReasoning = node.type === "team_member" || isConventionNode || isPrRichProject;

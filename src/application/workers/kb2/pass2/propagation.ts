@@ -137,11 +137,10 @@ export const propagationStep: StepFunction = async (ctx) => {
     const embeddingModel = getEmbeddingModel();
     const allChunks: { id: string; text: string; pageId: string; title: string; provider: string }[] = [];
 
-    const epExecIdEmbed = await ctx.getStepExecutionId("pass1", 11);
     for (const pageId of updatedEntityPageIds) {
       try {
-        const epFindFilter = epExecIdEmbed
-          ? { page_id: pageId, execution_id: epExecIdEmbed }
+        const epFindFilter = epExecId2
+          ? { page_id: pageId, execution_id: epExecId2 }
           : { page_id: pageId, run_id: ctx.runId };
         const page = await tc.entity_pages.findOne(epFindFilter) as any;
         if (!page) continue;
@@ -165,11 +164,10 @@ export const propagationStep: StepFunction = async (ctx) => {
       }
     }
 
-    const hpExecIdEmbed = await ctx.getStepExecutionId("pass1", 12);
     for (const pageId of updatedHumanPageIds) {
       try {
-        const hpFindFilter = hpExecIdEmbed
-          ? { page_id: pageId, execution_id: hpExecIdEmbed }
+        const hpFindFilter = hpExecId
+          ? { page_id: pageId, execution_id: hpExecId }
           : { page_id: pageId, run_id: ctx.runId };
         const hp = await tc.human_pages.findOne(hpFindFilter) as any;
         if (!hp) continue;

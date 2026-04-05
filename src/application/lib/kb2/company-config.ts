@@ -22,8 +22,6 @@ import type {
   SyncConfig,
   RefinementsConfig,
   HumanPageConfig,
-} from "@/src/entities/models/kb2-company-config";
-import {
   DEFAULT_PROFILE,
   DEFAULT_SYNC_CONFIG,
   DEFAULT_REFINEMENTS,
