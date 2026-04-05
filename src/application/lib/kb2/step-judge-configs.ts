@@ -250,7 +250,7 @@ Return sub_scores for "Discovery coverage" (0-100), "Description quality" (0-100
         .filter((item) => item.reason === "already_canonical")
         .map((item) => item.label);
       const sample = discoveries.slice(0, 10).map((d) =>
-        `  [${d.category}] "${d.display_name}" (${d.confidence}, ${d.source_count ?? "?"} sources) — ${d.description.slice(0, 420)} | related: ${(d.related_entities ?? []).join(", ") || "(none)"} | source docs: ${(d.source_documents ?? []).join(", ") || "(none)"}`
+        `  [${d.category}] "${d.display_name}" (${d.confidence}, ${d.source_count ?? "?"} sources) — ${d.description.slice(0, 420)} | related: ${(d.related_entities ?? []).join(", ") || "(none)"} | source docs: ${((d as any).source_documents ?? []).join(", ") || "(none)"}`
       ).join("\n");
       const suppressionSummary = suppressionLog
         .filter((item) => item.reason !== "already_canonical")
