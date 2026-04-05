@@ -1,0 +1,24 @@
+step_id: pass1-step-02
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Retrieval quality for hidden-pattern evidence, not just chunk counts.
+  - Preserve local context around who said what and where.
+
+benchmark_must_fit:
+  - Kim evidence should remain retrievable as distinct local chunks across multiple dates and sources.
+  - Tim layout evidence should stay separable across Slack and PR review comments.
+  - Matt browse-pattern evidence should stay separable across PR reviews and boundary-case examples.
+
+benchmark_watchouts:
+  - Confluence effectively chunked as one page per chunk
+  - Jira effectively chunked as one ticket blob with no useful local structure
+  - Slack chunks so broad that one retrieved hit mixes unrelated conversations
+  - Chunking that requires whole-document luck to recover a convention
+
+benchmark_questions:
+  - Could a retrieval hit isolate one Kim color example without dragging in unrelated channel history?
+  - Could a retrieval hit isolate Matt's load-all guidance versus the larger-list pagination exception?

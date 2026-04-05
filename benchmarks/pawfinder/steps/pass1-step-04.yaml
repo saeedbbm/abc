@@ -1,0 +1,21 @@
+step_id: pass1-step-04
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+
+benchmark_focus:
+  - Demote wrong-unit project candidates before they reach canonical resolution.
+  - Preserve strong candidates while filtering obvious project inflation.
+
+benchmark_must_fit:
+  - Items like roadmap planning, about page copy, bug fixes, maintenance, postmortems, and onboarding docs should not survive as canonical-style projects here.
+  - Validation should explain retypes and rejections clearly enough that a human can audit them.
+
+benchmark_watchouts:
+  - Validation behaving like a formatting pass while project inflation survives untouched
+  - Weak candidates surviving simply because they have a non-null type
+
+benchmark_questions:
+  - Did Step 4 actually demote benchmark-known non-project work items?
+  - Are the surviving project candidates plausible bodies of work for PawFinder?

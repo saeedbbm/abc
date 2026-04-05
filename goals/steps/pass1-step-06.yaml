@@ -1,0 +1,61 @@
+step_id: pass1-step-06
+step_number: 6
+step_name: Graph Build
+pass: pass1
+
+purpose: >
+  Build the first usable knowledge graph from canonical entities using only explicit
+  or strongly source-derived relationships, while avoiding co-occurrence-based
+  semantic overreach.
+
+inputs:
+  - step 5 canonical nodes
+  - explicit relationship hints and structured provenance from earlier steps
+
+primary_outputs:
+  - explicit graph edges
+  - source-derived edge evidence and type assignments
+  - explicit confirmation that co-occurrence semantics were not used
+
+judge_should_look_at:
+  - sampled explicit edges
+  - whether the step avoided co-occurrence-only semantic edges
+  - whether all edge endpoints exist in the same execution
+
+must_do:
+  - create valid edges with existing source and target nodes
+  - derive edges from explicit relationships or structured provenance
+  - preserve evidence for each created edge
+  - keep the graph conservative enough that later steps enrich rather than repair it
+
+must_not_do:
+  - create dangling edges
+  - infer semantic edges from generic co-occurrence
+  - overuse specialized edge types like APPLIES_TO or PROPOSED_BY without explicit support
+
+success_signals:
+  - sampled edge types make semantic sense
+  - there are no broken endpoints
+  - edge evidence is visibly source-derived
+
+failure_signals:
+  - generic co-occurrence is mislabeled as highly specific semantics
+  - edge evidence is vague or absent
+  - graph precision is sacrificed for density
+
+deterministic_checks:
+  - key: total_edges
+    description: Graph build should produce at least some explicit edges on non-trivial runs.
+    mode: gte
+    target: 1
+  - key: zero_co_occurrence_semantic_edges
+    description: Step 6 should not use co-occurrence-only semantic edges.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - edges are valid and graph connectivity is usable
+    - sampled edge semantics are mostly correct
+  block_when:
+    - dangling edges or gross type misuse dominate the graph

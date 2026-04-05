@@ -1,0 +1,300 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 10,
+  "issues": [
+    {
+      "id": "20010",
+      "self": "https://jira.example.com/rest/api/3/issue/20010",
+      "key": "PAW-10",
+      "fields": {
+        "summary": "Build adoption application multi-step form",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Done" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Matt Chen" },
+        "reporter": { "displayName": "Matt Chen" },
+        "created": "2024-02-10T00:00:00.000+0000",
+        "updated": "2024-03-01T00:00:00.000+0000",
+        "labels": ["adoption", "forms"],
+        "description": "Build the multi-step adoption application form for the animal profile page. The form should collect applicant info (name, email, phone), housing details (type, yard, other pets), experience, and reason for adopting.\n\nAcceptance Criteria:\n- Form uses a multi-step wizard with progress indicator\n- Validation on each step before advancing (zod schema shared between client and server)\n- Submission creates a record in adoption_applications with status 'submitted'\n- Confirmation email sent via Resend on successful submission\n- Form is fully responsive on mobile",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-02-15T00:00:00.000+0000",
+              "body": "Built a reusable MultiStepForm component for this. Using zod schemas in /lib/schemas/ that are shared between the form component and the server action. This pattern should be reused for any future forms."
+            },
+            {
+              "author": { "displayName": "Jake Rivera" },
+              "created": "2024-02-18T00:00:00.000+0000",
+              "body": "The MultiStepForm component is really clean. I'll use the same pattern for the event RSVP form when we get to that."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20011",
+      "self": "https://jira.example.com/rest/api/3/issue/20011",
+      "key": "PAW-11",
+      "fields": {
+        "summary": "Set up Stripe donation page with Stripe Elements",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Done" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Matt Chen" },
+        "reporter": { "displayName": "Lisa Park" },
+        "created": "2024-02-25T00:00:00.000+0000",
+        "updated": "2024-03-15T00:00:00.000+0000",
+        "labels": ["donations", "stripe"],
+        "description": "Build the /donate page with Stripe Elements integration. Should support one-time and recurring monthly donations. Need preset amount buttons ($10, $25, $50, $100) plus custom amount input.\n\nAcceptance Criteria:\n- Stripe Elements card input embedded in our form\n- Supports one-time and monthly recurring donations\n- Server action creates PaymentIntent or Subscription\n- Webhook handler records donation in database\n- Thank-you email via Resend\n- Minimum donation: $5",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-03-05T00:00:00.000+0000",
+              "body": "Went with Stripe Elements instead of Checkout Sessions. Tradeoff: more code to maintain, but we get full control over the form UI and can embed it in our design system. Used the same zod schema pattern from the adoption form — schema in /lib/schemas/donation.ts, shared between the DonationForm component and the donate server action."
+            },
+            {
+              "author": { "displayName": "Sarah Kim" },
+              "created": "2024-03-08T00:00:00.000+0000",
+              "body": "Webhook handler is set up at /api/webhooks/stripe. Handles both payment_intent.succeeded and invoice.payment_succeeded for recurring. Tested with Stripe CLI locally."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20012",
+      "self": "https://jira.example.com/rest/api/3/issue/20012",
+      "key": "PAW-12",
+      "fields": {
+        "summary": "Add pet photo gallery with lightbox on animal profiles",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Done" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Jake Rivera" },
+        "reporter": { "displayName": "Mia Torres" },
+        "created": "2024-03-10T00:00:00.000+0000",
+        "updated": "2024-03-28T00:00:00.000+0000",
+        "labels": ["animal-profiles", "images"],
+        "description": "Add an image gallery to the animal profile page (/animals/[id]). Should display all images from animal_images table in a grid with a lightbox for full-size viewing.\n\nAcceptance Criteria:\n- Gallery grid shows thumbnails from CloudFront\n- Click opens lightbox with full-size image\n- Swipe/arrow navigation between images\n- Fallback placeholder when no images exist\n- Responsive: 2-col on mobile, 3-col on tablet, 4-col on desktop",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Jake Rivera" },
+              "created": "2024-03-20T00:00:00.000+0000",
+              "body": "Gallery is working. Using the CloudFront URLs from animal_images. Matt, should I use next/image for the thumbnails or just plain img tags with the CDN URL?"
+            },
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-03-20T00:00:00.000+0000",
+              "body": "Use plain img tags with the CloudFront URL. We decided not to use Vercel Image Optimization for user-uploaded content — the images are too large and it adds first-request latency. CloudFront handles the caching. See the Image Pipeline doc in Confluence."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20013",
+      "self": "https://jira.example.com/rest/api/3/issue/20013",
+      "key": "PAW-13",
+      "fields": {
+        "summary": "Create shelter contact form",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Done" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Sarah Kim" },
+        "reporter": { "displayName": "Lisa Park" },
+        "created": "2024-03-25T00:00:00.000+0000",
+        "updated": "2024-04-10T00:00:00.000+0000",
+        "labels": ["contact", "forms"],
+        "description": "Build a contact form at /contact for general shelter inquiries. Should collect name, email, subject, and message. Submissions go to the shelter's email via Resend.\n\nAcceptance Criteria:\n- Simple single-page form with name, email, subject, message\n- Zod validation on client and server\n- Server action sends email to shelter and stores in contact_messages table\n- Success toast on submission\n- Rate limited to prevent spam (5 submissions per hour per IP)",
+        "comment": {
+          "total": 3,
+          "comments": [
+            {
+              "author": { "displayName": "Sarah Kim" },
+              "created": "2024-04-01T00:00:00.000+0000",
+              "body": "Started on this. Quick question — should I create a new form component or reuse the MultiStepForm Matt built for PAW-10?"
+            },
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-04-01T00:00:00.000+0000",
+              "body": "This is a single-step form so you don't need the MultiStepForm wizard. But definitely use the same zod schema pattern — create /lib/schemas/contact.ts with the validation schema and share it between the ContactForm component and the server action. Same approach as adoption and donation forms. Don't duplicate validation logic."
+            },
+            {
+              "author": { "displayName": "Sarah Kim" },
+              "created": "2024-04-05T00:00:00.000+0000",
+              "body": "Done. Schema is in /lib/schemas/contact.ts, server action in /app/actions/contact.ts. Followed the same pattern. Rate limiting is handled with an in-memory map for now, we can move to Redis later if needed."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20014",
+      "self": "https://jira.example.com/rest/api/3/issue/20014",
+      "key": "PAW-14",
+      "fields": {
+        "summary": "Add adoption event calendar with RSVP",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "In Progress" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Jake Rivera" },
+        "reporter": { "displayName": "Lisa Park" },
+        "created": "2024-05-01T00:00:00.000+0000",
+        "updated": "2024-06-15T00:00:00.000+0000",
+        "labels": ["events", "calendar"],
+        "description": "Build an events page at /events showing upcoming adoption events. Each event should have a detail page with an RSVP form.\n\nAcceptance Criteria:\n- Events list page with upcoming events sorted by date\n- Event detail page with description, date/time, location, and RSVP button\n- RSVP form collects name, email, number of attendees\n- Max attendee cap with 'Event Full' state\n- Confirmation email on RSVP\n- Calendar view option (nice to have)",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Jake Rivera" },
+              "created": "2024-06-01T00:00:00.000+0000",
+              "body": "Events list page is done. Working on the RSVP form now. Using Matt's zod schema pattern — schema in /lib/schemas/event-rsvp.ts."
+            },
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-06-02T00:00:00.000+0000",
+              "body": "Nice. Make sure the RSVP submission goes through a server action, not an API route. We standardized on server actions for all form mutations after the auth token refresh issues we had in March."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20015",
+      "self": "https://jira.example.com/rest/api/3/issue/20015",
+      "key": "PAW-15",
+      "fields": {
+        "summary": "Implement adoption status tracking page for applicants",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "In Progress" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Sarah Kim" },
+        "reporter": { "displayName": "Sarah Kim" },
+        "created": "2024-05-15T00:00:00.000+0000",
+        "updated": "2024-06-18T00:00:00.000+0000",
+        "labels": ["adoption", "status-tracking"],
+        "description": "Currently applicants have no way to check their adoption application status online — they rely entirely on email updates. Build a status tracking page where applicants can enter their application number (or email) and see the current status.\n\nAcceptance Criteria:\n- Page at /adoption/status with a lookup form\n- Lookup by application ID or email\n- Shows current status with a visual progress bar (submitted → under_review → approved/rejected)\n- Shows the animal they applied for with photo\n- No authentication required (lookup by ID + email match for security)\n- Links back to the application process docs",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Sarah Kim" },
+              "created": "2024-06-10T00:00:00.000+0000",
+              "body": "Started on the backend — the lookup endpoint is done. Working with Mia on the progress bar design. Should have a PR up by end of week."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20016",
+      "self": "https://jira.example.com/rest/api/3/issue/20016",
+      "key": "PAW-16",
+      "fields": {
+        "summary": "Add breed/age/size filtering on animal browse page",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Medium" },
+        "assignee": null,
+        "reporter": { "displayName": "Mia Torres" },
+        "created": "2024-05-20T00:00:00.000+0000",
+        "updated": "2024-05-20T00:00:00.000+0000",
+        "labels": ["browse", "filtering", "ux"],
+        "description": "The /animals browse page currently shows all available animals in a grid with no filtering. Add filter controls for species (dog/cat), breed, age range, and size.\n\nAcceptance Criteria:\n- Filter sidebar (desktop) or bottom sheet (mobile)\n- Species toggle: All / Dogs / Cats\n- Breed dropdown (populated from current animals in DB)\n- Age range slider (0-15+ years)\n- Size filter: Small / Medium / Large\n- URL params update on filter change (bookmarkable/shareable)\n- Results update without full page reload (client-side filtering or server component with searchParams)",
+        "comment": {
+          "total": 0,
+          "comments": []
+        }
+      }
+    },
+    {
+      "id": "20017",
+      "self": "https://jira.example.com/rest/api/3/issue/20017",
+      "key": "PAW-17",
+      "fields": {
+        "summary": "Mobile responsive fixes for adoption form",
+        "issuetype": { "name": "Bug" },
+        "status": { "name": "Done" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Jake Rivera" },
+        "reporter": { "displayName": "Mia Torres" },
+        "created": "2024-04-20T00:00:00.000+0000",
+        "updated": "2024-05-02T00:00:00.000+0000",
+        "labels": ["mobile", "forms", "bug"],
+        "description": "The adoption form (PAW-10) has several responsive issues on mobile:\n- Step progress indicator overflows on narrow screens\n- Radio buttons for housing type are too close together\n- Submit button is hidden behind the keyboard on iOS\n- Form padding is too tight on screens under 375px\n\nAcceptance Criteria:\n- All issues fixed on iPhone SE (375px), iPhone 14 (390px), and small Android (360px)\n- Keyboard doesn't hide the active input or submit button\n- Progress indicator wraps gracefully",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Jake Rivera" },
+              "created": "2024-04-28T00:00:00.000+0000",
+              "body": "Fixed all the responsive issues. The progress indicator now uses dots instead of full step labels on screens under 480px. Also added scroll-into-view when the keyboard opens to prevent the submit button from hiding."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "20018",
+      "self": "https://jira.example.com/rest/api/3/issue/20018",
+      "key": "PAW-18",
+      "fields": {
+        "summary": "Add success stories / Happy Tails testimonials section",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Low" },
+        "assignee": null,
+        "reporter": { "displayName": "Lisa Park" },
+        "created": "2024-05-25T00:00:00.000+0000",
+        "updated": "2024-05-25T00:00:00.000+0000",
+        "labels": ["content", "testimonials"],
+        "description": "Build a 'Happy Tails' section on the homepage and a dedicated /stories page showcasing successful adoptions. Lisa will provide the content — we need the page structure and a way for her to add new stories.\n\nAcceptance Criteria:\n- Homepage carousel showing 3-4 featured success stories\n- Dedicated /stories page with all stories in a grid\n- Each story has: adopter name, animal name, photo, short testimonial\n- CMS-like admin interface for Lisa to add new stories (or hardcoded initially)\n- Stories link to the (now adopted) animal's profile page",
+        "comment": {
+          "total": 0,
+          "comments": []
+        }
+      }
+    },
+    {
+      "id": "20019",
+      "self": "https://jira.example.com/rest/api/3/issue/20019",
+      "key": "PAW-19",
+      "fields": {
+        "summary": "Optimize animal images — add WebP conversion in upload pipeline",
+        "issuetype": { "name": "Task" },
+        "status": { "name": "In Progress" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Sarah Kim" },
+        "reporter": { "displayName": "Matt Chen" },
+        "created": "2024-06-01T00:00:00.000+0000",
+        "updated": "2024-06-20T00:00:00.000+0000",
+        "labels": ["images", "performance"],
+        "description": "Our pet images are served as original JPEGs/PNGs which are often 3-8MB. Add a processing step in the upload pipeline that converts images to WebP format and generates a smaller thumbnail for the browse grid.\n\nAcceptance Criteria:\n- After upload to S3, a background job converts to WebP\n- Original is kept, WebP version stored alongside with '-webp' suffix\n- Thumbnail (400px wide) generated for browse grid\n- Frontend updated to use WebP with JPEG fallback\n- Existing images migrated via a one-time script",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Sarah Kim" },
+              "created": "2024-06-10T00:00:00.000+0000",
+              "body": "Looking into using Sharp for the conversion. Question — should this run as a Vercel serverless function triggered by the upload, or a separate worker?"
+            },
+            {
+              "author": { "displayName": "Matt Chen" },
+              "created": "2024-06-11T00:00:00.000+0000",
+              "body": "Use a Vercel serverless function triggered by the /api/images/register call. After the S3 key is recorded, kick off the conversion asynchronously. Don't block the upload response — the original image is fine to serve immediately, and the WebP version can be available within a few seconds. Sharp works well for this."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+step_id: pass1-step-15
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/F-entity-counts.txt
+
+benchmark_focus:
+  - Final human-page correctness for the assembled KB.
+  - The benchmark cares about a substantive `Company Overview`, correct project bucket placement, and project-led hub pages.
+
+benchmark_must_fit:
+  - "`Company Overview` should be non-placeholder."
+  - Project category pages should link the right project pages for documented, undocumented, ongoing, and proposed work.
+  - Human project hubs should be project-led rather than mostly team-member lists.
+
+benchmark_watchouts:
+  - "`Company Overview` exists only as placeholder text"
+  - project category pages link mostly team members and very few projects
+  - GT projects appear on the wrong hub page or on no hub page at all
+
+benchmark_false_positive_examples:
+  - readable prose that is disconnected from the actual entity pages
+  - category pages whose linked pages are mostly people while project pages remain missing or misbucketed
+
+benchmark_questions:
+  - "Is `Company Overview` substantive?"
+  - "Are `past_documented`, `past_undocumented`, `ongoing_documented`, `ongoing_undocumented`, and `proposed_projects` materially correct against GT?"
+  - Are the human project hubs linking mostly project pages rather than mostly team members?

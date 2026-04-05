@@ -1,0 +1,133 @@
+================================================================================
+HOW-TO PATTERN SPEC — DARK MODE
+================================================================================
+
+Project:      Dark Mode (Future Considerations)
+Origin:       Customer feedback #4 (Sarah Kim, 2025-01-08): "Have you guys
+              thought about adding a dark mode? I browse adoption sites at
+              night..."
+Status:       Future consideration — no backlog item, no discussion in Slack
+              or PRs beyond the feedback
+
+This feature is a cross-cutting visual concern. The how-to must show awareness
+of every existing color and layout convention that dark mode would need to
+respect, invert, or adapt.
+
+
+================================================================================
+MUST — Absence of these means the how-to is failing
+================================================================================
+
+COLOR-1   Pink accent for female pets
+          What to check: acknowledges pink accents must remain distinguishable
+          in dark mode. Discusses how the gender indicator adapts.
+
+COLOR-2   Blue accent for male pets
+          What to check: acknowledges blue accents need sufficient contrast
+          against dark backgrounds.
+
+COLOR-3   Green for financial CTAs only
+          What to check: green CTA buttons must still stand out as the
+          financial action in dark mode. Discusses contrast preservation.
+
+COLOR-4   White background for payment sections
+          What to check: discusses what happens to the "clean white payment
+          section" in dark mode — whether it stays light (common pattern) or
+          inverts with careful contrast.
+
+COLOR-5   Blues and grays for non-financial pages
+          What to check: the standard blue/gray palette needs dark mode
+          equivalents. This is the biggest surface area of the change.
+
+COLOR-6   Neutral blue for non-financial action buttons
+          What to check: blue buttons must remain distinct from green in
+          dark mode.
+
+FILE-1    CSS Modules with camelCase
+          What to check: discusses how to implement dark mode toggling with
+          CSS Modules (CSS custom properties / data-theme attribute pattern).
+
+
+================================================================================
+SHOULD — Expected when the plan has good evidence coverage
+================================================================================
+
+IMG-3     Species-specific image fallback
+          What to check: placeholder silhouettes may need inverted or
+          adjusted colors for dark backgrounds.
+
+NAV-3     Scrollable sidebar with max-height
+          What to check: sidebar styling (borders, backgrounds) needs dark
+          mode treatment.
+
+NAV-5     Light yellow for differing values
+          What to check: the light yellow highlight for comparison views
+          needs a dark mode equivalent.
+
+COMP-4    200ms CSS fade transition
+          What to check: transitions should work smoothly during theme
+          switches.
+
+NAV-6     Single column for forms
+          What to check: form field styling (borders, backgrounds, focus
+          states) in dark mode.
+
+GRID-4    Hamburger menu at 768px
+          What to check: mobile hamburger menu overlay needs dark mode
+          styling.
+
+GRID-3    Bottom nav bar on mobile
+          What to check: bottom nav bar needs dark mode colors.
+
+TEST-3    Playwright E2E
+          What to check: E2E tests should cover both light and dark mode
+          for visual regression.
+
+TEST-1    Vitest + RTL for frontend
+          What to check: component tests for theme switching logic.
+
+PROC-1    Matt reviews backend, Tim reviews frontend
+          What to check: this is purely frontend, so Tim reviews.
+
+
+================================================================================
+MAY — Relevant if the plan is thorough
+================================================================================
+
+FILE-2    Shared components in shared folder
+          What to check: dark mode toggle component should go in shared.
+
+FILE-3    Page folder structure
+          What to check: if there is a settings/preferences page for dark
+          mode, follows the page folder convention.
+
+PROC-2    PR description requirements
+          What to check: PR should include screenshots of both themes.
+
+COMP-3    Shared Toast component
+          What to check: Toast component needs dark mode styling.
+
+IMG-1     Lazy loading for pet photos
+          What to check: loading placeholder colors adapt to dark mode.
+
+IMG-2     Skeleton loading states
+          What to check: skeleton placeholders adapt to dark mode.
+
+
+================================================================================
+SCORING GUIDE
+================================================================================
+
+MUST patterns (7):     Each worth 3 points.   Max = 21
+SHOULD patterns (10):  Each worth 2 points.   Max = 20
+MAY patterns (6):      Each worth 1 point.    Max = 6
+
+Total possible: 47 points
+
+Rating:
+  38+  Excellent
+  26-37  Good
+  15-25  Mediocre
+  7-14   Poor
+  <7   Failing
+================================================================================

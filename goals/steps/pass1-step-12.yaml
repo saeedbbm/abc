@@ -1,0 +1,78 @@
+step_id: pass1-step-12
+step_number: 12
+step_name: Page Plan
+pass: pass1
+
+purpose: >
+  Decide which entity pages and human pages should be generated from the current
+  graph, with good coverage of important entities, hidden patterns, and proposed work.
+
+inputs:
+  - step 9 canonical entities
+  - step 10 convention entities
+
+primary_outputs:
+  - entity page plan
+  - human page plan
+  - ticket sync inputs for downstream admin views
+
+judge_should_look_at:
+  - planned entity pages
+  - planned human pages
+  - whether important node categories are covered
+  - whether repository pages and project bucket pages are explicitly planned
+
+must_do:
+  - plan pages for key entity types that matter to end users
+  - include convention entity pages when conventions exist
+  - include important proposed feature or project pages when they exist
+  - include the major human pages needed to explain the graph narratively
+
+must_not_do:
+  - skip convention pages when convention nodes are present
+  - skip important proposed features while planning many low-value pages
+  - pretend to compensate for missing upstream entities by planning generic placeholder pages
+
+success_signals:
+  - the plan covers both factual lookup and narrative synthesis use cases
+  - convention coverage and hidden-pattern page coverage are explicit
+  - the plan reflects the latest canonical graph, not stale earlier entities
+  - repository pages and project category hubs are planned when the graph supports them
+
+failure_signals:
+  - important convention or proposed-feature pages are missing
+  - page plan is dominated by noise pages with low user value
+  - downstream retrieval would have nothing planned for key discoveries
+  - repository or project category coverage is missing despite upstream evidence
+
+deterministic_checks:
+  - key: total_pages_positive
+    description: The page plan should contain at least one page.
+    mode: gte
+    target: 1
+  - key: hidden_conventions_page_present_when_needed
+    description: When conventions exist, the hidden-conventions human page should be present.
+    mode: eq
+    target: 1
+  - key: company_overview_page_present
+    description: The page plan should include a Company Overview human page.
+    mode: eq
+    target: 1
+  - key: planned_repo_pages_present_when_repo_nodes_exist
+    description: Repository nodes should receive entity page plans.
+    mode: eq
+    target: 1
+  - key: project_bucket_pages_planned_when_projects_exist
+    description: Project categories with project nodes should have planned project pages.
+    mode: eq
+    target: 1
+  - key: convention_entity_pages_present_when_needed
+    description: Convention nodes should receive entity page plans.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - important entities and human narratives are planned
+  block_when:
+    - conventions or major proposed features are omitted from the plan

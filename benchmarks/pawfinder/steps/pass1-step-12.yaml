@@ -1,0 +1,29 @@
+step_id: pass1-step-12
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/F-entity-counts.txt
+
+benchmark_focus:
+  - Final KB planning readiness for repository pages, project bucket pages, and company-level narrative pages.
+  - Planning should reflect the real graph, not hide missing entities behind generic human pages.
+
+benchmark_must_fit:
+  - "Repository entity page plans should include `pawfinder-web` and `pawfinder-api`."
+  - Project bucket planning should materially separate documented, undocumented, ongoing, and proposed work.
+  - "A `Company Overview` page should be planned."
+
+benchmark_watchouts:
+  - repository nodes exist upstream but no repository pages are planned
+  - project category pages are planned but the actual project lists are thin or empty
+  - planning many people pages while key repos and project hubs are missing
+
+benchmark_false_positive_examples:
+  - a plan that looks balanced by counts but omits both repo pages
+  - "a plan that includes `Company Overview` only as a placeholder fallback with no supporting entity coverage"
+
+benchmark_questions:
+  - Are both benchmark repositories planned as entity pages?
+  - "Do the planned project pages materially cover GT categories like `past_documented`, `ongoing_undocumented`, and `proposed_projects`?"
+  - "Is `Company Overview` explicitly planned rather than absent?"

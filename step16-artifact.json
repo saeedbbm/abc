@@ -1,0 +1,252 @@
+﻿{
+    "total_howtos":  4,
+    "llm_calls":  4,
+    "target_node_count":  4,
+    "target_nodes":  [
+                         "PawFinder Website Redesign â Future Considerations",
+                         "Toy Donation Program Feature",
+                         "Mobile Navigation",
+                         "Volunteer Hours Tracking"
+                     ],
+    "howto_titles":  [
+                         "Plan: PawFinder Website Redesign â Future Considerations",
+                         "Plan: Toy Donation Program Feature",
+                         "Plan: Mobile Navigation",
+                         "Plan: Volunteer Hours Tracking"
+                     ],
+    "howto_samples":  [
+                          {
+                              "title":  "Plan: PawFinder Website Redesign â Future Considerations",
+                              "ticket_id":  null,
+                              "project_node_id":  "690b5b36-5af9-4e4e-b2c3-1735a6d47705",
+                              "linked_entity_ids":  [
+                                                        "690b5b36-5af9-4e4e-b2c3-1735a6d47705"
+                                                    ],
+                              "sections":  [
+                                               {
+                                                   "section_name":  "Overview",
+                                                   "content":  "This ticket encompasses future enhancement plans for the PawFinder website focusing on user experience improvements and accessibility. The project includes implementing dark mode functionality, conducting a comprehensive accessibility audit, and adding page transition animations based on positive user feedback about the current website design and adoption process efficiency."
+                                               },
+                                               {
+                                                   "section_name":  "Context",
+                                                   "content":  "The current PawFinder website has received positive customer feedback, with users praising the website design and adoption process efficiency. Customers have successfully adopted pets quickly through the browse page functionality. These future enhancements represent low priority features identified through user feedback for potential development to further improve the user experience."
+                                               },
+                                               {
+                                                   "section_name":  "Requirements",
+                                                   "content":  "When complete, the website must support:\n- Dark mode toggle functionality with persistent user preference storage\n- Full WCAG 2.1 AA compliance through comprehensive accessibility audit\n- Smooth page transition animations that enhance rather than hinder user experience\n- Maintained functionality of existing browse page and adoption process\n- Performance optimization to ensure animations don\u0027t impact load times\n- Cross-browser compatibility for all new features"
+                                               },
+                                               {
+                                                   "section_name":  "Implementation Steps",
+                                                   "content":  "1. Define Dark Mode Design System\nNew work to define: Establish color palette, component styling, and brand guidelines for dark mode implementation. Define toggle mechanism and user preference persistence strategy.\n\n2. Conduct Accessibility Audit\nNew work to define: Perform comprehensive WCAG 2.1 AA audit of existing website. Document current accessibility gaps and create remediation plan with priority levels.\n\n3. Design Page Transition System\nNew work to define: Define animation library, transition patterns, and performance budgets. Establish consistent transition timing and easing functions across all page navigations.\n\n4. Implement Dark Mode Infrastructure\nNew work to define: Build CSS custom property system for theme switching, implement toggle component, and create theme context management. Establish local storage integration for preference persistence.\n\n5. Apply Dark Mode Styling\nNew work to define: Update all components and pages with dark mode variants. Ensure proper contrast ratios and visual hierarchy in both light and dark themes.\n\n6. Address Accessibility Issues\nNew work to define: Implement fixes identified in accessibility audit including keyboard navigation, screen reader support, focus management, and semantic markup improvements.\n\n7. Implement Page Transitions\nNew work to define: Add transition animations between pages while maintaining browse page functionality. Implement prefers-reduced-motion support for accessibility compliance."
+                                               },
+                                               {
+                                                   "section_name":  "Testing Plan",
+                                                   "content":  "Test dark mode toggle functionality across all browsers and devices. Verify theme persistence after browser refresh and across sessions. Conduct automated accessibility testing with tools like axe-core. Perform manual testing with screen readers (NVDA, JAWS, VoiceOver). Test page transitions with various network speeds and device capabilities. Validate that existing adoption process workflow remains unaffected. Test prefers-reduced-motion settings and ensure graceful fallbacks. Performance test to ensure animations don\u0027t impact Core Web Vitals."
+                                               },
+                                               {
+                                                   "section_name":  "Risks and Considerations",
+                                                   "content":  "Dark mode implementation may require significant CSS refactoring if current styling isn\u0027t built with theming in mind. Animation performance could impact mobile devices with limited processing power. Accessibility improvements might require markup changes that could affect existing functionality. Page transitions could interfere with browser navigation expectations and break user workflows. The scope of accessibility audit could reveal more extensive issues than anticipated, increasing project timeline. User preference persistence adds complexity around data privacy and cookie management."
+                                               }
+                                           ]
+                          },
+                          {
+                              "title":  "Plan: Toy Donation Program Feature",
+                              "ticket_id":  null,
+                              "project_node_id":  "b0c17c0f-de50-41d1-8342-320f8cfd9663",
+                              "linked_entity_ids":  [
+                                                        "b0c17c0f-de50-41d1-8342-320f8cfd9663",
+                                                        "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                        "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0"
+                                                    ],
+                              "sections":  [
+                                               {
+                                                   "section_name":  "Overview",
+                                                   "content":  "The Toy Donation Program Feature will enable users to donate physical toys directly to shelter animals through the website, addressing customer requests for material donation options beyond monetary contributions. This feature supports local shelters by facilitating the redistribution of gently used toys while providing pet owners a meaningful way to give back to the shelter community."
+                                               },
+                                               {
+                                                   "section_name":  "Context",
+                                                   "content":  "This feature builds on the existing Donation Page implementation by Tim, which currently handles monetary donations with preset amounts and payment processing. The design must follow Kim\u0027s Semantic Color Assignment for Financial Actions convention, which requires green colors for donation-related UI elements and financial call-to-action buttons. Customer feedback shows clear demand for toy donation capabilities, with requests for \u0027donating gently used dog toys to shelter animals\u0027 and \u0027gift shop feature enabling toy purchases for shelter animals.\u0027 The existing donation infrastructure provides a foundation for user experience patterns around charitable giving."
+                                               },
+                                               {
+                                                   "section_name":  "Requirements",
+                                                   "content":  "When complete, users must be able to: 1) Submit toy donation requests through a dedicated form, 2) Specify toy type, condition, and quantity, 3) Select target shelter from available options, 4) Receive confirmation and next steps for physical delivery/pickup, 5) View donation history in their user profile. The interface must follow Kim\u0027s color conventions with green buttons for donation actions and neutral blue for non-financial actions. The feature must integrate with existing user authentication and profile systems. Shelters must be able to review and approve/decline toy donation offers through their administrative interface."
+                                               },
+                                               {
+                                                   "section_name":  "Implementation Steps",
+                                                   "content":  "1. Create toy donation form UI following existing donation\nBuild a toy donation form page following the existing Donation Page structure by Tim. Use the same clean white background for the form section to minimize distractions, as established in the monetary donation implementation. Apply Kim\u0027s Semantic Color Assignment convention with green styling for the primary \u0027Submit Toy Donation\u0027 button since this is a donation-related financial action. Use neutral blue for secondary actions like \u0027Cancel\u0027 or \u0027Save Draft\u0027 that are not money-related.\n\n2. Implement toy type and condition selection components\nCreate form fields for toy specification including type dropdown (rope toys, balls, plush toys, chew toys, interactive toys), condition radio buttons (new, like new, good condition, fair condition), and quantity input. Follow the existing preset amount button styling pattern from the monetary donation page, using light gray buttons with darker borders for selected options, reserving green only for the final submission action.\n\n3. Add shelter selection functionality\nNew work to define: Implement shelter dropdown/selector component that loads available shelters accepting toy donations. This will require defining the shelter data structure, API endpoints for fetching shelter information, and UI patterns for shelter selection that align with existing site patterns.\n\n4. Create database schema for toy donations\nNew work to define: Design and implement database tables to store toy donation requests including donor information, toy details, target shelter, status tracking, and timestamps. Define foreign key relationships to existing user and shelter tables.\n\n5. Build API endpoints for toy donation management\nNew work to define: Create REST API endpoints for submitting toy donations, retrieving user donation history, and shelter administrative functions. Define request/response schemas and error handling patterns consistent with existing donation API structure.\n\n6. Implement shelter administrative interface\nNew work to define: Build administrative views for shelters to review pending toy donation requests, approve/decline donations, and manage donation logistics. Determine integration points with existing shelter management systems.\n\n7. Add toy donation history to user profiles\nNew work to define: Extend existing user profile functionality to display toy donation history alongside monetary donation records. Design UI components that clearly distinguish between different donation types while maintaining consistent visual hierarchy."
+                                               },
+                                               {
+                                                   "section_name":  "Testing Plan",
+                                                   "content":  "Unit tests should cover form validation for toy type, condition, and quantity inputs, ensuring invalid submissions are properly rejected. Integration tests must verify the complete donation submission flow from form entry through database persistence and confirmation email delivery. Test shelter selection functionality with various shelter availability scenarios. UI tests should validate Kim\u0027s color conventions are correctly applied with green buttons for donation actions and neutral blue for non-financial actions. Load testing should verify the system handles multiple concurrent toy donation submissions. Edge cases to test include: empty shelter availability, invalid toy type selections, quantity limits, duplicate submissions, and network failures during submission."
+                                               },
+                                               {
+                                                   "section_name":  "Risks and Considerations",
+                                                   "content":  "Key risks include managing physical logistics coordination between donors and shelters, which requires clear communication protocols and may involve liability considerations for item condition/safety. The feature adds operational overhead for shelters who must review and manage physical donations. There\u0027s potential for mismatched expectations between donated item condition and shelter needs. Consider implementing approval workflows to prevent overwhelming shelters with unsuitable donations. The system must handle scenarios where shelters reach capacity or temporarily stop accepting donations. Privacy concerns arise around sharing donor contact information with shelters for pickup coordination. Integration complexity may emerge if shelters use different management systems or have varying donation policies."
+                                               }
+                                           ]
+                          },
+                          {
+                              "title":  "Plan: Mobile Navigation",
+                              "ticket_id":  null,
+                              "project_node_id":  "36f8a860-42f7-45eb-a097-98cf10e92fd5",
+                              "linked_entity_ids":  [
+                                                        "36f8a860-42f7-45eb-a097-98cf10e92fd5",
+                                                        "ae68e851-d901-49ef-9baf-1c7e9b4d9124"
+                                                    ],
+                              "sections":  [
+                                               {
+                                                   "section_name":  "Overview",
+                                                   "content":  "The Mobile Navigation project appears to be completed but undocumented, focusing on responsive design improvements for mobile devices. This project addressed mobile-specific usability issues including vertical pet card stacking, larger touch targets (44px minimum), and a dedicated bottom navigation bar for quick access to Browse, Shelters, and Volunteer sections."
+                                               },
+                                               {
+                                                   "section_name":  "Context",
+                                                   "content":  "This project builds on existing navigation patterns and has been completed by Jill with evidence of a mobile navigation refactor in the codebase. The work addresses responsive design needs and follows Kim\u0027s established Semantic Color Assignment for Financial Actions convention, which requires green colors for money-related UI elements and neutral blue for standard action buttons. The Navigation component has been modified (src/components/Navigation/Navigation) and appears to include mobile-specific optimizations."
+                                               },
+                                               {
+                                                   "section_name":  "Requirements",
+                                                   "content":  "Since this project is marked as completed, the requirements have already been met: 1) Pet cards must stack vertically on mobile instead of using 2-column grid layout, 2) All touch targets must meet 44px minimum size for accessibility, 3) Bottom navigation bar must provide quick access to Browse, Shelters, and Volunteer sections on mobile devices, 4) Navigation must follow Kim\u0027s color conventions with green for financial actions and neutral blue for standard navigation, 5) Mobile navigation must be responsive and functional across different mobile screen sizes."
+                                               },
+                                               {
+                                                   "section_name":  "Implementation Steps",
+                                                   "content":  "1. Document existing mobile navigation implementation\nSince the project is completed, document the current mobile navigation patterns in src/components/Navigation/Navigation component. Review the mobile refactor work that has already been implemented.\n\n2. Apply Kim\u0027s color conventions to navigation elements\nEnsure navigation buttons follow Kim\u0027s Semantic Color Assignment for Financial Actions: use green colors for donation-related buttons and neutral blue for standard navigation actions like Browse, Shelters, and Volunteer sections.\n\n3. Verify mobile pet card vertical stacking\nConfirm that pet cards display in vertical stack format on mobile devices instead of the 2-column grid used on desktop, ensuring proper responsive behavior.\n\n4. Validate touch target accessibility\nVerify all interactive elements in mobile navigation meet the 44px minimum touch target size requirement for mobile accessibility compliance.\n\n5. Test bottom navigation functionality\nEnsure the bottom navigation bar provides working quick access to Browse, Shelters, and Volunteer sections on mobile devices.\n\n6. Add volunteer hours tracking capability\nNew work to define: Based on customer feedback requesting volunteer hours tracking and downloadable records for community service verification, add functionality to track and export volunteer hours data."
+                                               },
+                                               {
+                                                   "section_name":  "Testing Plan",
+                                                   "content":  "Test mobile navigation across different device sizes and orientations. Verify touch target sizes meet 44px minimum requirement using accessibility testing tools. Test pet card vertical stacking behavior on various mobile screen widths. Validate bottom navigation functionality and ensure proper color application per Kim\u0027s conventions (green for financial actions, neutral blue for standard navigation). Test volunteer hours tracking feature with edge cases like partial hours, multiple sessions, and export functionality."
+                                               },
+                                               {
+                                                   "section_name":  "Risks and Considerations",
+                                                   "content":  "Since this project is already completed, the main risk is ensuring documentation matches actual implementation. Color convention compliance needs verification to ensure Kim\u0027s financial action color rules are properly applied. The addition of volunteer hours tracking represents new scope that may require backend changes and data storage considerations. Mobile performance should be monitored to ensure navigation improvements don\u0027t impact load times. Accessibility compliance for 44px touch targets must be maintained across all interactive elements."
+                                               }
+                                           ]
+                          },
+                          {
+                              "title":  "Plan: Volunteer Hours Tracking",
+                              "ticket_id":  null,
+                              "project_node_id":  "7fc87b27-c6e1-431c-9d30-8f00be6dc53e",
+                              "linked_entity_ids":  [
+                                                        "7fc87b27-c6e1-431c-9d30-8f00be6dc53e",
+                                                        "aeb7f6e4-30f0-4b50-baee-b4f1c4d9cece",
+                                                        "ae68e851-d901-49ef-9baf-1c7e9b4d9124"
+                                                    ],
+                              "sections":  [
+                                               {
+                                                   "section_name":  "Overview",
+                                                   "content":  "This ticket implements a volunteer hours tracking system that integrates with the existing Volunteer Portal to record and report volunteer time spent at partner shelters. The feature addresses customer feedback from students who need downloadable community service records and provides shelters with better volunteer engagement analytics."
+                                               },
+                                               {
+                                                   "section_name":  "Context",
+                                                   "content":  "The existing Volunteer Portal (owned by Jill) already handles volunteer registration, shift browsing, and signup functionality through a REST API. The backend includes endpoints for volunteer profiles and shift management at `/api/v1/volunteers` and `/api/v1/shifts`. Jack has an active PR for the volunteer hours tracking API, indicating backend work is already in progress. This feature extends the existing volunteer workflow to capture time tracking data and generate reports."
+                                               },
+                                               {
+                                                   "section_name":  "Requirements",
+                                                   "content":  "When complete, volunteers must be able to clock in/out of their shifts and view their total hours. The system must generate downloadable reports for community service verification. Shelters must be able to view volunteer hour summaries for their organization. All hour tracking data must be tied to existing volunteer profiles and scheduled shifts. Reports must include volunteer name, shelter, dates, and total hours in a format suitable for academic institutions."
+                                               },
+                                               {
+                                                   "section_name":  "Implementation Steps",
+                                                   "content":  "1. Extend existing volunteer API with time tracking endpoints\nAdd new endpoints to the existing /api/v1/volunteers and /api/v1/shifts structure to handle clock in/out functionality. Based on the existing pattern, implement: POST /api/v1/shifts/:id/checkin, POST /api/v1/shifts/:id/checkout, GET /api/v1/volunteers/:id/hours for retrieving hour summaries.\n\n2. Add hours tracking UI to volunteer dashboard\nExtend the existing volunteer dashboard page to include clock in/out buttons for active shifts and a hours summary view. Apply Kim\u0027s Semantic Color Assignment convention using neutral blue for clock in/out action buttons since these are not money-related actions. Use standard blues and grays for the informational hours display sections.\n\n3. Build downloadable hours report feature\nNew work to define: Create a report generation endpoint that produces downloadable PDFs or CSV files with volunteer hours data suitable for academic community service verification. Include volunteer name, shelter details, shift dates, and total hours.\n\n4. Add shelter-side hours visibility\nNew work to define: Extend shelter dashboard (if it exists) or create new shelter views to show volunteer hour summaries for their organization. Follow the existing API pattern of shelter-scoped endpoints like the existing /api/v1/shelters/:id/shifts structure.\n\n5. Coordinate with Jack\u0027s existing PR\nNew work to define: Review and integrate with Jack\u0027s volunteer hours tracking API PR that\u0027s already in progress. Ensure frontend implementation aligns with the backend API structure he\u0027s building."
+                                               },
+                                               {
+                                                   "section_name":  "Testing Plan",
+                                                   "content":  "Test clock in/out functionality across different shift types and durations. Verify hour calculations are accurate including handling of shifts that span midnight. Test report generation with various date ranges and volunteer profiles. Validate that hours only record for volunteers who are signed up for shifts. Test edge cases like multiple check-ins without check-outs, network interruptions during clock operations, and concurrent shift signups. Ensure shelter hour summaries aggregate correctly across multiple volunteers and time periods."
+                                               },
+                                               {
+                                                   "section_name":  "Risks and Considerations",
+                                                   "content":  "Time tracking data accuracy depends on volunteers remembering to clock in/out, which may result in incomplete records. Consider automatic timeout mechanisms for forgotten clock-outs. The downloadable report format must meet varying academic institution requirements - may need multiple export formats. Integration with Jack\u0027s existing API work requires coordination to avoid merge conflicts. Additional database storage for time tracking data will increase system load. Consider privacy implications of detailed volunteer time tracking and ensure compliance with shelter volunteer agreements."
+                                               }
+                                           ]
+                          }
+                      ],
+    "direct_technical_source_count":  164,
+    "convention_constraints_total":  3,
+    "convention_refs_total":  3,
+    "convention_reference_coverage_pct":  100,
+    "implementation_reference_count":  5,
+    "implementation_reference_opportunities":  3,
+    "implementation_step_count":  25,
+    "steps_with_source_refs":  8,
+    "step_evidence_coverage_pct":  32,
+    "source_artifact_titles_used":  [
+                                        "#design | 2023-03-14 11:05 AM",
+                                        "#design | 2023-10-02 2:00 PM",
+                                        "#design | 2024-02-19 3:15 PM",
+                                        "#design | 2025-03-10 11:30 AM",
+                                        "pawfinder-api PR #52: Volunteer portal backend API",
+                                        "pawfinder-web PR #61: Mobile navigation refactor",
+                                        "Volunteer Portal Product Spec"
+                                    ],
+    "compliance_results":  [
+                               {
+                                   "node":  "Toy Donation Program Feature",
+                                   "convention":  "[Kim] Semantic Color Assignment for Financial Actions",
+                                   "referenced":  true
+                               },
+                               {
+                                   "node":  "Mobile Navigation",
+                                   "convention":  "[Kim] Semantic Color Assignment for Financial Actions",
+                                   "referenced":  true
+                               },
+                               {
+                                   "node":  "Volunteer Hours Tracking",
+                                   "convention":  "[Kim] Semantic Color Assignment for Financial Actions",
+                                   "referenced":  true
+                               }
+                           ],
+    "evidence_pack_samples":  [
+                                  {
+                                      "target":  "PawFinder Website Redesign â Future Considerations",
+                                      "convention_source_count":  0,
+                                      "precedent_source_count":  0,
+                                      "source_type_mix":  {
+                                                              "Customer Feedback":  1
+                                                          },
+                                      "fallback_count":  1,
+                                      "total_evidence_items":  1,
+                                      "fallback_ratio_pct":  100
+                                  },
+                                  {
+                                      "target":  "Toy Donation Program Feature",
+                                      "convention_source_count":  33,
+                                      "precedent_source_count":  20,
+                                      "source_type_mix":  {
+                                                              "Slack":  32,
+                                                              "Confluence":  7,
+                                                              "GitHub":  12,
+                                                              "Jira":  2,
+                                                              "Customer Feedback":  4
+                                                          },
+                                      "fallback_count":  57,
+                                      "total_evidence_items":  57,
+                                      "fallback_ratio_pct":  100
+                                  },
+                                  {
+                                      "target":  "Mobile Navigation",
+                                      "convention_source_count":  33,
+                                      "precedent_source_count":  13,
+                                      "source_type_mix":  {
+                                                              "Slack":  32,
+                                                              "Confluence":  7,
+                                                              "GitHub":  7,
+                                                              "Customer Feedback":  1
+                                                          },
+                                      "fallback_count":  47,
+                                      "total_evidence_items":  47,
+                                      "fallback_ratio_pct":  100
+                                  },
+                                  {
+                                      "target":  "Volunteer Hours Tracking",
+                                      "convention_source_count":  33,
+                                      "precedent_source_count":  32,
+                                      "source_type_mix":  {
+                                                              "Slack":  32,
+                                                              "Confluence":  19,
+                                                              "GitHub":  12,
+                                                              "Jira":  2,
+                                                              "Customer Feedback":  2
+                                                          },
+                                      "fallback_count":  67,
+                                      "total_evidence_items":  67,
+                                      "fallback_ratio_pct":  100
+                                  }
+                              ]
+}

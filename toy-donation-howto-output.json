@@ -1,0 +1,464 @@
+﻿{
+    "_id":  "69cf7a5cdcbdafb3a6c65cd5",
+    "howto_id":  "9c00b4d7-217a-479f-b3bc-36c594ba7919",
+    "run_id":  "c5111e40-5b76-41f1-b6af-ce65bc84bb7a",
+    "execution_id":  "6a416b12-ba63-49b7-a90f-61ea673bf6e2",
+    "ticket_id":  null,
+    "project_node_id":  "b0c17c0f-de50-41d1-8342-320f8cfd9663",
+    "title":  "Plan: Toy Donation Program Feature",
+    "sections":  [
+                     {
+                         "section_name":  "Overview",
+                         "content":  "The Toy Donation Program Feature will enable users to donate physical toys directly to shelter animals through the website, addressing customer requests for material donation options beyond monetary contributions. This feature supports local shelters by facilitating the redistribution of gently used toys while providing pet owners a meaningful way to give back to the shelter community."
+                     },
+                     {
+                         "section_name":  "Context",
+                         "content":  "This feature builds on the existing Donation Page implementation by Tim, which currently handles monetary donations with preset amounts and payment processing. The design must follow Kim\u0027s Semantic Color Assignment for Financial Actions convention, which requires green colors for donation-related UI elements and financial call-to-action buttons. Customer feedback shows clear demand for toy donation capabilities, with requests for \u0027donating gently used dog toys to shelter animals\u0027 and \u0027gift shop feature enabling toy purchases for shelter animals.\u0027 The existing donation infrastructure provides a foundation for user experience patterns around charitable giving.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                 "title":  "#design | 2023-10-02 2:00 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green."
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related, feels natural"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Decision title: Semantic Color Assignment for Financial Actions"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Pet browse page cards with green \"Sponsor Me\" buttons for financial sponsorship actions"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Requirements",
+                         "content":  "When complete, users must be able to: 1) Submit toy donation requests through a dedicated form, 2) Specify toy type, condition, and quantity, 3) Select target shelter from available options, 4) Receive confirmation and next steps for physical delivery/pickup, 5) View donation history in their user profile. The interface must follow Kim\u0027s color conventions with green buttons for donation actions and neutral blue for non-financial actions. The feature must integrate with existing user authentication and profile systems. Shelters must be able to review and approve/decline toy donation offers through their administrative interface.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                 "title":  "#design | 2023-10-02 2:00 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green. just a standard action button"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Shelter locations page using neutral blue for non-financial \"Visit\" action buttons"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Implementation Steps",
+                         "content":  "1. Create toy donation form UI following existing donation\nBuild a toy donation form page following the existing Donation Page structure by Tim. Use the same clean white background for the form section to minimize distractions, as established in the monetary donation implementation. Apply Kim\u0027s Semantic Color Assignment convention with green styling for the primary \u0027Submit Toy Donation\u0027 button since this is a donation-related financial action. Use neutral blue for secondary actions like \u0027Cancel\u0027 or \u0027Save Draft\u0027 that are not money-related.\n\n2. Implement toy type and condition selection components\nCreate form fields for toy specification including type dropdown (rope toys, balls, plush toys, chew toys, interactive toys), condition radio buttons (new, like new, good condition, fair condition), and quantity input. Follow the existing preset amount button styling pattern from the monetary donation page, using light gray buttons with darker borders for selected options, reserving green only for the final submission action.\n\n3. Add shelter selection functionality\nNew work to define: Implement shelter dropdown/selector component that loads available shelters accepting toy donations. This will require defining the shelter data structure, API endpoints for fetching shelter information, and UI patterns for shelter selection that align with existing site patterns.\n\n4. Create database schema for toy donations\nNew work to define: Design and implement database tables to store toy donation requests including donor information, toy details, target shelter, status tracking, and timestamps. Define foreign key relationships to existing user and shelter tables.\n\n5. Build API endpoints for toy donation management\nNew work to define: Create REST API endpoints for submitting toy donations, retrieving user donation history, and shelter administrative functions. Define request/response schemas and error handling patterns consistent with existing donation API structure.\n\n6. Implement shelter administrative interface\nNew work to define: Build administrative views for shelters to review pending toy donation requests, approve/decline donations, and manage donation logistics. Determine integration points with existing shelter management systems.\n\n7. Add toy donation history to user profiles\nNew work to define: Extend existing user profile functionality to display toy donation history alongside monetary donation records. Design UI components that clearly distinguish between different donation types while maintaining consistent visual hierarchy.",
+                         "steps":  [
+                                       {
+                                           "title":  "Create toy donation form UI following existing donation",
+                                           "content":  "Build a toy donation form page following the existing Donation Page structure by Tim. Use the same clean white background for the form section to minimize distractions, as established in the monetary donation implementation. Apply Kim\u0027s Semantic Color Assignment convention with green styling for the primary \u0027Submit Toy Donation\u0027 button since this is a donation-related financial action. Use neutral blue for secondary actions like \u0027Cancel\u0027 or \u0027Save Draft\u0027 that are not money-related.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                                   "title":  "#design | 2023-10-02 2:00 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green."
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                                   "title":  "#design | 2024-02-19 3:15 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "the green is only for the final \"Complete Donation\" button so it really pops"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                                   "title":  "#design | 2024-02-19 3:15 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "keeping those neutral. light gray buttons for the preset amounts ($10, $25, $50 etc), and the selected one gets a slightly darker border. the green is only for the final \"Complete Donation\" button so it really pops"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                                   "title":  "#design | 2023-03-14 11:05 AM",
+                                                                   "section_heading":  "#design Message 9",
+                                                                   "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related, feels natural"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                                   "title":  "#design | 2023-10-02 2:00 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green. just a standard action button"
+                                                               },
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                                   "title":  "#design | 2024-02-19 3:15 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "so for the donation form itself, I\u0027m going with a clean white background."
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "9c439476-d6ca-412d-9ecc-5c05a52efe67",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Key Decisions",
+                                                                   "item_text":  "The donation page design uses a clean white background for the payment section to minimize visual distractions during transaction."
+                                                               },
+                                                               {
+                                                                   "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                                   "page_id":  "9c439476-d6ca-412d-9ecc-5c05a52efe67",
+                                                                   "page_title":  "Donation Page",
+                                                                   "node_type":  "project",
+                                                                   "section_name":  "Key Decisions",
+                                                                   "item_text":  "The primary action button for donations is styled in green to align with other financial actions across the platform."
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Identity",
+                                                                   "item_text":  "Decision title: Semantic Color Assignment for Financial Actions"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Decision",
+                                                                   "item_text":  "Use green color for all financial action buttons including donation completion, pet sponsorship, and money-related call-to-actions"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Consequences",
+                                                                   "item_text":  "Donation amount selector buttons remain neutral gray to avoid color overwhelm, with only the final completion button using green for maximum impact"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Donation Page project requiring green completion buttons and neutral amount selectors"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Pet browse page cards with green \"Sponsor Me\" buttons for financial sponsorship actions"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Affected Systems",
+                                                                   "item_text":  "Shelter locations page using neutral blue for non-financial \"Visit\" action buttons"
+                                                               },
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Decision Makers",
+                                                                   "item_text":  "Kim established the semantic color convention and designed the implementation across multiple projects"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Implement toy type and condition selection components",
+                                           "content":  "Create form fields for toy specification including type dropdown (rope toys, balls, plush toys, chew toys, interactive toys), condition radio buttons (new, like new, good condition, fair condition), and quantity input. Follow the existing preset amount button styling pattern from the monetary donation page, using light gray buttons with darker borders for selected options, reserving green only for the final submission action.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "slack",
+                                                                   "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                                   "title":  "#design | 2024-02-19 3:15 PM",
+                                                                   "section_heading":  "#design Message 3",
+                                                                   "excerpt":  "keeping those neutral. light gray buttons for the preset amounts ($10, $25, $50 etc), and the selected one gets a slightly darker border. the green is only for the final \"Complete Donation\" button so it really pops"
+                                                               }
+                                                           ],
+                                           "entity_refs":  [
+                                                               {
+                                                                   "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                                   "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                                   "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                                   "node_type":  "decision",
+                                                                   "section_name":  "Consequences",
+                                                                   "item_text":  "Donation amount selector buttons remain neutral gray to avoid color overwhelm, with only the final completion button using green for maximum impact"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Add shelter selection functionality",
+                                           "content":  "New work to define: Implement shelter dropdown/selector component that loads available shelters accepting toy donations. This will require defining the shelter data structure, API endpoints for fetching shelter information, and UI patterns for shelter selection that align with existing site patterns."
+                                       },
+                                       {
+                                           "title":  "Create database schema for toy donations",
+                                           "content":  "New work to define: Design and implement database tables to store toy donation requests including donor information, toy details, target shelter, status tracking, and timestamps. Define foreign key relationships to existing user and shelter tables.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-volunteer-portal-product-spec",
+                                                                   "title":  "Volunteer Portal Product Spec",
+                                                                   "excerpt":  "on these pages, so the design is our standard blues and grays.",
+                                                                   "section_heading":  "Design",
+                                                                   "source_author":  "Sarah"
+                                                               }
+                                                           ]
+                                       },
+                                       {
+                                           "title":  "Build API endpoints for toy donation management",
+                                           "content":  "New work to define: Create REST API endpoints for submitting toy donations, retrieving user donation history, and shelter administrative functions. Define request/response schemas and error handling patterns consistent with existing donation API structure."
+                                       },
+                                       {
+                                           "title":  "Implement shelter administrative interface",
+                                           "content":  "New work to define: Build administrative views for shelters to review pending toy donation requests, approve/decline donations, and manage donation logistics. Determine integration points with existing shelter management systems."
+                                       },
+                                       {
+                                           "title":  "Add toy donation history to user profiles",
+                                           "content":  "New work to define: Extend existing user profile functionality to display toy donation history alongside monetary donation records. Design UI components that clearly distinguish between different donation types while maintaining consistent visual hierarchy.",
+                                           "source_refs":  [
+                                                               {
+                                                                   "source_type":  "confluence",
+                                                                   "doc_id":  "confluence-volunteer-portal-product-spec",
+                                                                   "title":  "Volunteer Portal Product Spec",
+                                                                   "excerpt":  "on these pages, so the design is our standard blues and grays.",
+                                                                   "section_heading":  "Design",
+                                                                   "source_author":  "Sarah"
+                                                               }
+                                                           ]
+                                       }
+                                   ],
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                 "title":  "#design | 2023-10-02 2:00 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green."
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                 "title":  "#design | 2024-02-19 3:15 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "the green is only for the final \"Complete Donation\" button so it really pops"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                 "title":  "#design | 2024-02-19 3:15 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "keeping those neutral. light gray buttons for the preset amounts ($10, $25, $50 etc), and the selected one gets a slightly darker border. the green is only for the final \"Complete Donation\" button so it really pops"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-03-14-11-05-am",
+                                                 "title":  "#design | 2023-03-14 11:05 AM",
+                                                 "section_heading":  "#design Message 9",
+                                                 "excerpt":  "also thinking about the \"Sponsor Me\" button on each card. going with green for that since it\u0027s money-related, feels natural"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                 "title":  "#design | 2023-10-02 2:00 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green. just a standard action button"
+                                             },
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2024-02-19-3-15-pm",
+                                                 "title":  "#design | 2024-02-19 3:15 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "so for the donation form itself, I\u0027m going with a clean white background."
+                                             },
+                                             {
+                                                 "source_type":  "confluence",
+                                                 "doc_id":  "confluence-volunteer-portal-product-spec",
+                                                 "title":  "Volunteer Portal Product Spec",
+                                                 "excerpt":  "on these pages, so the design is our standard blues and grays.",
+                                                 "section_heading":  "Design",
+                                                 "source_author":  "Sarah"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "9c439476-d6ca-412d-9ecc-5c05a52efe67",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Scope",
+                                                 "item_text":  "Excludes non-monetary donation functionalities like toy donations or shelter comparisons."
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "9c439476-d6ca-412d-9ecc-5c05a52efe67",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Key Decisions",
+                                                 "item_text":  "The donation page design uses a clean white background for the payment section to minimize visual distractions during transaction."
+                                             },
+                                             {
+                                                 "node_id":  "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0",
+                                                 "page_id":  "9c439476-d6ca-412d-9ecc-5c05a52efe67",
+                                                 "page_title":  "Donation Page",
+                                                 "node_type":  "project",
+                                                 "section_name":  "Key Decisions",
+                                                 "item_text":  "The primary action button for donations is styled in green to align with other financial actions across the platform."
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Identity",
+                                                 "item_text":  "Decision title: Semantic Color Assignment for Financial Actions"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision",
+                                                 "item_text":  "Use green color for all financial action buttons including donation completion, pet sponsorship, and money-related call-to-actions"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Consequences",
+                                                 "item_text":  "Donation amount selector buttons remain neutral gray to avoid color overwhelm, with only the final completion button using green for maximum impact"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Donation Page project requiring green completion buttons and neutral amount selectors"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Pet browse page cards with green \"Sponsor Me\" buttons for financial sponsorship actions"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Shelter locations page using neutral blue for non-financial \"Visit\" action buttons"
+                                             },
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Decision Makers",
+                                                 "item_text":  "Kim established the semantic color convention and designed the implementation across multiple projects"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Testing Plan",
+                         "content":  "Unit tests should cover form validation for toy type, condition, and quantity inputs, ensuring invalid submissions are properly rejected. Integration tests must verify the complete donation submission flow from form entry through database persistence and confirmation email delivery. Test shelter selection functionality with various shelter availability scenarios. UI tests should validate Kim\u0027s color conventions are correctly applied with green buttons for donation actions and neutral blue for non-financial actions. Load testing should verify the system handles multiple concurrent toy donation submissions. Edge cases to test include: empty shelter availability, invalid toy type selections, quantity limits, duplicate submissions, and network failures during submission.",
+                         "source_refs":  [
+                                             {
+                                                 "source_type":  "slack",
+                                                 "doc_id":  "slack-design-2023-10-02-2-00-pm",
+                                                 "title":  "#design | 2023-10-02 2:00 PM",
+                                                 "section_heading":  "#design Message 3",
+                                                 "excerpt":  "going with a neutral blue for that one. it\u0027s not a money action so doesn\u0027t need to be green. just a standard action button"
+                                             }
+                                         ],
+                         "entity_refs":  [
+                                             {
+                                                 "node_id":  "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                                                 "page_id":  "70dcdb14-76bb-4c8d-a73e-1b8cdb1132f2",
+                                                 "page_title":  "Semantic Color Assignment for Financial Actions",
+                                                 "node_type":  "decision",
+                                                 "section_name":  "Affected Systems",
+                                                 "item_text":  "Shelter locations page using neutral blue for non-financial \"Visit\" action buttons"
+                                             }
+                                         ]
+                     },
+                     {
+                         "section_name":  "Risks and Considerations",
+                         "content":  "Key risks include managing physical logistics coordination between donors and shelters, which requires clear communication protocols and may involve liability considerations for item condition/safety. The feature adds operational overhead for shelters who must review and manage physical donations. There\u0027s potential for mismatched expectations between donated item condition and shelter needs. Consider implementing approval workflows to prevent overwhelming shelters with unsuitable donations. The system must handle scenarios where shelters reach capacity or temporarily stop accepting donations. Privacy concerns arise around sharing donor contact information with shelters for pickup coordination. Integration complexity may emerge if shelters use different management systems or have varying donation policies."
+                     }
+                 ],
+    "linked_entity_ids":  [
+                              "b0c17c0f-de50-41d1-8342-320f8cfd9663",
+                              "ae68e851-d901-49ef-9baf-1c7e9b4d9124",
+                              "e183d3ad-070d-421e-ba1d-ebcc09b9ebc0"
+                          ],
+    "created_at":  "2026-04-03T08:28:21.511Z",
+    "updated_at":  "2026-04-03T08:28:21.511Z",
+    "plan_status":  "draft",
+    "owner_name":  "",
+    "reviewers":  [
+
+                  ],
+    "discussion":  [
+
+                   ]
+}

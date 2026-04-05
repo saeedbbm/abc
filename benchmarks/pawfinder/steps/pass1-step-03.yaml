@@ -1,0 +1,31 @@
+step_id: pass1-step-03
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+
+benchmark_focus:
+  - High candidate recall with strict canonical units.
+  - Do not let `project` become a catch-all class.
+
+benchmark_must_fit:
+  - Real projects should be surfaced as entities or at least strong candidates.
+  - Wrong-unit work items should not be promoted into top-level canonical projects.
+  - Source refs should carry enough evidence that later steps can merge, validate, and attribute correctly.
+
+benchmark_watchouts:
+  - Promoting planning, docs, maintenance, bugs, and handoff items into `project`
+  - Treating one Jira ticket as a full project by default
+  - Losing provenance so Kim gets attributed to Tim or Matt gets attributed to Jack later
+
+benchmark_false_positive_examples:
+  - Update about page copy
+  - 2026 roadmap planning
+  - bug fixes
+  - maintenance
+  - postmortems
+  - onboarding docs
+
+benchmark_questions:
+  - Are extracted project-shaped nodes mostly real bodies of work from the benchmark?
+  - Are the inputs rich enough that Step 4 or Step 5 can clean up, or is Step 3 already hardening wrong ontology?

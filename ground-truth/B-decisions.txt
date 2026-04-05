@@ -1,0 +1,598 @@
+================================================================================
+GROUND TRUTH — SECTION B: DECISIONS AND CONVENTIONS
+================================================================================
+
+Every architectural choice, UI convention, coding pattern, and technology
+selection present in the input data. Includes both explicit decisions
+(documented in Confluence or onboarding guides) and implicit conventions
+(discoverable only by cross-referencing multiple sources).
+
+Total decision count: 16
+
+
+================================================================================
+THE THREE HIDDEN PATTERNS
+================================================================================
+
+These are the most important discoveries the AI system should make. They are
+never stated as rules — they exist only as repeated behavior across multiple
+sources and dates.
+
+
+================================================================================
+DECISION 1: Kim's Color Convention
+================================================================================
+
+Canonical name:     Gender-Color and Money-Color UI Convention
+Summary:            Pet-related UI elements use pink accents for female animals
+                    and blue accents for male animals. Money-related UI elements
+                    (donate buttons, sponsor buttons, payment forms) use green
+                    for CTAs and white/neutral for backgrounds. Non-financial
+                    action buttons use blue.
+Made by:            Kim (UX designer)
+Applies to:         All pet-facing UI: pet profile cards, browse page, donation
+                    page, shelter comparison page, any page showing pet cards.
+                    All financial CTAs across the site.
+Status:             decided
+Explicitly documented?  PARTIALLY. The specific color choices are mentioned in
+                    the Confluence "Website Redesign" doc's design notes, but
+                    they are described as choices Kim made for specific pages,
+                    not as a site-wide rule. No document says "our convention
+                    is pink/blue for gender and green for money."
+
+All sources (chronological):
+
+  1. Slack #design 2023-03-14
+     Kim designing pet profile cards. Says "pink accent for the girls and blue
+     for the boys" for gender indicator. Says "Sponsor Me button...going with
+     green for that since it's money-related." Sarah agrees.
+
+  2. Slack #design 2023-10-02
+     Kim on shelter locations page. "Visit" button is "neutral blue...it's not
+     a money action so doesn't need to be green." This establishes the
+     negative case: non-financial buttons are NOT green.
+
+  3. Slack #design 2024-02-19
+     Kim on donation page. "main donate button I'm making green — it's a
+     financial action." Payment section "white and clean." Pet dedication
+     card "pink or blue accent depending on if it's a girl or boy animal."
+
+  4. Slack #design 2024-06-10
+     Kim on comparison page mockups. "animal cards on the comparison view
+     still use the pink/blue accents."
+
+  5. Slack #design 2025-03-10
+     Kim on volunteer portal. "no financial stuff on this page so it's just
+     our standard blues and grays." Reinforces the pattern by absence:
+     no money = no green.
+
+  6. Confluence "PawFinder Website Redesign" Phase 1
+     "pink for female animals, blue for males" on gender indicator.
+     "Sponsor Me button on each card is green since it's a financial action.
+     Kim suggested green for any money-related call-to-action."
+
+  7. Confluence "PawFinder Website Redesign" Phase 2
+     "Visit CTA button on shelter cards is blue (not green, since it's not
+     a financial action)."
+
+  8. Confluence "PawFinder Website Redesign" Phase 3
+     "Complete Donation button is green. Green for the donation CTA keeps
+     things consistent with our other financial actions."
+     "pet card...uses the same pink/blue gender accent as the browse page."
+
+  9. GitHub PR #18 (Tim, 2023-03-28)
+     Description: "gender indicator with color styling per Kim's designs."
+     "Sponsor Me button is styled green per the design mockups."
+
+  10. GitHub PR #47 (Tim, 2024-03-25)
+      Description: "donate button is styled green (per Kim's designs).
+      Payment section has a clean white background. If the user dedicates
+      to a pet, the pet card appears with the standard gender-colored accent."
+
+Pattern elements:
+  - Pink accent = female animal
+  - Blue accent = male animal
+  - Green = financial/money CTA (Sponsor, Donate)
+  - White/neutral = payment/financial form backgrounds
+  - Blue = non-financial action buttons (Visit)
+  - Standard blues/grays = pages with no financial element
+
+
+================================================================================
+DECISION 2: Tim's Layout Convention
+================================================================================
+
+Canonical name:     Selection vs. Comparison Layout Convention
+Summary:            When the user is choosing/selecting from a list (picking
+                    one item to drill into), use a vertical menu/sidebar on
+                    the left. When the user is comparing items side by side,
+                    use a horizontal columnar layout across the page.
+Made by:            Tim (Senior frontend developer)
+Applies to:         All page layouts involving navigation or item presentation
+                    on pawfinder/pawfinder-web. Applied to: pet categories page,
+                    shelter comparison page, volunteer shift browser, resource
+                    library page.
+Status:             decided
+Explicitly documented?  NO. Tim's layout thinking exists only in Slack messages
+                    and GitHub PR review comments. There is no Confluence doc
+                    that states this as a convention. PAW-18 ("Site navigation
+                    improvements") tracks the work but has no linked doc.
+                    The Q3 2024 roadmap mentions it has "No formal project doc."
+
+All sources (chronological):
+
+  1. Slack #engineering 2023-03-21
+     Tim on pet categories page: "putting the category list as a vertical
+     menu on the left side...feels right for a 'pick one of these' type
+     interaction. the user is choosing, not comparing, so vertical nav
+     makes more sense to me than tabs across the top."
+
+  2. Slack #engineering 2024-05-13
+     Tim on shelter comparison: "horizontal layout...shelters laid out left
+     to right across the top so you can scan across and compare attributes.
+     when you're comparing things, your eyes want to go left-right to see
+     differences. it's different from when you're just picking something
+     from a list."
+
+  3. Slack #engineering 2024-10-07
+     Tim on volunteer signup form: "single column for forms...forms are
+     different from browse/comparison layouts." (Tangentially related —
+     shows Tim thinks about layout categorically.)
+
+  4. Slack #engineering 2025-02-17
+     Tim on resource library page: "put the categories on the left as a
+     vertical list, not tabs on top. when someone is choosing which section
+     to look at, left side nav is better. tabs across the top work better
+     when you're comparing stuff side by side."
+
+  5. GitHub PR #43 — Tim's review comment (2024-07-09)
+     Tim on Jill's shelter comparison PR: "The comparison grid looks right —
+     horizontal columns for the shelters, rows for the attributes. That's
+     the right call for a comparison view."
+
+  6. GitHub PR #55 — Tim's review comment (2024-10-16)
+     Tim on Jill's volunteer portal frontend: "I'd rethink the layout.
+     Right now you have the shelter selector as tabs across the top, but
+     the user is choosing which shelter to look at, not comparing shelters.
+     Put the shelter list on the left as a vertical nav." Jill changes it.
+
+  7. GitHub PR #31 — Tim's own PR (2023-09-18)
+     Shelter locations page description: "The shelter list is a vertical
+     scrollable panel on the left side." (The user is selecting a shelter,
+     not comparing.)
+
+Pattern elements:
+  - Vertical left sidebar/menu = user is selecting/choosing/navigating
+  - Horizontal columns/layout = user is comparing items
+  - Single column top-to-bottom = forms (data entry)
+
+
+================================================================================
+DECISION 3: Matt's Client-Side Browse Pattern
+================================================================================
+
+Canonical name:     Client-Side Browse for Small Datasets
+Summary:            For browse-and-choose flows where the dataset is small
+                    (under ~20 items), load the entire list in a single API
+                    call on page mount and handle next/prev or list navigation
+                    entirely client-side. No server round-trip per click.
+                    For larger or growing lists (30-40+ items), pagination
+                    is acceptable.
+Made by:            Matt (Architect)
+Applies to:         All browse/list features on pawfinder/pawfinder-web and
+                    corresponding pawfinder/pawfinder-api endpoints. Applied
+                    to: adoption chooser (8-15 pets), donation page pet
+                    dedication (10-12 pets), shelter events browser (5-12
+                    events), volunteer shifts (10-15 shifts).
+Status:             decided
+Explicitly documented?  NO. Matt never writes this down as a rule. His pattern
+                    exists primarily in his own PR code (PR #23) and his review
+                    comments on others' PRs. The load-all-under-20 pattern
+                    itself is not stated in Slack or Confluence, but the
+                    boundary case (where Matt recommends pagination for a
+                    larger ~30-40 item list) does appear in Slack 2025-06-09.
+
+All sources (chronological):
+
+  1. GitHub PR #23 — Matt's own PR (2023-07-24)
+     Adoption chooser page. Description: "The page fetches the full list of
+     adoptable pets from GET /api/v1/pets/adoptable on mount and stores them
+     in component state. Navigation between pets is handled entirely
+     client-side by indexing into the local array. No API call on prev/next —
+     we typically have 8-15 adoptable pets at any given time so there's no
+     reason to round-trip to the server for each click."
+
+  2. GitHub PR #47 — Matt's review on Tim's PR (2024-03-27)
+     Donation page. Matt's comment: "you're fetching the pet list fresh every
+     time the user toggles it on. Just load them once when the page mounts
+     and keep them in state. There are only like 10-12 adoptable pets at
+     any time."
+
+  3. GitHub PR #49 — Matt's review on Jack's PR (2024-08-07)
+     Shelter events browser. Jack originally calls API on every Next/Prev
+     click. Matt: "How many events does a shelter typically have?" Jack:
+     "5-8, maybe 12 max." Matt: "just load them all upfront in one call
+     when the page mounts. Store the array in state and navigate through
+     it locally with the prev/next index. No need to make a server request
+     every time the user clicks an arrow for a list that small."
+
+  4. GitHub PR #52 — Matt's review on Jack's PR (2024-09-25)
+     Volunteer portal backend. Matt: "The shift list for a shelter — you're
+     right to return them all, 15 shifts is nothing."
+
+  5. GitHub PR #55 — Matt's review on Jill's PR (2024-10-21)
+     Volunteer portal frontend. Matt: "I see you're loading all shifts for
+     the selected shelter at once — that's the right call, no need to
+     paginate 10-15 items."
+
+  6. GitHub PR #58 — Matt's review on Jack's PR (2025-06-18)
+     Supply tracking backend. 30-40 supply items. Jack uses pagination.
+     Matt: "for 30-40 items that's borderline but probably fine since it
+     could grow." Approves pagination. THIS IS THE BOUNDARY CASE — Matt
+     does NOT push for load-all when the list is larger.
+
+Pattern elements:
+  - Under ~20 items: load all in one API call, client-side navigation
+  - ~30-40 items with growth potential: pagination is acceptable
+  - The threshold is roughly 20 items
+  - Rationale (implicit): UX feels snappier, fewer network requests
+  - Backend implication: endpoints for small lists don't need pagination
+    parameters, just return the full array
+
+
+================================================================================
+EXPLICITLY DOCUMENTED DECISIONS
+================================================================================
+
+These are decisions stated in Confluence docs or the onboarding guide.
+
+
+================================================================================
+DECISION 4: TypeScript Strict Mode
+================================================================================
+
+Canonical name:     TypeScript Strict Mode in Both Repos
+Summary:            Both pawfinder-web and pawfinder-api use TypeScript strict
+                    mode.
+Made by:            Unattributed (onboarding guide states the standard but
+                    does not say who chose it; Matt is a reasonable inference
+                    given his architect role, but unsupported by the data)
+Applies to:         pawfinder/pawfinder-web, pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Code Style section
+
+
+================================================================================
+DECISION 5: CSS Modules with camelCase
+================================================================================
+
+Canonical name:     CSS Modules with camelCase Class Names
+Summary:            Frontend uses CSS Modules for styling (not styled-components
+                    or inline styles). Class names use camelCase convention.
+Made by:            Tim (enforced in Slack and code review)
+Applies to:         pawfinder/pawfinder-web
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Code Style section
+  - Slack #engineering 2024-06-03 (Tim tells Jill: "CSS modules mostly...
+    camelCase for the module classes")
+
+
+================================================================================
+DECISION 6: Standardized API Response Envelope
+================================================================================
+
+Canonical name:     API Response Envelope Format
+Summary:            All API endpoints return { data: T, meta: { timestamp,
+                    requestId } }. Implemented via response wrapper middleware.
+Made by:            Matt
+Applies to:         pawfinder/pawfinder-api (all endpoints)
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Code Style section
+  - GitHub PR #27 (Matt, 2023-05-15) — the PR that standardized it
+  - Jira PAW-7
+  - Slack #engineering 2023-05-10 (Matt announces refactor)
+  - Slack #engineering 2025-11-10 (Jack references the middleware)
+
+
+================================================================================
+DECISION 7: PostgreSQL as Primary Database
+================================================================================
+
+Canonical name:     PostgreSQL as Primary Database
+Summary:            The application uses PostgreSQL. Upgraded from v10 to v15
+                    in June 2024 after a migration incident.
+Made by:            Unattributed (onboarding guide states the standard;
+                    Matt is a reasonable inference but unsupported by data)
+Applies to:         pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Database section
+  - Confluence "Incident Postmortem" (documents upgrade from PG 10 to 15)
+
+
+================================================================================
+DECISION 8: Squash Merge to Main
+================================================================================
+
+Canonical name:     Squash Merge PR Workflow
+Summary:            All PRs are squash-merged to main. CI/CD auto-deploys
+                    to staging on merge.
+Made by:            Unattributed (onboarding guide states the standard;
+                    Matt is a reasonable inference but unsupported by data)
+Applies to:         Both repos
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" PR Process section
+
+
+================================================================================
+DECISION 9: ESLint + Prettier
+================================================================================
+
+Canonical name:     ESLint and Prettier for Code Formatting
+Summary:            Both repos use ESLint + Prettier for code style enforcement.
+Made by:            Unattributed (onboarding guide states the standard;
+                    reasonable inference but unsupported by data)
+Applies to:         Both repos
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Code Style section
+
+
+================================================================================
+DECISION 10: Frontend Testing Stack (Vitest + RTL + Playwright)
+================================================================================
+
+Canonical name:     Frontend Testing with Vitest, RTL, and Playwright
+Summary:            Frontend unit tests use Vitest + React Testing Library.
+                    E2E tests use Playwright (acknowledged as flaky).
+                    Backend uses Jest.
+Made by:            Unattributed (onboarding guide states the standard;
+                    Tim is the most likely owner for frontend testing choices
+                    but this is inference)
+Applies to:         pawfinder/pawfinder-web (Vitest, RTL, Playwright),
+                    pawfinder/pawfinder-api (Jest)
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "PawFinder Engineering Onboarding Guide" Testing section
+  - Slack #engineering 2023-09-11 (Tim complains about flaky Playwright tests)
+
+
+================================================================================
+DECISION 11: ISO 8601 for API Date Formats
+================================================================================
+
+Canonical name:     ISO 8601 Date Format for API Responses
+Summary:            All API responses must return dates in ISO 8601 format.
+                    Normalization happens in the service layer.
+Made by:            Matt
+Applies to:         pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  NO (only in Slack)
+All sources:
+  - Slack #engineering 2024-08-19 (Matt tells Jack to always return ISO 8601)
+
+
+================================================================================
+DECISION 12: Structured Data Over Raw Strings from DB
+================================================================================
+
+Canonical name:     Parse DB Strings into Structured Objects
+Summary:            Raw strings from the database (like hours of operation)
+                    should be parsed into structured objects before sending
+                    in the API response. Frontend should not do string parsing.
+Made by:            Matt
+Applies to:         pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  NO (only in GitHub and Slack)
+All sources:
+  - GitHub PR #35 review (Matt tells Jack to parse shelter hours)
+  - Slack #engineering 2024-03-18 (Matt: "don't just pass through the raw
+    string from the DB")
+
+
+================================================================================
+DECISION 13: Idempotent DELETE Endpoints
+================================================================================
+
+Canonical name:     DELETE Endpoints Should Be Idempotent
+Summary:            DELETE operations should not error if the resource is
+                    already deleted/absent. Return 200 with a message.
+Made by:            Matt
+Applies to:         pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  NO (only in GitHub)
+All sources:
+  - GitHub PR #52 review (Matt tells Jack to make shift cancellation
+    DELETE idempotent)
+
+
+================================================================================
+DECISION 14: Shelter Data Sync Architecture
+================================================================================
+
+Canonical name:     15-Minute Polling Sync for Shelter Data
+Summary:            Shelter data is synced every 15 minutes via a scheduler.
+                    Supports API integration (pull) and CSV upload. Process
+                    is idempotent.
+Made by:            Matt (inferred — he gets failure alerts)
+Applies to:         Shelter partner integration system
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "Shelter Partner Integration Spec"
+
+
+================================================================================
+DECISION 15: Migration Review for Large Tables
+================================================================================
+
+Canonical name:     Matt Reviews Migrations on Large Tables
+Summary:            After the May 2024 incident, all future migrations on
+                    tables over 10K rows must be reviewed by Matt before
+                    deploying. CI pipeline flags ALTER TABLE on large tables.
+Made by:            Matt (as incident response)
+Applies to:         pawfinder/pawfinder-api database migrations
+Status:             decided
+Explicitly documented?  YES
+All sources:
+  - Confluence "Incident Postmortem — Database Migration Failure"
+  - Jira PAW-29
+
+
+================================================================================
+DECISION 16: API Versioning Convention
+================================================================================
+
+Canonical name:     Stay on v1 Until Breaking Changes
+Summary:            New endpoints go under /api/v1. No need for v2 until
+                    there are breaking changes. Just add to the existing
+                    namespace.
+Made by:            Matt
+Applies to:         pawfinder/pawfinder-api
+Status:             decided
+Explicitly documented?  NO (only in Slack)
+All sources:
+  - Slack #engineering 2025-11-10 (Matt tells Jack: "v1 is fine. we don't
+    need v2 until we have breaking changes. just add to the existing
+    namespace")
+
+
+================================================================================
+RULE-SOUNDING LANGUAGE FLAGS
+================================================================================
+
+The following lines in the input data state patterns too explicitly. An LLM
+ingesting this data would trivially extract these as "rules" rather than
+needing to discover them as behavioral patterns. These should be softened
+to page-specific, situational language.
+
+FLAG FORMAT: file | line number(s) | exact problematic text | which pattern
+
+
+--- Kim's Color Convention ---
+
+FLAG 1:
+  File:     slack.txt
+  Line:     68
+  Text:     "going with green for that since it's money-related, feels natural"
+  Pattern:  Kim's color convention
+  Problem:  "money-related" generalizes beyond this specific page
+
+FLAG 2:
+  File:     slack.txt
+  Line:     70
+  Text:     "yeah green for money stuff makes sense"
+  Pattern:  Kim's color convention
+  Problem:  Sarah's reply elevates it to a general principle
+
+FLAG 3:
+  File:     slack.txt
+  Line:     201
+  Text:     "it's not a money action so doesn't need to be green"
+  Pattern:  Kim's color convention
+  Problem:  States the negative rule explicitly
+
+FLAG 4:
+  File:     slack.txt
+  Line:     270
+  Text:     "it's a financial action, and green just says 'go' and 'money'
+             at the same time"
+  Pattern:  Kim's color convention
+  Problem:  "financial action" is rule-like language
+
+FLAG 5:
+  File:     confluence.txt
+  Lines:    47-49
+  Text:     "green since it's a financial action. Kim suggested green for any
+             money-related call-to-action and it works well"
+  Pattern:  Kim's color convention
+  Problem:  "any money-related call-to-action" is an explicit general rule
+
+FLAG 6:
+  File:     confluence.txt
+  Lines:    71-72
+  Text:     "not green, since it's not a financial action"
+  Pattern:  Kim's color convention
+  Problem:  States the negative rule explicitly in documentation
+
+FLAG 7:
+  File:     confluence.txt
+  Lines:    96-98
+  Text:     "Green for the donation CTA keeps things consistent with our
+             other financial actions (like the Sponsor button on pet cards)"
+  Pattern:  Kim's color convention
+  Problem:  "consistent with our other financial actions" explicitly
+            cross-references the pattern across features
+
+
+--- Tim's Layout Convention ---
+
+FLAG 8:
+  File:     slack.txt
+  Line:     81
+  Text:     "the user is choosing, not comparing, so vertical nav makes more
+             sense to me than tabs across the top"
+  Pattern:  Tim's layout convention
+  Problem:  "choosing, not comparing" is textbook-style abstraction
+
+FLAG 9:
+  File:     slack.txt
+  Lines:    342-343
+  Text:     "when you're comparing things, your eyes want to go left-right
+             to see differences. it's different from when you're just picking
+             something from a list"
+  Pattern:  Tim's layout convention
+  Problem:  Explicitly contrasts the two modes as a general principle
+
+FLAG 10:
+  File:     slack.txt
+  Line:     489
+  Text:     "left side nav is better. tabs across the top work better when
+             you're comparing stuff side by side"
+  Pattern:  Tim's layout convention
+  Problem:  Directly states a general rule about when each layout is "better"
+
+FLAG 11:
+  File:     slack.txt
+  Lines:    422-423
+  Text:     "forms are different from browse/comparison layouts. when someone
+             is filling in info, vertical flow is the way to go"
+  Pattern:  Tim's layout convention (tangential)
+  Problem:  Explicitly categorizes layout types
+
+
+--- Meta Hints ---
+
+FLAG 12:
+  File:     confluence.txt
+  Lines:    363-365
+  Text:     "No formal project doc, just improvements as we go. (PAW-18)"
+  Pattern:  N/A — this is a meta-hint
+  Problem:  Explicitly tells the reader that Tim's navigation work is
+            undocumented, which is information the AI should discover
+            on its own by noticing the absence of a doc
+
+
+--- Lines That Are Borderline But Acceptable ---
+
+The following are borderline but probably fine because they describe a
+specific page choice rather than stating a general rule:
+
+  - confluence.txt line 104-105: "horizontal columnar layout (Tim's design
+    direction)" — credits Tim for a specific page, not a general rule
+  - github.txt PR #23 description: Matt explains loading all pets on mount
+    for this specific page — describes behavior without abstracting to a rule
+  - github.txt PR #49 review: Matt tells Jack to change the approach for
+    this specific feature — gives a reason tied to the item count
+================================================================================

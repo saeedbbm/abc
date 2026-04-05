@@ -1,0 +1,147 @@
+================================================================================
+HOW-TO PATTERN SPEC — SUPPLY TRACKING FRONTEND
+================================================================================
+
+Project:      Supply Needs Tracking (Frontend)
+Origin:       Jira PAW-14 / PAW-24 — backend completed by Jack (PR #35, #58),
+              frontend not yet started. Matt confirmed Jack has a PR coming
+              for the frontend (Slack 2025-04-14).
+Status:       Active — backend complete, frontend planned
+
+The backend for supply needs tracking is done (CRUD API for shelter supplies).
+This plan covers the frontend: a page to browse, filter, and manage shelter
+supply needs. It should draw heavily on existing browse page patterns and
+Tim's layout conventions.
+
+
+================================================================================
+MUST — Absence of these means the how-to is failing
+================================================================================
+
+NAV-1     Vertical left sidebar for selection
+          What to check: shelter selection for viewing supplies uses a
+          vertical sidebar on the left (picking a shelter to see its
+          supplies = selection, not comparison).
+
+GRID-1    Responsive grid breakpoints
+          What to check: supply cards use the 3/2/1 column responsive grid.
+
+COLOR-5   Blues and grays for non-financial pages
+          What to check: no financial transactions on this page, so standard
+          blues and grays. No green.
+
+COLOR-6   Neutral blue for non-financial action buttons
+          What to check: action buttons (Add Supply, Edit, View Details) are
+          blue.
+
+NAV-6     Single column for forms
+          What to check: supply entry/edit forms are single-column.
+
+API-2     No pagination for small lists (under ~20 items)
+          What to check: if a shelter has a small number of supply items,
+          loads in full. References Matt's pattern.
+
+API-3     Cursor-based pagination for larger lists
+          What to check: PR #58 already implemented cursor-based pagination
+          for the supplies API (30-40 items). The frontend must handle this.
+          This is directly from the existing implementation.
+
+
+================================================================================
+SHOULD — Expected when the plan has good evidence coverage
+================================================================================
+
+IMG-2     Skeleton loading states
+          What to check: skeleton loading while supply data loads.
+
+COMP-1    React.memo + useCallback for card grids
+          What to check: supply card grid uses memoization.
+
+COMP-4    200ms CSS fade transition
+          What to check: transitions when switching between shelters or
+          filtering.
+
+NAV-3     Scrollable sidebar with max-height
+          What to check: shelter sidebar uses max-height + overflow-y scroll.
+
+NAV-4     1/3 left panel, 2/3 content split
+          What to check: 1/3 sidebar, 2/3 content layout.
+
+FILE-1    CSS Modules with camelCase
+          What to check: CSS Modules for new components.
+
+FILE-3    Page folder structure
+          What to check: src/pages/SupplyTracking/SupplyTracking.tsx + etc.
+
+PROC-1    Matt reviews backend, Tim reviews frontend
+          What to check: Tim reviews the frontend PR.
+
+TEST-1    Vitest + RTL for frontend
+          What to check: Vitest + RTL for component tests.
+
+API-1     Response envelope { data, meta }
+          What to check: references the existing API's response format.
+
+API-4     Parse DB strings into structured objects
+          What to check: supply data comes structured from the API (Jack's
+          backend already does this per Matt's review on PR #35).
+
+COMP-3    Shared Toast component
+          What to check: form save success/error uses shared Toast.
+
+
+================================================================================
+MAY — Relevant if the plan is thorough
+================================================================================
+
+GRID-2    44px minimum touch targets
+          What to check: mobile touch targets on supply cards.
+
+GRID-3    Bottom nav bar on mobile
+          What to check: accounts for bottom nav padding.
+
+GRID-4    Hamburger menu at 768px
+          What to check: works with hamburger nav.
+
+COMP-2    Promise.all for parallel API calls
+          What to check: if loading shelters + supplies in parallel.
+
+NAV-5     Light yellow for differing values
+          What to check: if supply comparison between shelters is added.
+
+FILE-2    Shared components in shared folder
+          What to check: SupplyCard goes to shared if reusable.
+
+TEST-3    Playwright E2E
+          What to check: E2E tests for supply management flow.
+
+PROC-2    PR description requirements
+          What to check: mentions PR description format.
+
+PROC-3    Squash merge, auto-deploy
+          What to check: mentions merge/deploy workflow.
+
+API-5     ISO 8601 for all dates
+          What to check: timestamps on supply entries use ISO 8601.
+
+API-8     Validate uniqueness before insert
+          What to check: duplicate supply entry validation.
+
+
+================================================================================
+SCORING GUIDE
+================================================================================
+
+MUST patterns (7):     Each worth 3 points.   Max = 21
+SHOULD patterns (12):  Each worth 2 points.   Max = 24
+MAY patterns (11):     Each worth 1 point.    Max = 11
+
+Total possible: 56 points
+
+Rating:
+  45+  Excellent
+  32-44  Good
+  18-31  Mediocre
+  9-17   Poor
+  <9   Failing
+================================================================================

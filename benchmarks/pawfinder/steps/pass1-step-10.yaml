@@ -1,0 +1,28 @@
+step_id: pass1-step-10
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Hidden convention discovery is the benchmark money shot.
+  - Missing Kim is a major benchmark failure even if the output looks numerically cleaner.
+
+benchmark_must_fit:
+  - Synthesize benchmark-critical convention nodes for Kim, Tim, and Matt.
+  - Preserve enough repeated evidence to explain why each convention exists.
+  - Avoid fragmenting one broad convention into several narrow near-duplicates.
+  - Each convention must have pattern_rule containing concrete prescriptions (exact colors, breakpoints, thresholds, component patterns) not just abstract names.
+  - Each convention must have established_by set to the correct person based on provenance, not the implementer.
+
+benchmark_watchouts:
+  - Kim convention disappears entirely
+  - Tim or Matt convention exists but with weak constituent evidence
+  - repeated source evidence exists but the step refuses to synthesize because it expects too many canonical decision nodes first
+  - ownership is inherited from noisy upstream decided_by counts instead of provenance
+  - fully documented standards are mislabeled as hidden conventions
+
+benchmark_questions:
+  - Did the step recover all three benchmark conventions?
+  - If not, which one is missing and why?
+  - Are constituent decisions broad enough to represent a real pattern instead of page-specific fragments?

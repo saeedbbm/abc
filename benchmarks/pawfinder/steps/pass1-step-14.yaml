@@ -1,0 +1,30 @@
+step_id: pass1-step-14
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/F-entity-counts.txt
+
+benchmark_focus:
+  - Final entity-page correctness for repositories and GT-critical projects.
+  - Entity pages should expose the right nodes before human-page synthesis starts.
+
+benchmark_must_fit:
+  - "Repository entity pages should include `pawfinder-web` and `pawfinder-api` or an obviously equivalent normalized title."
+  - "GT-critical projects such as `Pet Adoption Chooser`, `Site Navigation Improvements`, `Event Calendar for Shelter Pages`, and `Toy Donation Feature` should not be absent."
+  - Convention and person pages should still be grounded, but not at the expense of missing core repo/project coverage.
+  - Convention entity pages must contain specific implementation prescriptions (exact colors, pixel sizes, breakpoints, thresholds, component patterns) not collapsed to vague one-liners.
+
+benchmark_watchouts:
+  - repository pages missing entirely
+  - project coverage looks broad in counts but misses important GT projects
+  - sampled pages focus only on conventions or team members while repos/projects are absent
+
+benchmark_false_positive_examples:
+  - good-looking convention pages with no repository pages
+  - many project pages, but the benchmark-critical ongoing or proposed projects are absent
+
+benchmark_questions:
+  - Are both benchmark repositories visible as generated entity pages?
+  - Are GT-critical project pages present, even if their canonical names are lightly normalized?
+  - Do the generated pages suggest that step 15 can build correct project hubs?

@@ -1,0 +1,28 @@
+step_id: pass1-step-08
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/E-customer-feedback.txt
+
+benchmark_focus:
+  - Discover real undocumented projects and real proposed features.
+  - Group recurring external demand into one coherent feature candidate.
+
+benchmark_must_fit:
+  - Discover the benchmark's undocumented work rather than mainly inventing ticket noise.
+  - Group the three toy-donation feedback submissions into one `Toy Donation Feature`.
+  - Preserve evidence from the underlying submissions or source docs.
+  - Toy Donation discovery node must have real source_refs from at least 2 customer feedback submissions.
+  - Discovery node should have useful related_entities linking to existing projects like Pet Profiles and Donation Page.
+
+benchmark_watchouts:
+  - Converting single Jira tickets directly into project nodes
+  - Flooding the output with fake proposed tickets
+  - Splitting recurring user demand into multiple near-duplicate discoveries
+  - Missing the difference between a feature-level project and a one-off task
+
+benchmark_questions:
+  - Does the step find the benchmark's real undocumented projects with usable evidence?
+  - Does it create one Toy Donation discovery node instead of several noisy variants?
+  - Are discovery nodes shaped strongly enough to survive later graph and page steps?

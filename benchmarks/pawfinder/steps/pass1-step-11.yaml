@@ -1,0 +1,26 @@
+step_id: pass1-step-11
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Graph usefulness for downstream how-to generation.
+  - Convention nodes and discovery nodes must become traversable, not decorative.
+
+benchmark_must_fit:
+  - Convention nodes should connect to constituent decisions and owners.
+  - The graph should support a believable traversal from `Toy Donation Feature` to conventions and their owners.
+  - Discovery nodes should not remain floating islands with zero useful links.
+  - Traversal QA must show paths from Toy Donation to each of the 3 conventions via APPLIES_TO and from conventions to owners via PROPOSED_BY.
+  - APPLIES_TO targets must be real feature-level entities, not ticket fragments or one-off tasks.
+
+benchmark_watchouts:
+  - convention nodes exist but stay disconnected
+  - APPLIES_TO edges land on noisy ticket fragments instead of the real feature-level node
+  - graph density grows without improving path quality
+
+benchmark_questions:
+  - Can the judge trace `Toy Donation Feature -> convention -> owner -> evidence` through the produced graph?
+  - Are APPLIES_TO targets real feature/project nodes rather than low-value noise?

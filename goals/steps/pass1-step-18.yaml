@@ -1,0 +1,64 @@
+step_id: pass1-step-18
+step_number: 18
+step_name: Create Verify Cards
+pass: pass1
+
+purpose: >
+  Convert raw claims into a manageable set of high-signal human review cards that
+  focus attention on uncertainty, contradiction, attribution risk, and other
+  meaningful quality gaps.
+
+inputs:
+  - step 17 claims
+  - step 9 and step 10 entities
+  - step 6, 7, and 11 edges
+  - step 14 entity pages
+
+primary_outputs:
+  - verification cards with severity, type, and execution identity
+
+judge_should_look_at:
+  - card counts versus candidate counts
+  - severity distribution
+  - sampled kept cards and sampled filtered cards
+
+must_do:
+  - keep the card set manageable enough for humans to use
+  - prioritize high-signal issues such as attribution mistakes, contradictions, and missing critical support
+  - filter noisy low-value cards aggressively
+  - preserve execution identity and traceability metadata
+
+must_not_do:
+  - overwhelm the reviewer with low-value noise
+  - create convention-existence cards by default just because a convention is synthesized
+  - lose execution_id or provenance needed to trace the card back
+
+success_signals:
+  - a reviewer could realistically work through the final card set
+  - severity calibration feels sensible on sampled cards
+  - the most important KB risks are visible near the top of the queue
+
+failure_signals:
+  - card volume is too large to be useful
+  - low-value structural noise dominates
+  - traceability metadata is missing or broken
+
+deterministic_checks:
+  - key: total_cards_positive_when_candidates_exist
+    description: Some candidates should survive filtering when real issues exist.
+    mode: gte
+    target: 1
+  - key: card_volume_reasonable
+    description: Final card count should remain manageable relative to candidate count.
+    mode: eq
+    target: 1
+  - key: sampled_cards_have_execution_id
+    description: Sampled cards should include execution identity.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - verify cards are high-signal and traceable
+  block_when:
+    - card output is mostly noise or loses traceability

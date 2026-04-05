@@ -1,0 +1,194 @@
+================================================================================
+GROUND TRUTH — SECTION E: CUSTOMER FEEDBACK
+================================================================================
+
+All 6 customer feedback submissions grouped into themes, with analysis of
+what the AI system should do with each one.
+
+Source file: webform.txt (6 submissions total)
+
+
+================================================================================
+THEME 1: TOY DONATION REQUESTS  (3 submissions — SIGNAL)
+================================================================================
+
+This is the primary actionable feedback cluster. Three separate users, over
+a 10-month span, independently request the ability to donate toys to shelter
+animals. This is an unmet need that does not correspond to any existing feature
+or planned work.
+
+The AI system should:
+  1. Identify this as a recurring request (3 occurrences over 10 months)
+  2. Recognize that no existing project addresses it (monetary donations exist
+     but not toy donations)
+  3. Propose a new "Toy Donation" feature
+  4. Synthesize implementation guidance from the three discovered patterns:
+     - Kim's color convention: pink/blue per pet gender on the pet selection
+       cards, green for the purchase/donate CTA, white for payment section
+     - Tim's layout convention: vertical left sidebar for browsing/selecting
+       a pet, since the user is choosing one pet to gift a toy to
+     - Matt's client-side browse pattern: a shelter typically has <20 pets,
+       so load the full list on mount and handle selection client-side
+
+
+--- Submission #1 ---
+
+Submitter:      Lisa M. (lisa.martinez82@gmail.com)
+Date:           2024-06-03
+Subject:        Donating toys
+
+Summary:        Adopted a dog (Benny) from a PawFinder shelter last year.
+                Has leftover dog toys. Wants to donate them to shelter animals.
+                Did not see a toy donation option on the site.
+
+Key detail:     She wants to donate physical toys she already owns (not
+                purchase new ones). The feature could support both physical
+                toy donation and purchasing new toys.
+
+Relevant quote: "Is there a way to do that through your site? I didn't see
+                anything about toy donations."
+
+Matching project:  NONE — this is a proposed new feature
+
+
+--- Submission #2 ---
+
+Submitter:      David Chen (dchen_99@yahoo.com)
+Date:           2024-11-19
+Subject:        Donation question
+
+Summary:        Noticed the monetary donation feature exists. Wants to
+                specifically buy a toy for a particular animal he saw on
+                the browse page. Wants to pick a specific pet and donate
+                a toy directly to them.
+
+Key detail:     He explicitly connects this to the existing browse page
+                (seeing a specific cat). The feature should integrate with
+                the pet browse/profile system.
+
+Relevant quote: "Like if I wanted to buy a toy or something for a particular
+                cat I saw on the browse page?"
+
+Matching project:  NONE — this is a proposed new feature
+
+
+--- Submission #3 ---
+
+Submitter:      Rachel Torres (rach.torres@outlook.com)
+Date:           2025-03-22
+Subject:        Toys for shelter pets
+
+Summary:        Family with kids wants to buy toys for shelter animals.
+                Asks if there is a gift shop. Wants to be able to pick
+                which animal gets the toy.
+
+Key detail:     Mentions "pick which animal" — same pet-selection
+                requirement as Submission #2. Her kids are the motivation,
+                suggesting family engagement as a use case.
+
+Relevant quote: "Would be cool if we could pick which animal gets the toy
+                too."
+
+Matching project:  NONE — this is a proposed new feature
+
+
+--- Toy Donation Feature: Ideal AI Recommendation ---
+
+The AI system should produce a recommendation roughly like:
+
+  "Three customers have independently requested the ability to donate toys to
+  specific shelter animals. No current feature or planned work addresses this.
+  Recommend building a Toy Donation feature.
+
+  Based on existing team conventions:
+  - The toy selection/browsing interface should use a vertical sidebar to list
+    available pets (per the established selection layout pattern)
+  - Pet cards should use pink/blue accents based on the animal's gender
+    (consistent with other pet-facing pages)
+  - The purchase/donate CTA should be green (consistent with other financial
+    actions on the site)
+  - Since each shelter typically has fewer than 20 adoptable pets, the pet
+    list can be loaded in a single API call and browsed client-side
+    (consistent with other small-list browse pages)"
+
+
+================================================================================
+THEME 2: POSITIVE FEEDBACK  (1 submission — NOISE)
+================================================================================
+
+--- Submission #4 ---
+
+Submitter:      Tom Bradley (tbradley77@gmail.com)
+Date:           2024-03-10
+Subject:        Great website!
+
+Summary:        Positive feedback about the browse page and adoption
+                application flow. Found cat (Whiskers) in ~5 minutes.
+
+Action:         No action needed. Validates that the browse page and
+                adoption flow work well from a user perspective.
+
+Matching project:  Pet Profiles and Browse Page (completed, working well)
+
+
+================================================================================
+THEME 3: BUG REPORT  (1 submission — ACTIONABLE NOISE)
+================================================================================
+
+--- Submission #5 ---
+
+Submitter:      Amanda K. (amandak_pnw@gmail.com)
+Date:           2025-01-08
+Subject:        Broken link
+
+Summary:        "Our Partners" link in the footer leads to a 404 page.
+                She volunteers at the Riverside shelter.
+
+Action:         Bug fix needed. The closest Jira ticket is PAW-22 ("Fix
+                broken shelter links on about page" — Status: Done, resolved
+                2024-11-20). However, PAW-22 fixes links on the about page,
+                while this customer reports the "Our Partners" link in the
+                footer going to a 404. These may not be the same bug. If
+                PAW-22 did not fix the footer link, a new ticket is needed.
+
+Matching project:  Possibly related to PAW-22, but likely a different bug
+
+
+================================================================================
+THEME 4: FEATURE REQUEST — VOLUNTEER HOURS EXPORT  (1 submission — SIGNAL)
+================================================================================
+
+--- Submission #6 ---
+
+Submitter:      Mike Nguyen (mikenguyen.pdx@gmail.com)
+Date:           2025-08-14
+Subject:        Volunteer hours question
+
+Summary:        Can see upcoming shifts on the volunteer dashboard but
+                needs a total count of hours for a school community service
+                requirement. Wants a downloadable report/export.
+
+Action:         This is a secondary feature request. The volunteer portal
+                exists (PAW-20, PAW-21, launched mid-2025) but does not
+                include an hours tracking/export feature. This could be
+                proposed as an enhancement to the volunteer portal.
+
+Matching project:  Volunteer Portal (completed, but this feature is missing)
+
+
+================================================================================
+FEEDBACK SUMMARY TABLE
+================================================================================
+
+#   Submitter         Date         Theme               Action
+--  ----------------  ----------   ------------------   ----------------------
+1   Lisa M.           2024-06-03   Toy donation         Propose new feature
+2   David Chen        2024-11-19   Toy donation         Propose new feature
+3   Rachel Torres     2025-03-22   Toy donation         Propose new feature
+4   Tom Bradley       2024-03-10   Positive feedback    No action
+5   Amanda K.         2025-01-08   Bug report           Likely different from PAW-22
+6   Mike Nguyen       2025-08-14   Volunteer export     Propose enhancement
+
+Signal submissions: 4 (#1, #2, #3, #6)
+Noise submissions:  2 (#4, #5)
+================================================================================

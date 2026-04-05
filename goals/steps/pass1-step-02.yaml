@@ -1,0 +1,70 @@
+step_id: pass1-step-02
+step_number: 2
+step_name: Embed Documents
+pass: pass1
+
+purpose: >
+  Convert parsed documents into retrieval-ready chunks and embeddings that preserve
+  source semantics and make later retrieval accurate for both local evidence and
+  multi-hop narrative generation.
+
+inputs:
+  - step 1 parsed documents
+
+primary_outputs:
+  - chunked evidence spans
+  - embeddings for retrieval
+  - chunk metadata linking each chunk to its parent document and source unit
+
+judge_should_look_at:
+  - artifact counts and size distribution
+  - sampled chunks from each provider
+  - whether chunk metadata preserves document and section identity
+
+must_do:
+  - chunk source units or evidence spans in a source-aware way
+  - preserve parent document identity and source-unit identity for each chunk
+  - include enough local context that a chunk is meaningful on its own
+  - keep speaker, heading, reviewer, or ticket context in chunk text or metadata
+
+must_not_do:
+  - create giant generic chunks that blur multiple unrelated topics
+  - split important source units in ways that destroy meaning
+  - drop provider or parent-document metadata
+  - optimize chunk counts at the expense of retrieval quality
+
+success_signals:
+  - chunks are small enough to retrieve precisely and large enough to carry meaning
+  - sampled chunks are interpretable without opening the entire source file
+  - convention evidence, decision evidence, and project evidence remain retrievable
+
+failure_signals:
+  - chunks mix unrelated conversations or sections together
+  - chunk boundaries cut through message threads or decision evidence
+  - retrieval would need whole-document luck to find the right evidence
+
+deterministic_checks:
+  - key: total_chunks_positive
+    description: Embedding should produce at least one chunk.
+    mode: gte
+    target: 1
+  - key: source_units_positive
+    description: Evidence chunking should preserve or reference source units.
+    mode: gte
+    target: 1
+  - key: chunks_cover_documents
+    description: Chunk count should be at least document count on non-empty runs.
+    mode: gte
+    target: 1
+  - key: sampled_chunks_have_parent_doc_id
+    description: Sampled chunks should preserve parent document identity.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - every parsed document is represented by chunks
+    - sampled chunks retain source meaning and parent linkage
+  block_when:
+    - chunking loses source structure badly enough to harm retrieval
+    - chunk metadata is too weak to trace retrieval hits back to sources

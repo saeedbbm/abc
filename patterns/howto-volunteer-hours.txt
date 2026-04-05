@@ -1,0 +1,144 @@
+================================================================================
+HOW-TO PATTERN SPEC — VOLUNTEER HOURS TRACKING
+================================================================================
+
+Project:      Volunteer Hours Tracking
+Origin:       Slack #engineering 2025-04-14 — Matt says "Jack has a PR coming
+              for the volunteer hours tracking API." Customer feedback #6
+              (Mike Nguyen, 2025-08-14) asks for downloadable volunteer hours
+              report.
+Status:       Active / ongoing_undocumented — API work in flight, no PR in
+              data yet
+
+This feature extends the completed Volunteer Portal (PAW-20, PAW-21). It adds
+hours tracking and export. The how-to should reference patterns from the
+volunteer portal implementation as precedent.
+
+
+================================================================================
+MUST — Absence of these means the how-to is failing
+================================================================================
+
+API-1     Response envelope { data, meta }
+          What to check: new hours tracking endpoints use the standard
+          response wrapper middleware.
+
+API-2     No pagination for small lists (under ~20 items)
+          What to check: a volunteer's hours log for a single shelter is
+          likely small enough to load in full. References Matt's pattern
+          and the volunteer portal precedent (PR #52, #55).
+
+API-7     Stay on /api/v1
+          What to check: new endpoints go under /api/v1/volunteers/hours
+          or similar.
+
+NAV-1     Vertical left sidebar for selection
+          What to check: if there is a UI for selecting a shelter or date
+          range, uses vertical sidebar pattern per Tim's convention.
+
+NAV-6     Single column for forms
+          What to check: any data-entry forms (manual hour entry) use
+          single-column layout per Tim.
+
+PROC-1    Matt reviews backend, Tim reviews frontend
+          What to check: Matt reviews Jack's backend PR.
+
+
+================================================================================
+SHOULD — Expected when the plan has good evidence coverage
+================================================================================
+
+API-5     ISO 8601 for all dates
+          What to check: hour entries and date ranges use ISO 8601.
+
+API-4     Parse DB strings into structured objects
+          What to check: hours data is structured (date, start_time,
+          end_time, duration, shelter), not raw strings.
+
+COLOR-5   Blues and grays for non-financial pages
+          What to check: volunteer hours pages use blues/grays (no financial
+          elements, so no green).
+
+COLOR-6   Neutral blue for non-financial action buttons
+          What to check: action buttons (Download Report, View History) are
+          blue, not green.
+
+IMG-2     Skeleton loading states
+          What to check: hours list shows skeleton placeholder while loading.
+
+FILE-1    CSS Modules with camelCase
+          What to check: frontend components use CSS Modules.
+
+FILE-4    API file structure
+          What to check: follows controller + routes + model convention for
+          the hours tracking backend.
+
+TEST-2    Jest for backend
+          What to check: testing plan mentions Jest for backend tests.
+
+TEST-1    Vitest + RTL for frontend
+          What to check: testing plan mentions Vitest + RTL for frontend
+          components.
+
+API-3     Cursor-based pagination for larger lists
+          What to check: if aggregated hours across all shelters could grow
+          large over time, mentions cursor-based pagination as fallback.
+
+DATA-3    Existing pet API endpoints
+          What to check: references the existing volunteer portal endpoints
+          as the base to extend (not build from scratch).
+
+
+================================================================================
+MAY — Relevant if the plan is thorough
+================================================================================
+
+COMP-2    Promise.all for parallel API calls
+          What to check: if loading hours + shelter data in parallel.
+
+COMP-3    Shared Toast component
+          What to check: export success/error uses shared Toast.
+
+FILE-3    Page folder structure
+          What to check: follows page folder convention for frontend.
+
+FILE-5    Migrations in /db/migrations
+          What to check: mentions migration for hours tracking table.
+
+PROC-4    Large table migrations reviewed by Matt
+          What to check: if hours table could grow large, migration review.
+
+TEST-3    Playwright E2E
+          What to check: E2E tests for download/export flow.
+
+PROC-2    PR description requirements
+          What to check: mentions PR description format.
+
+PROC-3    Squash merge, auto-deploy
+          What to check: mentions merge/deploy workflow.
+
+API-6     Idempotent DELETE
+          What to check: if hours entries can be deleted, DELETE is
+          idempotent.
+
+GRID-3    Bottom nav bar on mobile
+          What to check: accounts for bottom nav on mobile.
+
+
+================================================================================
+SCORING GUIDE
+================================================================================
+
+MUST patterns (6):     Each worth 3 points.   Max = 18
+SHOULD patterns (11):  Each worth 2 points.   Max = 22
+MAY patterns (10):     Each worth 1 point.    Max = 10
+
+Total possible: 50 points
+
+Rating:
+  40+  Excellent
+  28-39  Good
+  16-27  Mediocre
+  8-15   Poor
+  <8   Failing
+================================================================================

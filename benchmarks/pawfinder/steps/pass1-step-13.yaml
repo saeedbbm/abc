@@ -1,0 +1,27 @@
+step_id: pass1-step-13
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/A-projects.txt
+  - ground-truth/F-entity-counts.txt
+
+benchmark_focus:
+  - Retrieval coverage for the pages that make the final KB trustworthy.
+  - Repository pages, project hubs, and company-level pages should have retrieval packs rich enough to avoid placeholders.
+
+benchmark_must_fit:
+  - Retrieval packs should exist for planned repository pages.
+  - Project hub retrieval should include project context, not mostly people-only context.
+  - "`Company Overview` retrieval should have enough context to synthesize a real page when the source corpus supports it."
+  - Convention retrieval packs must include extended doc snippets with actual PR review comments and Slack design discussions, not just 500-char truncations.
+  - Proposed-feature retrieval packs must include convention-related context via multi-hop expansion.
+
+benchmark_watchouts:
+  - retrieval packs exist numerically but miss repo/project evidence
+  - project category packs are shallow because they mostly pull team-member pages
+  - company-level packs are too thin to produce anything beyond placeholder prose
+
+benchmark_questions:
+  - Do sampled retrieval packs cover repository pages and project hubs, not just conventions?
+  - "Would the sampled context be enough to generate a non-placeholder `Company Overview`?"
+  - Do project category packs contain project context rather than mostly people context?

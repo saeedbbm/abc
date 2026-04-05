@@ -1,0 +1,23 @@
+step_id: pass1-step-09
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/B-decisions.txt
+
+benchmark_focus:
+  - Correct attribution is benchmark-critical.
+  - This step should improve bad provenance-driven fields, not just fill blanks.
+
+benchmark_must_fit:
+  - Distinguish decision-maker from implementer when evidence supports it.
+  - Avoid attributing Kim's design choices to Tim just because Tim implemented them.
+  - Avoid attributing Matt's browse pattern to Jack or Jill just because they wrote reviewed PRs.
+
+benchmark_watchouts:
+  - first-mentioned-person heuristics
+  - generic co-occurrence attribution
+  - filling decided_by without provenance signals
+
+benchmark_questions:
+  - Does the step materially improve `decided_by` for hidden-pattern decisions?
+  - If the upstream evidence is ambiguous, does the step stay cautious instead of confidently wrong?

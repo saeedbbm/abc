@@ -1,0 +1,71 @@
+step_id: pass1-step-05
+step_number: 5
+step_name: Entity Resolution
+pass: pass1
+
+purpose: >
+  Merge duplicate entities into canonical nodes using strong evidence while keeping
+  related-but-distinct scopes separate.
+
+inputs:
+  - step 4 validated entities
+  - stable identifiers and source evidence carried from earlier steps
+
+primary_outputs:
+  - canonical graph nodes
+  - merge records and aliases
+  - stronger entity set for graphing, discovery, and attribute completion
+
+judge_should_look_at:
+  - before and after counts by type
+  - sampled merge decisions and kept-separate decisions
+  - whether stable ids and shared evidence are used
+
+must_do:
+  - merge same-type duplicates when evidence strongly indicates identity
+  - use stable identifiers (ticket keys, PR numbers) as deterministic identity anchors before similarity-based merging
+  - use shared artifacts as strong merge signals when available
+  - preserve aliases and combined source evidence on the canonical node
+  - keep parent and child scopes separate when they are related but not identical
+
+must_not_do:
+  - rely only on name similarity
+  - merge a project with a decision or process just because the names are similar
+  - collapse umbrella projects and subprojects into one node
+  - leave obvious duplicate entities fragmented
+
+success_signals:
+  - duplicate inflation is reduced materially
+  - canonical nodes carry combined evidence from merged duplicates
+  - sampled kept-separate decisions show good scope discipline
+
+failure_signals:
+  - entity counts remain heavily fragmented despite clear duplicate evidence
+  - false merges hide real scope boundaries
+  - cross-type concepts are merged instead of linked
+
+deterministic_checks:
+  - key: after_count_not_greater_than_before_count
+    description: Post-resolution total count should not exceed pre-resolution total count.
+    mode: eq
+    target: 1
+  - key: sampled_merges_have_evidence
+    description: Sampled merges should cite stable ids, shared evidence, or strong overlap.
+    mode: eq
+    target: 1
+  - key: sampled_false_merge_rate_low
+    description: Sampled resolution output should not show obvious parent-child collapses.
+    mode: eq
+    target: 1
+  - key: identity_based_merges_logged
+    description: Deterministic identity-based merges should be logged separately from similarity-based merges.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - obvious duplicates are merged
+    - no strong evidence of over-merging distinct scopes
+  block_when:
+    - fragmentation remains severe
+    - false merges would corrupt downstream ownership, discovery, or graph structure

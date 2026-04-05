@@ -1,0 +1,160 @@
+{
+  "results": [
+    {
+      "id": "200001",
+      "type": "page",
+      "status": "current",
+      "title": "PawFinder — Engineering Overview",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" },
+        "createdDate": "2024-01-15T00:00:00.000Z"
+      },
+      "version": {
+        "number": 3,
+        "when": "2024-06-10T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>PawFinder — Engineering Overview</h1>\n<h2>Overview</h2>\n<p>PawFinder is a pet adoption platform that helps shelters list animals available for adoption and connects them with prospective adopters. The website allows visitors to browse animals, submit adoption applications, donate to the shelter, RSVP to adoption events, and contact the shelter directly.</p>\n<h2>Tech Stack</h2>\n<ul>\n  <li><strong>Frontend &amp; Backend:</strong> Next.js 14 (App Router) with TypeScript</li>\n  <li><strong>Styling:</strong> Tailwind CSS with a custom design token system</li>\n  <li><strong>Database:</strong> PostgreSQL hosted on Neon</li>\n  <li><strong>ORM:</strong> Drizzle ORM</li>\n  <li><strong>Image Storage:</strong> AWS S3 with CloudFront CDN</li>\n  <li><strong>Payments:</strong> Stripe (Elements integration for donations)</li>\n  <li><strong>Hosting:</strong> Vercel (dev / staging / production environments)</li>\n  <li><strong>Auth:</strong> NextAuth.js with email magic links for adopter accounts</li>\n</ul>\n<h2>Team</h2>\n<ul>\n  <li><strong>Matt Chen</strong> — Tech Lead / Architect. Built the original site, owns architecture decisions.</li>\n  <li><strong>Sarah Kim</strong> — Backend engineer. Handles API routes, database, integrations.</li>\n  <li><strong>Jake Rivera</strong> — Frontend engineer. UI components, pages, responsive design.</li>\n  <li><strong>Lisa Park</strong> — Marketing &amp; Content. Manages adoption stories, social, newsletter.</li>\n  <li><strong>Mia Torres</strong> — UI/UX Designer. Design system, user flows, accessibility.</li>\n</ul>\n<h2>Repository</h2>\n<ul>\n  <li><code>pawfinder-web</code> — The main Next.js monorepo. Contains all frontend pages, API routes, server actions, database migrations, and infrastructure config.</li>\n</ul>\n<h2>Deployment</h2>\n<p>We deploy via Vercel with Git integration. Every push to <code>main</code> auto-deploys to production. The <code>staging</code> branch deploys to the staging environment. Pull request branches get Vercel preview deployments automatically. Environment variables are managed in the Vercel dashboard per environment.</p>\n<h2>Key Integrations</h2>\n<ul>\n  <li>Stripe for donation processing (Stripe Elements, not Checkout Sessions)</li>\n  <li>AWS S3 for pet image storage with presigned upload URLs</li>\n  <li>CloudFront CDN for image delivery (24h cache TTL)</li>\n  <li>Resend for transactional emails (adoption status updates, magic links)</li>\n  <li>NextAuth.js for adopter authentication</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200001",
+        "webui": "/spaces/ENG/pages/200001/PawFinder+Engineering+Overview"
+      }
+    },
+    {
+      "id": "200002",
+      "type": "page",
+      "status": "current",
+      "title": "Database Schema — Core Tables",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-sarah-kim", "displayName": "Sarah Kim" },
+        "createdDate": "2024-02-01T00:00:00.000Z"
+      },
+      "version": {
+        "number": 2,
+        "when": "2024-05-20T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-sarah-kim", "displayName": "Sarah Kim" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Database Schema — Core Tables</h1>\n<h2>animals</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>name</td><td>VARCHAR(100)</td><td></td></tr>\n    <tr><td>species</td><td>VARCHAR(20)</td><td>'dog' or 'cat'</td></tr>\n    <tr><td>breed</td><td>VARCHAR(100)</td><td></td></tr>\n    <tr><td>age_months</td><td>INTEGER</td><td>Age in months</td></tr>\n    <tr><td>size</td><td>VARCHAR(20)</td><td>'small', 'medium', 'large'</td></tr>\n    <tr><td>gender</td><td>VARCHAR(10)</td><td></td></tr>\n    <tr><td>description</td><td>TEXT</td><td>Markdown-formatted bio</td></tr>\n    <tr><td>status</td><td>VARCHAR(20)</td><td>'available', 'pending', 'adopted'</td></tr>\n    <tr><td>shelter_id</td><td>UUID</td><td>FK → shelters</td></tr>\n    <tr><td>featured</td><td>BOOLEAN</td><td>Show on homepage carousel</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n    <tr><td>updated_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>animal_images</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>animal_id</td><td>UUID</td><td>FK → animals</td></tr>\n    <tr><td>s3_key</td><td>VARCHAR(512)</td><td>S3 object key</td></tr>\n    <tr><td>alt_text</td><td>VARCHAR(255)</td><td>Accessibility text</td></tr>\n    <tr><td>sort_order</td><td>INTEGER</td><td>Display order in gallery</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>adoption_applications</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>animal_id</td><td>UUID</td><td>FK → animals</td></tr>\n    <tr><td>applicant_name</td><td>VARCHAR(200)</td><td></td></tr>\n    <tr><td>applicant_email</td><td>VARCHAR(255)</td><td></td></tr>\n    <tr><td>applicant_phone</td><td>VARCHAR(20)</td><td></td></tr>\n    <tr><td>housing_type</td><td>VARCHAR(50)</td><td>'house', 'apartment', 'condo', 'other'</td></tr>\n    <tr><td>has_yard</td><td>BOOLEAN</td><td></td></tr>\n    <tr><td>other_pets</td><td>TEXT</td><td></td></tr>\n    <tr><td>experience</td><td>TEXT</td><td>Prior pet ownership experience</td></tr>\n    <tr><td>why_adopt</td><td>TEXT</td><td></td></tr>\n    <tr><td>status</td><td>VARCHAR(20)</td><td>'submitted', 'under_review', 'approved', 'rejected'</td></tr>\n    <tr><td>reviewer_notes</td><td>TEXT</td><td>Internal staff notes</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n    <tr><td>updated_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>donations</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>donor_name</td><td>VARCHAR(200)</td><td>Optional, can be anonymous</td></tr>\n    <tr><td>donor_email</td><td>VARCHAR(255)</td><td></td></tr>\n    <tr><td>amount_cents</td><td>INTEGER</td><td>Stored in cents</td></tr>\n    <tr><td>stripe_payment_intent_id</td><td>VARCHAR(255)</td><td></td></tr>\n    <tr><td>message</td><td>TEXT</td><td>Optional dedication message</td></tr>\n    <tr><td>is_recurring</td><td>BOOLEAN</td><td>Monthly recurring flag</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>shelters</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>name</td><td>VARCHAR(200)</td><td></td></tr>\n    <tr><td>address</td><td>TEXT</td><td></td></tr>\n    <tr><td>city</td><td>VARCHAR(100)</td><td></td></tr>\n    <tr><td>state</td><td>VARCHAR(50)</td><td></td></tr>\n    <tr><td>zip</td><td>VARCHAR(10)</td><td></td></tr>\n    <tr><td>phone</td><td>VARCHAR(20)</td><td></td></tr>\n    <tr><td>email</td><td>VARCHAR(255)</td><td></td></tr>\n    <tr><td>hours</td><td>JSONB</td><td>Operating hours per day</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>events</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>title</td><td>VARCHAR(200)</td><td></td></tr>\n    <tr><td>description</td><td>TEXT</td><td></td></tr>\n    <tr><td>event_date</td><td>TIMESTAMP</td><td></td></tr>\n    <tr><td>location</td><td>TEXT</td><td></td></tr>\n    <tr><td>max_attendees</td><td>INTEGER</td><td>NULL = unlimited</td></tr>\n    <tr><td>rsvp_count</td><td>INTEGER</td><td>Default 0</td></tr>\n    <tr><td>shelter_id</td><td>UUID</td><td>FK → shelters</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<hr/>\n<p><em>Last migration: 2024-05-18. See <code>drizzle/migrations/</code> for history.</em></p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200002",
+        "webui": "/spaces/ENG/pages/200002/Database+Schema+Core+Tables"
+      }
+    },
+    {
+      "id": "200003",
+      "type": "page",
+      "status": "current",
+      "title": "Image Pipeline — S3 + CloudFront Setup",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" },
+        "createdDate": "2024-02-20T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-02-20T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Image Pipeline — S3 + CloudFront Setup</h1>\n<h2>Overview</h2>\n<p>Pet photos are the most important visual element on PawFinder. We use S3 for storage and CloudFront for delivery to keep load times fast.</p>\n<h2>Upload Flow</h2>\n<ol>\n  <li>Staff member selects photos in the admin panel</li>\n  <li>Frontend requests a presigned upload URL from <code>/api/images/presign</code></li>\n  <li>Frontend uploads directly to S3 using the presigned URL (bypasses our server)</li>\n  <li>On upload complete, frontend calls <code>/api/images/register</code> with the S3 key to create the <code>animal_images</code> record</li>\n</ol>\n<h2>S3 Configuration</h2>\n<ul>\n  <li>Bucket: <code>pawfinder-images-prod</code> (production), <code>pawfinder-images-staging</code> (staging)</li>\n  <li>Presigned URL expiry: 5 minutes</li>\n  <li>Max file size: 10MB (enforced by presigned URL conditions)</li>\n  <li>Accepted formats: JPEG, PNG, WebP</li>\n</ul>\n<h2>CloudFront CDN</h2>\n<ul>\n  <li>Distribution serves from the S3 bucket as origin</li>\n  <li>Cache TTL: 24 hours (we rarely update images after initial upload)</li>\n  <li>Custom domain: <code>images.pawfinder.org</code></li>\n  <li>Image URLs in the app follow the pattern: <code>https://images.pawfinder.org/{s3_key}</code></li>\n</ul>\n<h2>Why Not Vercel Image Optimization?</h2>\n<p>We considered using Next.js Image Optimization via Vercel, but our images are user-uploaded and often exceed 5MB. Vercel's optimizer has size limits and adds latency on the first request. Since we control the upload pipeline, we can ensure quality at upload time and let CloudFront serve the originals with a long cache TTL.</p>\n<h2>Future Considerations</h2>\n<ul>\n  <li>Add WebP conversion in the upload pipeline (PAW-19)</li>\n  <li>Consider adding image thumbnails for the browse grid to reduce bandwidth</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200003",
+        "webui": "/spaces/ENG/pages/200003/Image+Pipeline+S3+CloudFront+Setup"
+      }
+    },
+    {
+      "id": "200004",
+      "type": "page",
+      "status": "current",
+      "title": "Donation Flow — Stripe Integration",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" },
+        "createdDate": "2024-03-05T00:00:00.000Z"
+      },
+      "version": {
+        "number": 2,
+        "when": "2024-04-15T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Donation Flow — Stripe Integration</h1>\n<h2>Overview</h2>\n<p>PawFinder accepts monetary donations through a custom donation form powered by Stripe Elements. We chose Elements over Checkout Sessions because we needed full control over the form UI to match our design system and support custom dedication messages.</p>\n<h2>How It Works</h2>\n<ol>\n  <li>Donor visits <code>/donate</code> and fills in amount, name (optional), email, and an optional dedication message</li>\n  <li>Frontend validates using the shared zod schema (<code>lib/schemas/donation.ts</code>)</li>\n  <li>On form submit, a server action creates a Stripe PaymentIntent via the Stripe SDK</li>\n  <li>Stripe Elements handles card input and confirms the payment client-side</li>\n  <li>On success, a webhook (<code>/api/webhooks/stripe</code>) fires and we record the donation in the <code>donations</code> table</li>\n  <li>A thank-you email is sent via Resend</li>\n</ol>\n<h2>Recurring Donations</h2>\n<p>If the donor checks \"Make this monthly,\" we create a Stripe Subscription instead of a one-time PaymentIntent. The webhook handles both <code>payment_intent.succeeded</code> and <code>invoice.payment_succeeded</code> events.</p>\n<h2>Configuration</h2>\n<ul>\n  <li>Stripe publishable key: stored in <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> env var</li>\n  <li>Stripe secret key: stored in <code>STRIPE_SECRET_KEY</code> env var</li>\n  <li>Webhook secret: stored in <code>STRIPE_WEBHOOK_SECRET</code> env var</li>\n  <li>Minimum donation: $5</li>\n  <li>Preset amounts: $10, $25, $50, $100 (custom amount also supported)</li>\n</ul>\n<h2>Notes</h2>\n<p>The donation form currently only supports monetary donations. There is no mechanism for physical item donations (toys, blankets, food). This has come up in user feedback a few times — see the product-feedback Slack channel.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200004",
+        "webui": "/spaces/ENG/pages/200004/Donation+Flow+Stripe+Integration"
+      }
+    },
+    {
+      "id": "200005",
+      "type": "page",
+      "status": "current",
+      "title": "Deployment Guide — Vercel Environments",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" },
+        "createdDate": "2024-01-20T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-01-20T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-matt-chen", "displayName": "Matt Chen" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Deployment Guide — Vercel Environments</h1>\n<h2>Environments</h2>\n<table>\n  <tbody>\n    <tr><th>Environment</th><th>URL</th><th>Branch</th><th>Auto-deploy</th></tr>\n    <tr><td>Production</td><td>pawfinder.org</td><td>main</td><td>Yes, on merge to main</td></tr>\n    <tr><td>Staging</td><td>staging.pawfinder.org</td><td>staging</td><td>Yes, on push to staging</td></tr>\n    <tr><td>Development</td><td>dev.pawfinder.org</td><td>dev</td><td>Yes, on push to dev</td></tr>\n    <tr><td>Preview</td><td>*.vercel.app</td><td>Any PR branch</td><td>Yes, automatic</td></tr>\n  </tbody>\n</table>\n<h2>Environment Variables</h2>\n<p>Each environment has its own set of env vars in the Vercel dashboard:</p>\n<ul>\n  <li><code>DATABASE_URL</code> — Neon connection string (different DB per environment)</li>\n  <li><code>STRIPE_SECRET_KEY</code> / <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> — Test keys for dev/staging, live for prod</li>\n  <li><code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> — S3 credentials</li>\n  <li><code>S3_BUCKET</code> — <code>pawfinder-images-dev</code>, <code>pawfinder-images-staging</code>, or <code>pawfinder-images-prod</code></li>\n  <li><code>CLOUDFRONT_DOMAIN</code> — CDN domain per environment</li>\n  <li><code>RESEND_API_KEY</code> — Email sending</li>\n  <li><code>NEXTAUTH_SECRET</code> — Auth secret (different per env)</li>\n</ul>\n<h2>Branching Strategy</h2>\n<p>Feature branches are created from <code>dev</code>. When ready, PRs are merged to <code>dev</code> first for testing, then promoted to <code>staging</code>, then <code>main</code> for production. Hotfixes go directly to <code>main</code> and are cherry-picked back.</p>\n<h2>Database Migrations</h2>\n<p>Drizzle migrations run automatically on deploy via a custom <code>postbuild</code> script in <code>package.json</code>. New migrations are generated with <code>npx drizzle-kit generate</code> and committed to the repo.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200005",
+        "webui": "/spaces/ENG/pages/200005/Deployment+Guide+Vercel+Environments"
+      }
+    },
+    {
+      "id": "200006",
+      "type": "page",
+      "status": "current",
+      "title": "Adoption Process — Application Workflow",
+      "space": { "id": "3001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-sarah-kim", "displayName": "Sarah Kim" },
+        "createdDate": "2024-03-18T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-18T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-sarah-kim", "displayName": "Sarah Kim" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Adoption Process — Application Workflow</h1>\n<h2>Overview</h2>\n<p>When a visitor wants to adopt a pet, they fill out a multi-step application form on the animal's profile page. The application goes through a review process managed by shelter staff.</p>\n<h2>Application States</h2>\n<ol>\n  <li><strong>submitted</strong> — Applicant has filled out and submitted the form. An email confirmation is sent via Resend.</li>\n  <li><strong>under_review</strong> — A staff member has opened and is reviewing the application. The animal's status changes to 'pending'.</li>\n  <li><strong>approved</strong> — Application is approved. Applicant receives an email with next steps (shelter visit scheduling). The animal's status stays 'pending' until pickup.</li>\n  <li><strong>rejected</strong> — Application is rejected. Applicant receives a polite email. The animal's status reverts to 'available'.</li>\n</ol>\n<h2>After Approval</h2>\n<p>Once the adopter visits the shelter and takes the animal home, staff manually update the animal's status to 'adopted' in the admin panel. This removes the animal from the public browse page and moves it to the \"Happy Tails\" success stories section.</p>\n<h2>Notifications</h2>\n<p>Applicants receive email updates at each status change. Staff receive a daily digest of new applications via a scheduled Vercel Cron job (<code>/api/cron/application-digest</code>) that runs at 8am.</p>\n<h2>Notes</h2>\n<p>Currently there is no way for applicants to check their application status on the website — they rely on email updates. This is a known gap that has been mentioned in user feedback. Adding a status tracking page is on the backlog (PAW-15).</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/200006",
+        "webui": "/spaces/ENG/pages/200006/Adoption+Process+Application+Workflow"
+      }
+    }
+  ]
+}

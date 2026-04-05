@@ -1,0 +1,60 @@
+step_id: pass1-step-07
+step_number: 7
+step_name: Graph Enrichment
+pass: pass1
+
+purpose: >
+  Mine repeated observation patterns into reusable evidence packs without adding graph
+  noise, so later convention synthesis can work from repeated evidence instead of
+  brittle edge inference.
+
+inputs:
+  - step 3 observations
+  - step 5 canonical nodes when helpful for context
+
+primary_outputs:
+  - repeated-pattern evidence packs
+  - grouped observation clusters
+  - zero graph-edge side effects
+
+judge_should_look_at:
+  - sampled pattern candidates and their evidence packs
+  - whether repeated evidence really spans multiple source units or documents
+  - whether the step stayed conservative and avoided graph noise
+
+must_do:
+  - identify repeated evidence across source units or documents
+  - group observations into usable pattern candidates
+  - preserve the underlying evidence refs for each candidate
+  - stay conservative about what counts as a repeated pattern
+
+must_not_do:
+  - add graph edges in this step
+  - collapse unrelated observations into one fake pattern
+  - produce pattern candidates with only one weak source unit
+
+success_signals:
+  - evidence packs represent real repeated behavior
+  - later convention synthesis could work directly from the artifact
+  - the step adds signal without degrading graph precision
+
+failure_signals:
+  - pattern candidates are vague, noisy, or duplicative
+  - repeated evidence is not actually repeated
+  - the step behaves like graph edge generation instead of evidence mining
+
+deterministic_checks:
+  - key: pattern_candidates_positive
+    description: Pattern mining should usually produce at least one candidate evidence pack on non-trivial runs.
+    mode: gte
+    target: 1
+  - key: total_new_edges
+    description: This step should not add graph edges directly.
+    mode: eq
+    target: 0
+
+go_no_go:
+  proceed_when:
+    - enrichment adds value without overwhelming the graph with noise
+  block_when:
+    - added relationships are mostly weak, generic, or misleading

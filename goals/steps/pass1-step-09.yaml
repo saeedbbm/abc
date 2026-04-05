@@ -1,0 +1,69 @@
+step_id: pass1-step-09
+step_number: 9
+step_name: Attribute Completion
+pass: pass1
+
+purpose: >
+  Complete and correct entity attributes after resolution and discovery so downstream
+  steps can trust the entity set, especially for status, ownership, rationale, scope,
+  description, and documentation level.
+
+inputs:
+  - step 5 canonical nodes
+  - step 8 discovery nodes
+  - step 1 parsed documents and preserved provenance metadata
+
+primary_outputs:
+  - corrected and completed entity attributes
+  - explicit reasoning or uncertainty where evidence is incomplete
+  - a trustworthy entity set for convention synthesis and page generation
+
+judge_should_look_at:
+  - before and after attribute values on sampled entities
+  - whether wrong existing values are corrected, not merely left in place
+  - whether provenance roles are visible in ownership decisions
+
+must_do:
+  - fill missing public attributes needed downstream
+  - correct wrong existing status and ownership values when evidence supports correction
+  - use structured evidence first when it is available (Jira ticket status, PR metadata)
+  - distinguish decision maker from implementer, reviewer, or person merely mentioned using structured provenance (PR author/reviewer, Slack speaker, Confluence author)
+  - derive status from deterministic Jira evidence first, use LLM only for ambiguous cases
+
+must_not_do:
+  - behave as fill-only when wrong non-null values remain
+  - preserve an existing value just because it is present
+  - infer decided_by from nearby names without role-aware provenance
+  - rely on benchmark-specific expectations
+
+success_signals:
+  - projects and processes have valid statuses or explicit uncertainty
+  - decisions have correct decided_by, rationale, and scope when supported
+  - sampled corrections show that bad inherited values were actually repaired
+
+failure_signals:
+  - valid-looking but wrong statuses survive unchanged
+  - reviewer-originated or speaker-originated decisions are attributed to implementers
+  - important convention-driving decisions keep the wrong owner
+
+deterministic_checks:
+  - key: description_coverage_pct
+    description: Most entities should have a public description after this step.
+    mode: gte
+    target: 85
+  - key: valid_status_pct
+    description: Most project and process entities should have a valid status.
+    mode: gte
+    target: 90
+  - key: decisions_with_decided_by_pct
+    description: Most decision entities should have decided_by filled or explicitly reasoned as unknown.
+    mode: gte
+    target: 80
+
+go_no_go:
+  proceed_when:
+    - entity attributes are broadly complete and trustworthy
+    - major ownership mistakes have been corrected
+  block_when:
+    - important decisions still have wrong ownership
+    - status and attribute quality are too weak for convention synthesis and page generation

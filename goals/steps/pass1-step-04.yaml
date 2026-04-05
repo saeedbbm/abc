@@ -1,0 +1,63 @@
+step_id: pass1-step-04
+step_number: 4
+step_name: Extraction Validation
+pass: pass1
+
+purpose: >
+  Validate candidate entities, demote wrong-unit project candidates, retype obvious
+  ontology mistakes, and keep only evidence-backed entities moving toward
+  canonicalization.
+
+inputs:
+  - step 3 extracted entities
+  - step 1 parsed documents
+
+primary_outputs:
+  - validated entities
+  - demotion and retype decisions
+  - explicit validation reasons for rejected or changed candidates
+
+judge_should_look_at:
+  - retyped and rejected candidates
+  - project candidates that were demoted to ticket, process, or other safer types
+  - whether validation reasons are explicit and evidence-backed
+
+must_do:
+  - demote wrong-unit project candidates before canonicalization
+  - retype obvious ontology errors instead of preserving them
+  - reject weak candidates rather than over-promoting them
+  - preserve explicit validation reasons for downstream auditability
+
+must_not_do:
+  - treat validation as a light formatting pass only
+  - preserve project inflation from step 3
+  - convert ambiguity into false certainty
+  - add low-evidence entities as if they were confirmed facts
+
+success_signals:
+  - wrong-unit entities are demoted before step 5
+  - false positives are filtered out
+  - validation improves later canonicalization inputs
+
+failure_signals:
+  - one-off tasks still survive as canonical-looking projects
+  - validation changes are undocumented or hard to audit
+  - normalization hides uncertainty instead of preserving it
+
+deterministic_checks:
+  - key: retyped_or_rejected_positive
+    description: Validation should usually retype or reject at least some weak candidates on non-trivial runs.
+    mode: gte
+    target: 1
+  - key: sampled_retyped_entities_have_reasons
+    description: Retyped entities should include explicit validation reasons.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - recovered entities are evidence-backed
+    - validation preserves uncertainty on unsafe fields
+  block_when:
+    - validation introduces systematic ownership errors
+    - recovered entities are mostly noisy or weakly supported

@@ -1,0 +1,363 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 12,
+  "issues": [
+    {
+      "id": "10044",
+      "self": "https://jira.example.com/rest/api/3/issue/10044",
+      "key": "BRW-44",
+      "fields": {
+        "summary": "Implement loyalty points multiplier for weekend promotions",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "In Progress" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Daniel Cho" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-02T00:00:00.000+0000",
+        "updated": "2024-04-09T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "We want to run 2x points weekends periodically. Backend needs to support a multiplier config that Celery picks up when processing order completions. The multiplier should be stored in a config table so marketing can toggle it without a deploy.\n\nAcceptance Criteria:\n- A `promotions_config` table exists with at least `multiplier` and `active` columns\n- Celery job applies multiplier when `active = true` and current day is Saturday or Sunday\n- Multiplier defaults to 1.0 when no active promotion exists\n- Unit tests cover multiplier application logic",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Daniel Cho" },
+              "created": "2024-04-07T00:00:00.000+0000",
+              "body": "Started on the Celery side. Config table migration is done, wiring up the job now."
+            },
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-09T00:00:00.000+0000",
+              "body": "Make sure the multiplier caps at 3x per the product discussion last week."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10045",
+      "self": "https://jira.example.com/rest/api/3/issue/10045",
+      "key": "BRW-45",
+      "fields": {
+        "summary": "Push notification not sent when order status changes to \"Ready\"",
+        "issuetype": { "name": "Bug" },
+        "status": { "name": "In Progress" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Daniel Cho" },
+        "reporter": { "displayName": "Marcus Webb" },
+        "created": "2024-04-03T00:00:00.000+0000",
+        "updated": "2024-04-10T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Several customers have reported they aren't receiving push notifications when their order is marked ready for pickup. Firebase calls appear to be going out from the backend logs but the notification never arrives on device. Started happening after the Firebase SDK bump in late March.\n\nAcceptance Criteria:\n- Notifications reliably delivered when order status transitions to `ready`\n- Root cause documented in ticket comments\n- Regression test added to notification service tests",
+        "comment": {
+          "total": 3,
+          "comments": [
+            {
+              "author": { "displayName": "Daniel Cho" },
+              "created": "2024-04-05T00:00:00.000+0000",
+              "body": "Firebase logs show the message is accepted on their end. Might be a token registration issue on the client side."
+            },
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-08T00:00:00.000+0000",
+              "body": "Checked token refresh logic — we're not re-registering tokens after app update. That's probably it."
+            },
+            {
+              "author": { "displayName": "Daniel Cho" },
+              "created": "2024-04-10T00:00:00.000+0000",
+              "body": "Confirmed. Token gets stale post-update. Fixing token refresh on foreground launch."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10046",
+      "self": "https://jira.example.com/rest/api/3/issue/10046",
+      "key": "BRW-46",
+      "fields": {
+        "summary": "Add pagination to order history endpoint",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Priya Nair" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-05T00:00:00.000+0000",
+        "updated": "2024-04-05T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "The `/v1/orders/history` endpoint currently returns all historical orders for a user with no limit. For users with a long order history this is getting slow. Add cursor-based pagination. Page size should default to 20.\n\nAcceptance Criteria:\n- Endpoint accepts `cursor` and `limit` query params\n- Response includes `next_cursor` field when additional results exist\n- Default `limit` is 20, max is 100\n- Existing endpoint behavior unchanged when no params passed (backwards compat for app versions below 3.2)",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-05T00:00:00.000+0000",
+              "body": "Holding off until BRW-41 is merged so we don't conflict on the orders query layer."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10047",
+      "self": "https://jira.example.com/rest/api/3/issue/10047",
+      "key": "BRW-47",
+      "fields": {
+        "summary": "Checkout screen freezes on low-end Android devices",
+        "issuetype": { "name": "Bug" },
+        "status": { "name": "Open" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Marcus Webb" },
+        "reporter": { "displayName": "Marcus Webb" },
+        "created": "2024-04-06T00:00:00.000+0000",
+        "updated": "2024-04-11T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Getting reproducible freezes on Android devices with 3GB RAM or less when the user reaches the checkout screen. The freeze lasts 2-4 seconds and appears tied to the cart summary re-render. Profiler shows a large number of unnecessary re-renders on `CartSummaryComponent`. Suspected cause is missing memoization on the item list.\n\nAcceptance Criteria:\n- Checkout screen renders without freeze on a Moto G Power (test device)\n- `CartSummaryComponent` re-render count reduced, confirmed via React DevTools profiler\n- No visual regression on iOS",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-11T00:00:00.000+0000",
+              "body": "Wrapped item list in `useMemo`, freeze is significantly reduced in local testing. Need to test on physical device."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10048",
+      "self": "https://jira.example.com/rest/api/3/issue/10048",
+      "key": "BRW-48",
+      "fields": {
+        "summary": "Rewards balance not updating after order completion",
+        "issuetype": { "name": "Bug" },
+        "status": { "name": "Open" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Daniel Cho" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-08T00:00:00.000+0000",
+        "updated": "2024-04-11T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Users are reporting their rewards points balance doesn't reflect the points earned from a completed order until they force-close and reopen the app. The backend is correctly updating `rewards_points` in the users table — the issue appears to be that the app is not invalidating the cached user profile after an order completes.\n\nAcceptance Criteria:\n- Rewards balance visible on home screen updates within 5 seconds of order completion without requiring app restart\n- Cache invalidation triggered on order status change to `completed`\n- No additional full profile fetches introduced unnecessarily",
+        "comment": {
+          "total": 3,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-09T00:00:00.000+0000",
+              "body": "Verified the DB write is happening correctly. Definitely a frontend cache issue."
+            },
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-10T00:00:00.000+0000",
+              "body": "We're storing the user profile in Redux and not invalidating on order completion. Will hook into the order status listener."
+            },
+            {
+              "author": { "displayName": "Daniel Cho" },
+              "created": "2024-04-11T00:00:00.000+0000",
+              "body": "We should also look at the Celery job timing — there's sometimes a 10 second delay before the DB write happens. Frontend fix alone may not be enough."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10049",
+      "self": "https://jira.example.com/rest/api/3/issue/10049",
+      "key": "BRW-49",
+      "fields": {
+        "summary": "Admin panel — filter orders by store location",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Low" },
+        "assignee": { "displayName": "Priya Nair" },
+        "reporter": { "displayName": "Marcus Webb" },
+        "created": "2024-04-09T00:00:00.000+0000",
+        "updated": "2024-04-09T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "The internal admin panel currently shows all orders across all locations in a flat list. Store managers need to filter by their location. Add a location dropdown filter to the orders table view. Backend will need a `location_id` filter param on the admin orders endpoint.\n\nAcceptance Criteria:\n- Dropdown populated from `/v1/admin/locations`\n- Selecting a location filters the orders table\n- Filter selection persists across page refresh (stored in URL param)\n- Backend endpoint validates that the requesting admin has access to the selected location",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-09T00:00:00.000+0000",
+              "body": "Design already has mockups for this in Figma. Backend endpoint change should be small."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10050",
+      "self": "https://jira.example.com/rest/api/3/issue/10050",
+      "key": "BRW-50",
+      "fields": {
+        "summary": "Refactor Celery task retry logic to use exponential backoff",
+        "issuetype": { "name": "Task" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Daniel Cho" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-10T00:00:00.000+0000",
+        "updated": "2024-04-10T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Our current Celery tasks retry on a fixed 30-second interval. Under load this is causing Redis to back up when downstream services (Stripe, Firebase) are slow. Switch to exponential backoff with jitter. Max retries should remain at 5.\n\nAcceptance Criteria:\n- All Celery tasks updated to use exponential backoff\n- Base delay of 5 seconds, doubling each retry with jitter up to max 120 seconds\n- Retry behavior documented in the `brewgo-api` README\n- No change to max retry count (5)",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-10T00:00:00.000+0000",
+              "body": "Low urgency but good to get in before the summer traffic spike."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10051",
+      "self": "https://jira.example.com/rest/api/3/issue/10051",
+      "key": "BRW-51",
+      "fields": {
+        "summary": "Add saved payment methods screen",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Medium" },
+        "assignee": { "displayName": "Marcus Webb" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-10T00:00:00.000+0000",
+        "updated": "2024-04-10T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Users want to manage their saved cards without having to go through checkout. Add a \"Payment Methods\" screen in the account settings section. Pull saved methods from Stripe via the existing `/v1/payments/methods` endpoint. Allow users to delete a saved method.\n\nAcceptance Criteria:\n- Screen accessible from Account > Payment Methods\n- Lists all saved cards with last 4 digits and card brand\n- User can delete a card (with confirmation prompt)\n- Successful deletion removes card from Stripe and refreshes the list",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-10T00:00:00.000+0000",
+              "body": "Stripe endpoint is already built and tested. This is purely a frontend task."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10052",
+      "self": "https://jira.example.com/rest/api/3/issue/10052",
+      "key": "BRW-52",
+      "fields": {
+        "summary": "Scheduled order feature — allow ordering up to 24 hours in advance",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "To Do" },
+        "priority": { "name": "Medium" },
+        "assignee": null,
+        "reporter": { "displayName": "Marcus Webb" },
+        "created": "2024-04-11T00:00:00.000+0000",
+        "updated": "2024-04-11T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Product wants to support scheduled orders so customers can set a future pickup time up to 24 hours out. This will require changes to the order creation flow on the frontend and a scheduled dispatch mechanism on the backend. Celery beat seems like the right tool for dispatching at the right time.\n\nAcceptance Criteria:\n- User can select a pickup time during checkout (time slots in 15-minute increments)\n- Order saved with `scheduled_for` timestamp\n- Celery beat dispatches order to kitchen at appropriate time\n- User receives confirmation notification with scheduled time\n- Orders cannot be scheduled more than 24 hours out or in the past",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-11T00:00:00.000+0000",
+              "body": "This will touch checkout flow pretty significantly. Should probably be broken into sub-tasks before anyone picks it up."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10053",
+      "self": "https://jira.example.com/rest/api/3/issue/10053",
+      "key": "BRW-53",
+      "fields": {
+        "summary": "Gift card redemption support at checkout",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Open" },
+        "priority": { "name": "Low" },
+        "assignee": null,
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-11T00:00:00.000+0000",
+        "updated": "2024-04-11T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "description": "Marketing wants to offer digital gift cards as a holiday promotion. Customers need to be able to enter a gift card code at checkout and have the balance applied before charging the remaining amount to their card on file. Gift card balances would live in our own DB rather than Stripe.\n\nAcceptance Criteria:\n- Gift card code entry field at checkout\n- Backend validates code and returns remaining balance\n- Balance applied as partial payment; remainder charged to Stripe\n- Appropriate error shown if code is invalid or balance is zero\n- Gift card balance updated atomically with order creation to prevent double-spend",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-11T00:00:00.000+0000",
+              "body": "Need to confirm with legal whether gift cards require any state-specific compliance handling before we scope this properly."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10054",
+      "self": "https://jira.example.com/rest/api/3/issue/10054",
+      "key": "BRW-54",
+      "fields": {
+        "summary": "Customer feedback: in-app drink customization saved presets",
+        "issuetype": { "name": "Story" },
+        "status": { "name": "Open" },
+        "priority": { "name": "Medium" },
+        "assignee": null,
+        "reporter": { "displayName": "Marcus Webb" },
+        "created": "2024-04-12T00:00:00.000+0000",
+        "updated": "2024-04-12T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "customfield_customerFeedbackRef": "CFB-2024-0041",
+        "description": "Based on a customer feature request received via the app feedback form, users want to save their customized drink orders as named presets for quick reordering. Example: save \"My usual oat latte\" with all customizations and reorder in one tap. This will need a new `presets` table linked to `users` and a UI update to the ordering flow.\n\nAcceptance Criteria:\n- User can save current drink customization as a named preset from the item detail screen\n- Presets appear on a dedicated \"My Presets\" section on the home screen\n- Tapping a preset adds the item with all saved customizations to cart\n- User can delete a preset\n- Max 10 presets per user",
+        "comment": {
+          "total": 1,
+          "comments": [
+            {
+              "author": { "displayName": "Marcus Webb" },
+              "created": "2024-04-12T00:00:00.000+0000",
+              "body": "Assigned to backlog for now. Need backend schema design before frontend can start."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10055",
+      "self": "https://jira.example.com/rest/api/3/issue/10055",
+      "key": "BRW-55",
+      "fields": {
+        "summary": "Cart total shows incorrect amount when discount code applied — rounding error",
+        "issuetype": { "name": "Bug" },
+        "status": { "name": "Open" },
+        "priority": { "name": "High" },
+        "assignee": { "displayName": "Daniel Cho" },
+        "reporter": { "displayName": "Priya Nair" },
+        "created": "2024-04-12T00:00:00.000+0000",
+        "updated": "2024-04-12T00:00:00.000+0000",
+        "labels": ["inferred"],
+        "customfield_customerFeedbackRef": "CFB-2024-0047",
+        "description": "Stemming from customer bug report CFB-2024-0047. When a percentage-based discount code is applied at checkout, the cart total displayed in the app is sometimes off by $0.01 from the amount actually charged by Stripe. Reproduced consistently with orders where the pre-discount total is not evenly divisible by the discount percentage. Root cause is likely floating point arithmetic in the discount calculation on the frontend rather than rounding at the server.\n\nAcceptance Criteria:\n- Cart total displayed matches Stripe charge amount in all tested cases\n- Discount calculation moved to backend, frontend receives pre-calculated totals\n- Regression tests cover at least 10 discount/total combinations including edge cases\n- Fix verified against Stripe test mode charges",
+        "comment": {
+          "total": 2,
+          "comments": [
+            {
+              "author": { "displayName": "Priya Nair" },
+              "created": "2024-04-12T00:00:00.000+0000",
+              "body": "Backend should be the source of truth for pricing. Frontend should never be doing its own discount math."
+            },
+            {
+              "author": { "displayName": "Daniel Cho" },
+              "created": "2024-04-12T00:00:00.000+0000",
+              "body": "Agreed. I'll add a `discounted_total` field to the cart summary endpoint response so the frontend just displays what we send."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

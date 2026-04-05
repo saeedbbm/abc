@@ -1,0 +1,454 @@
+{
+  "results": [
+    {
+      "id": "100001",
+      "type": "page",
+      "status": "current",
+      "title": "Brew & Go App — Engineering Overview",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2024-03-12T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-12T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Brew &amp; Go App — Engineering Overview</h1>\n<h2>Overview</h2>\n<p>Brew &amp; Go is the company's mobile ordering platform for customers to order ahead, earn rewards, and pay through the app. The backend is built on Flask and the frontend is a React Native application. We use PostgreSQL as our primary datastore, hosted on AWS RDS. Static assets are served via S3 and CloudFront.</p>\n<h2>Team</h2>\n<ul>\n  <li><strong>Priya Nair</strong> — Backend / infra lead</li>\n  <li><strong>Marcus Webb</strong> — Frontend lead</li>\n  <li><strong>Daniel Cho</strong> — Full-stack, handles integrations and background jobs</li>\n</ul>\n<h2>Repositories</h2>\n<ul>\n  <li><code>brewgo-api</code> — Flask REST API (Python 3.11)</li>\n  <li><code>brewgo-app</code> — React Native frontend</li>\n  <li><code>brewgo-infra</code> — Terraform configs, deployment scripts</li>\n</ul>\n<h2>Deployment</h2>\n<p>We deploy via GitHub Actions to AWS Elastic Beanstalk. Staging environment is auto-deployed on merge to <code>main</code>. Production deploys require a manual approval step in the Actions workflow.</p>\n<h2>Key Dependencies</h2>\n<ul>\n  <li>Stripe for payment processing</li>\n  <li>Firebase for push notifications</li>\n  <li>Celery + Redis for background job queuing</li>\n  <li>SQLAlchemy as the ORM layer</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100001",
+        "webui": "/spaces/ENG/pages/100001/Brew+%26+Go+App+%E2%80%94+Engineering+Overview"
+      }
+    },
+    {
+      "id": "100002",
+      "type": "page",
+      "status": "current",
+      "title": "Database Schema — Core Tables",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2023-11-04T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-11-04T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Database Schema — Core Tables</h1>\n<h2>users</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>email</td><td>VARCHAR(255)</td><td>Unique</td></tr>\n    <tr><td>phone</td><td>VARCHAR(20)</td><td></td></tr>\n    <tr><td>rewards_points</td><td>INTEGER</td><td>Default 0</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>orders</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>user_id</td><td>UUID</td><td>FK → users</td></tr>\n    <tr><td>status</td><td>VARCHAR(50)</td><td>pending, confirmed, ready, completed</td></tr>\n    <tr><td>total_cents</td><td>INTEGER</td><td>Stored in cents</td></tr>\n    <tr><td>store_id</td><td>INTEGER</td><td>FK → stores</td></tr>\n    <tr><td>created_at</td><td>TIMESTAMP</td><td></td></tr>\n  </tbody>\n</table>\n<h2>order_items</h2>\n<table>\n  <tbody>\n    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>\n    <tr><td>id</td><td>UUID</td><td>Primary key</td></tr>\n    <tr><td>order_id</td><td>UUID</td><td>FK → orders</td></tr>\n    <tr><td>product_id</td><td>INTEGER</td><td>FK → products</td></tr>\n    <tr><td>quantity</td><td>INTEGER</td><td></td></tr>\n    <tr><td>price_cents</td><td>INTEGER</td><td>Price at time of order</td></tr>\n  </tbody>\n</table>\n<h2>rewards</h2>\n<p>Rewards points are calculated at a flat rate of 1 point per dollar spent, rounded down. Points are added to the user record on order completion by the <code>finalize_order</code> Celery task.</p>\n<hr/>\n<p><em>Last schema migration: 2023-10-28. See <code>alembic/versions/</code> for history.</em></p>\n<hr/>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100002",
+        "webui": "/spaces/ENG/pages/100002/Database+Schema+%E2%80%94+Core+Tables"
+      }
+    },
+    {
+      "id": "100003",
+      "type": "page",
+      "status": "current",
+      "title": "API Authentication — How We Handle Auth",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" },
+        "createdDate": "2024-01-09T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-01-09T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>API Authentication — How We Handle Auth</h1>\n<h2>Overview</h2>\n<p>The Brew &amp; Go API uses JWT-based authentication. Tokens are issued on login and must be included in the <code>Authorization</code> header as a Bearer token on all protected endpoints.</p>\n<h2>Token Lifecycle</h2>\n<ul>\n  <li>Access tokens expire after 24 hours</li>\n  <li>Refresh tokens expire after 30 days</li>\n  <li>Refresh endpoint: <code>POST /auth/refresh</code></li>\n</ul>\n<h2>Implementation</h2>\n<p>Token signing uses HS256 with a secret stored in AWS Secrets Manager under the key <code>brewgo/jwt_secret</code>. The Flask app retrieves this on startup via <code>boto3</code>.</p>\n<h2>Password Storage</h2>\n<p>Passwords are hashed using bcrypt with a work factor of 12.</p>\n<h2>Notes</h2>\n<p>The <code>/auth/login</code> and <code>/auth/register</code> endpoints are rate-limited to 10 requests per minute per IP using Flask-Limiter backed by Redis. If a user hits the limit they receive a 429 response.</p>\n<p>Session invalidation is not currently implemented. If a token is compromised, the only mitigation is rotating the <code>jwt_secret</code>, which invalidates all active sessions globally.</p>\n<hr/>\n<p><em>See also:</em> <ac:link><ri:page ri:content-title='Brew &amp; Go App — Engineering Overview'/><ac:plain-text-link-body><![CDATA[Brew & Go App — Engineering Overview]]></ac:plain-text-link-body></ac:link></p>\n<hr/>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100003",
+        "webui": "/spaces/ENG/pages/100003/API+Authentication+%E2%80%94+How+We+Handle+Auth"
+      }
+    },
+    {
+      "id": "100004",
+      "type": "page",
+      "status": "current",
+      "title": "Project Retrospective — Loyalty Rewards v1",
+      "space": { "id": "2002", "key": "CP", "name": "Completed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2023-06-15T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-06-15T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Project Retrospective — Loyalty Rewards v1</h1>\n<h2>Summary</h2>\n<p>Launched the initial rewards points system in April 2023. Customers earn points on every completed order and can redeem them for discounts at checkout. Shipped on schedule over a 6-week sprint.</p>\n<h2>What Went Well</h2>\n<ul>\n  <li>Backend implementation was clean and well-tested</li>\n  <li>Celery task for point finalization proved reliable in production</li>\n  <li>Marcus's UI work on the rewards dashboard was praised in early user feedback</li>\n</ul>\n<h2>What Could Be Better</h2>\n<ul>\n  <li>We underestimated the edge cases around partial refunds and point reversal</li>\n  <li>QA cycle was too compressed — we found two bugs post-launch that required hotfixes</li>\n  <li>Documentation for the redemption flow was never written up properly</li>\n</ul>\n<h2>Outcome</h2>\n<p>Rewards program now has 8,400 active participants as of the retro date. Redemption rate is around 22%, which is above the initial target of 15%.</p>\n<h2>Follow-up Items</h2>\n<ul>\n  <li>Write redemption flow documentation <em>(still pending)</em></li>\n  <li>Revisit point reversal logic for refunds in a future sprint</li>\n  <li>Consider tiered rewards levels as a Phase 2 initiative</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100004",
+        "webui": "/spaces/CP/pages/100004/Project+Retrospective+%E2%80%94+Loyalty+Rewards+v1"
+      }
+    },
+    {
+      "id": "100005",
+      "type": "page",
+      "status": "current",
+      "title": "Project Retrospective — Store Locator Feature",
+      "space": { "id": "2002", "key": "CP", "name": "Completed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" },
+        "createdDate": "2023-09-02T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-09-02T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Project Retrospective — Store Locator Feature</h1>\n<h2>Summary</h2>\n<p>Added an interactive store locator map to the app in August 2023. Users can find the nearest Brew &amp; Go location, see current wait times, and set a preferred store. Built over 4 weeks.</p>\n<h2>Implementation Notes</h2>\n<p>Used the Google Maps SDK on the React Native side and added a <code>/stores</code> endpoint on the API. Wait times are a manual value set by store managers through the admin portal, refreshed every 15 minutes via a Celery scheduled task.</p>\n<h2>What Went Well</h2>\n<ul>\n  <li>Shipped ahead of schedule by 3 days</li>\n  <li>Daniel's integration of the admin portal controls was straightforward</li>\n  <li>No significant bugs post-launch</li>\n</ul>\n<h2>What Could Be Better</h2>\n<ul>\n  <li>Wait time estimates are manual and frequently inaccurate — customers have complained</li>\n  <li>We never added the \"favorite store\" persistence we originally scoped. It got cut for time and was meant to be picked up in a later sprint</li>\n</ul>\n<h2>Outcome</h2>\n<p>Store locator is used by roughly 60% of monthly active users. Favorite store persistence is still not shipped as of this writing.</p>\n<h2>Follow-up Items</h2>\n<ul>\n  <li>Implement favorite store persistence</li>\n  <li>Explore automated wait time estimation using order throughput data</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100005",
+        "webui": "/spaces/CP/pages/100005/Project+Retrospective+%E2%80%94+Store+Locator+Feature"
+      }
+    },
+    {
+      "id": "100006",
+      "type": "page",
+      "status": "current",
+      "title": "Project Retrospective — Push Notification System",
+      "space": { "id": "2002", "key": "CP", "name": "Completed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" },
+        "createdDate": "2023-12-20T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-12-20T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Project Retrospective — Push Notification System</h1>\n<h2>Summary</h2>\n<p>Integrated Firebase Cloud Messaging to support push notifications for order status updates. Launched November 2023. Covered order confirmed, order ready, and promotional blast notifications.</p>\n<h2>Implementation</h2>\n<p>FCM device tokens are stored in the <code>user_devices</code> table (added in migration <code>0012</code>). The notification dispatch is handled by a Celery task triggered by order status changes. Promotional blasts are kicked off manually from a small internal admin script.</p>\n<h2>What Went Well</h2>\n<ul>\n  <li>Order-status notifications working reliably with &lt;2 second delay in testing</li>\n  <li>Firebase integration was less painful than expected</li>\n  <li>Good test coverage on the dispatch logic</li>\n</ul>\n<h2>What Could Be Better</h2>\n<ul>\n  <li>Promotional blast tooling is fragile — it's a Python script run locally by whoever needs it, with no logging or retry logic</li>\n  <li>We didn't build any unsubscribe or notification preference controls for users</li>\n  <li>Documentation is sparse</li>\n</ul>\n<h2>Outcome</h2>\n<p>Push notifications have measurably improved our order pickup rate. \"Order ready\" open rates are around 74%.</p>\n<h2>Follow-up Items</h2>\n<ul>\n  <li>Build proper notification preference UI for users</li>\n  <li>Harden the promotional blast tool into a proper admin panel feature</li>\n  <li>Add logging and monitoring to notification dispatch</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100006",
+        "webui": "/spaces/CP/pages/100006/Project+Retrospective+%E2%80%94+Push+Notification+System"
+      }
+    },
+    {
+      "id": "100007",
+      "type": "page",
+      "status": "current",
+      "title": "Current Sprint — Q1 2024 Active Projects",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2024-02-28T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-02-28T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Current Sprint — Q1 2024 Active Projects</h1>\n<h2>1. Scheduled Orders</h2>\n<p>Allow customers to place orders up to 7 days in advance with a selected pickup time. Backend work is mostly done — Daniel has the Celery scheduling logic working in staging. Marcus is finishing the date/time picker UI. Target launch: mid-March 2024.</p>\n<h2>2. Nutrition &amp; Allergen Information</h2>\n<p>Adding nutritional data and allergen flags to product pages. Data entry is being handled by the ops team. Priya is building the API changes and Marcus is wiring up the display components. Target launch: end of March 2024.</p>\n<h2>3. Guest Checkout</h2>\n<p>Let users place orders without creating an account. This has been a recurring request. Architecture discussion is still ongoing — the main open question is how to handle rewards points for guest orders (we currently don't plan to award them). Target launch: TBD, aiming for Q2 2024.</p>\n<h2>Notes</h2>\n<p>We're running a bit thin on backend bandwidth this sprint with Scheduled Orders and Nutrition both in flight simultaneously. Priya flagged this in last week's standup.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100007",
+        "webui": "/spaces/ENG/pages/100007/Current+Sprint+%E2%80%94+Q1+2024+Active+Projects"
+      }
+    },
+    {
+      "id": "100008",
+      "type": "page",
+      "status": "current",
+      "title": "Scheduled Orders — Technical Design",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" },
+        "createdDate": "2024-02-14T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-02-14T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Scheduled Orders — Technical Design</h1>\n<h2>Overview</h2>\n<p>Customers will be able to select a future pickup time when placing an order. The order is submitted immediately and charged at submission time, but the kitchen receives it only when the preparation window begins (15 minutes before the selected pickup time).</p>\n<h2>API Changes</h2>\n<p>New field on <code>POST /orders</code>: <code>scheduled_for</code> (ISO 8601 datetime, nullable). If provided, the order enters <code>scheduled</code> status rather than <code>pending</code>.</p>\n<h2>Celery Task</h2>\n<p>A new periodic task <code>release_scheduled_orders</code> runs every 5 minutes. It queries for orders in <code>scheduled</code> status where <code>scheduled_for &lt;= NOW() + 15 minutes</code> and transitions them to <code>pending</code>, triggering the normal confirmation flow.</p>\n<h2>Edge Cases</h2>\n<ul>\n  <li>What happens if the app server is down during the release window? Orders will release on next task run, potentially late.</li>\n  <li>Cancellations: customers can cancel up to 1 hour before scheduled time. Refund via Stripe is triggered immediately.</li>\n  <li>Time zones: all times stored in UTC, displayed in user's local time via the frontend.</li>\n</ul>\n<h2>Status</h2>\n<p>Implementation complete in staging. Pending UI sign-off from Marcus and QA pass.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100008",
+        "webui": "/spaces/ENG/pages/100008/Scheduled+Orders+%E2%80%94+Technical+Design"
+      }
+    },
+    {
+      "id": "100009",
+      "type": "page",
+      "status": "current",
+      "title": "Guest Checkout — Architecture Discussion Notes",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" },
+        "createdDate": "2024-03-01T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-01T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Guest Checkout — Architecture Discussion Notes</h1>\n<h2>Background</h2>\n<p>Guest checkout has been requested repeatedly by customers who don't want to create an account just to try the app. We want to reduce friction for first-time users.</p>\n<h2>Proposed Approach</h2>\n<p>Guest sessions are identified by a short-lived anonymous token issued by <code>POST /auth/guest</code>. This token allows access to ordering endpoints only. Guest orders are associated with a <code>guest_session_id</code> rather than a <code>user_id</code>.</p>\n<h2>Open Questions</h2>\n<ol>\n  <li><strong>Rewards</strong>: We will not award rewards points for guest orders. This is decided.</li>\n  <li><strong>Order history</strong>: Guest users cannot view past orders — by design.</li>\n  <li><strong>Token expiry</strong>: Guest tokens expire after 2 hours of inactivity. Priya suggested 1 hour but we didn't reach consensus.</li>\n  <li><strong>Payment</strong>: Stripe supports guest payment intents without a customer record, so this is straightforward.</li>\n</ol>\n<h2>Schema Changes</h2>\n<ul>\n  <li><code>orders.user_id</code> becomes nullable</li>\n  <li>New column: <code>orders.guest_session_id VARCHAR(255)</code></li>\n  <li>New table: <code>guest_sessions(id, token_hash, created_at, last_active_at, expires_at)</code></li>\n</ul>\n<h2>Next Steps</h2>\n<p>Priya to finalize the token expiry decision and begin backend implementation. Marcus will start UI scaffolding once the token flow is confirmed.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100009",
+        "webui": "/spaces/ENG/pages/100009/Guest+Checkout+%E2%80%94+Architecture+Discussion+Notes"
+      }
+    },
+    {
+      "id": "100010",
+      "type": "page",
+      "status": "current",
+      "title": "Nutrition & Allergen Feature — Notes",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" },
+        "createdDate": "2024-03-05T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-05T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Nutrition &amp; Allergen Feature — Notes</h1>\n<h2>Scope</h2>\n<p>Display nutritional information (calories, fat, carbs, protein, sodium) and allergen flags (dairy, gluten, nuts, soy) on each product detail page in the app.</p>\n<h2>Data</h2>\n<p>The ops team is populating a spreadsheet that will be imported into the <code>products</code> table via a one-time migration script. Ongoing updates will go through the admin portal.</p>\n<h2>API</h2>\n<p>Priya is adding <code>nutrition</code> and <code>allergens</code> fields to the <code>GET /products/{id}</code> response. The nutrition object will be a JSON blob stored in a new <code>product_details</code> table.</p>\n<h2>Frontend</h2>\n<p>New accordion component on the product detail screen. Allergens displayed as icon badges. Tapping an allergen badge shows a short description.</p>\n<h2>Open Items</h2>\n<ul>\n  <li>Admin portal editing for nutrition data is out of scope for this sprint — ops will use a direct DB update process for now</li>\n  <li>Confirm final allergen list with the ops team (current list may be incomplete)</li>\n  <li>Accessibility review needed on the badge component</li>\n</ul>\n<h2>Timeline</h2>\n<p>Data import expected by March 15. Priya's API changes targeting March 18. Marcus targeting March 22 for frontend. Launch end of March.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100010",
+        "webui": "/spaces/ENG/pages/100010/Nutrition+%26+Allergen+Feature+%E2%80%94+Notes"
+      }
+    },
+    {
+      "id": "100011",
+      "type": "page",
+      "status": "current",
+      "title": "Proposed Project — Tiered Rewards Program",
+      "space": { "id": "2003", "key": "PP", "name": "Proposed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2024-03-08T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-08T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Proposed Project — Tiered Rewards Program</h1>\n<h2>Background</h2>\n<p>Our current rewards system is flat — 1 point per dollar, no differentiation by spend level. Multiple customers have asked for a tiered program (e.g., Silver, Gold, Platinum) with escalating benefits.</p>\n<h2>Proposal</h2>\n<p>Introduce three tiers based on rolling 12-month spend:</p>\n<table>\n  <tbody>\n    <tr><th>Tier</th><th>Threshold</th><th>Benefit</th></tr>\n    <tr><td>Silver</td><td>$0–$199</td><td>1 pt / dollar</td></tr>\n    <tr><td>Gold</td><td>$200–$499</td><td>1.25 pts / dollar</td></tr>\n    <tr><td>Platinum</td><td>$500+</td><td>1.5 pts / dollar</td></tr>\n  </tbody>\n</table>\n<h2>Technical Scope</h2>\n<ul>\n  <li>New <code>rewards_tier</code> column on <code>users</code> table</li>\n  <li>Background job to recalculate tier monthly</li>\n  <li>Updated <code>finalize_order</code> task to apply correct multiplier</li>\n  <li>Frontend tier display in rewards dashboard</li>\n</ul>\n<h2>Open Questions</h2>\n<ul>\n  <li>Should existing points be grandfathered under old earn rates?</li>\n  <li>Do we notify users on tier changes?</li>\n  <li>How do we handle downgrades (e.g., spend drops below threshold)?</li>\n</ul>\n<h2>Status</h2>\n<p>Proposal only. Not yet scheduled. Requires product sign-off before engineering begins.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100011",
+        "webui": "/spaces/PP/pages/100011/Proposed+Project+%E2%80%94+Tiered+Rewards+Program"
+      }
+    },
+    {
+      "id": "100012",
+      "type": "page",
+      "status": "current",
+      "title": "Proposed Project — In-App Chat Support",
+      "space": { "id": "2003", "key": "PP", "name": "Proposed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" },
+        "createdDate": "2024-03-10T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-10T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-marcus-webb", "displayName": "Marcus Webb" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Proposed Project — In-App Chat Support</h1>\n<h2>Background</h2>\n<p>Customer support currently happens entirely via email. Response times are slow and customers have complained. Adding an in-app chat widget would let customers get help faster, especially for order issues.</p>\n<h2>Proposal</h2>\n<p>Integrate a third-party chat SDK (Intercom is the leading candidate) into the React Native app. The support team would handle conversations from the Intercom dashboard. No custom chat infrastructure needed.</p>\n<h2>Technical Scope</h2>\n<ul>\n  <li>Add Intercom React Native SDK to <code>brewgo-app</code></li>\n  <li>Pass user identity (email, name, user ID) to Intercom on login</li>\n  <li>Surface a chat button on the Orders and Help screens</li>\n  <li>Configure Intercom workspace (handled by ops, not engineering)</li>\n</ul>\n<h2>Risks</h2>\n<ul>\n  <li>Intercom adds ~2MB to the app bundle</li>\n  <li>User PII is passed to a third party — needs a privacy/legal review</li>\n  <li>Guest users cannot be identified to Intercom without extra handling</li>\n</ul>\n<h2>Open Questions</h2>\n<ul>\n  <li>Do we build for iOS only first, or both platforms simultaneously?</li>\n  <li>Who owns the Intercom workspace configuration?</li>\n</ul>\n<h2>Status</h2>\n<p>Proposal only. Pending legal sign-off on PII handling. Not yet scheduled.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100012",
+        "webui": "/spaces/PP/pages/100012/Proposed+Project+%E2%80%94+In-App+Chat+Support"
+      }
+    },
+    {
+      "id": "100013",
+      "type": "page",
+      "status": "current",
+      "title": "Proposed Project — Subscription Coffee Plan",
+      "space": { "id": "2003", "key": "PP", "name": "Proposed Projects", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" },
+        "createdDate": "2024-03-11T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-03-11T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Proposed Project — Subscription Coffee Plan</h1>\n<h2>Background</h2>\n<p>Several regulars have expressed interest in a subscription model — pay a flat monthly fee and get a set number of drinks per month. This would help with revenue predictability and customer retention.</p>\n<h2>Proposal</h2>\n<p>Offer a \"Brew Pass\" subscription: $25/month for 10 drinks, $40/month for 20 drinks. Drinks are added to the account at the start of each billing cycle and expire at the end of the cycle.</p>\n<h2>Technical Scope</h2>\n<ul>\n  <li>Stripe Billing integration for recurring payments</li>\n  <li>New <code>subscriptions</code> table to track plan, status, cycle dates</li>\n  <li>New <code>drink_credits</code> balance on user accounts</li>\n  <li>Checkout flow modification to allow paying with drink credits</li>\n  <li>Admin tooling to manage/cancel subscriptions</li>\n</ul>\n<h2>Risks</h2>\n<ul>\n  <li>Stripe Billing integration is significant lift — estimated 3–4 week backend effort</li>\n  <li>Expiring credits need careful UX to avoid frustration</li>\n  <li>Edge cases: what happens if a user cancels mid-cycle?</li>\n</ul>\n<h2>Open Questions</h2>\n<ul>\n  <li>What counts as a \"drink\" — any menu item, or only specific SKUs?</li>\n  <li>Can credits roll over?</li>\n</ul>\n<h2>Status</h2>\n<p>Proposal only. High interest from the business side. Engineering estimate not yet done.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100013",
+        "webui": "/spaces/PP/pages/100013/Proposed+Project+%E2%80%94+Subscription+Coffee+Plan"
+      }
+    },
+    {
+      "id": "100014",
+      "type": "page",
+      "status": "current",
+      "title": "Onboarding — Setting Up Your Dev Environment",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" },
+        "createdDate": "2023-08-17T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-08-17T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-daniel-cho", "displayName": "Daniel Cho" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Onboarding — Setting Up Your Dev Environment</h1>\n<h2>Prerequisites</h2>\n<ul>\n  <li>Python 3.11</li>\n  <li>Node.js 18.x</li>\n  <li>Docker Desktop</li>\n  <li>AWS CLI configured with <code>brewgo-dev</code> profile</li>\n</ul>\n<h2>Backend Setup</h2>\n<ac:structured-macro ac:name='code'>\n  <ac:parameter ac:name='language'>bash</ac:parameter>\n  <ac:plain-text-body><![CDATA[\ngit clone git@github.com:brewgo/brewgo-api.git\ncd brewgo-api\npython -m venv venv\nsource venv/bin/activate\npip install -r requirements.txt\ncp .env.example .env\n# Fill in values — ask Priya for the dev secrets\ndocker-compose up -d  # starts Postgres and Redis locally\nflask db upgrade\nflask run\n]]></ac:plain-text-body>\n</ac:structured-macro>\n<h2>Frontend Setup</h2>\n<ac:structured-macro ac:name='code'>\n  <ac:parameter ac:name='language'>bash</ac:parameter>\n  <ac:plain-text-body><![CDATA[\ngit clone git@github.com:brewgo/brewgo-app.git\ncd brewgo-app\nnpm install\nnpx expo start\n]]></ac:plain-text-body>\n</ac:structured-macro>\n<p>Use the Expo Go app on your phone or an iOS/Android simulator.</p>\n<h2>Notes</h2>\n<ul>\n  <li>The <code>.env.example</code> file has all required keys listed. Missing values will cause startup failures.</li>\n  <li>Stripe test keys are in the shared 1Password vault under \"Brew &amp; Go Dev\"</li>\n  <li>Ask Marcus if you hit any simulator issues on Apple Silicon</li>\n</ul>\n<p><em>Last updated: August 2023</em></p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100014",
+        "webui": "/spaces/ENG/pages/100014/Onboarding+%E2%80%94+Setting+Up+Your+Dev+Environment"
+      }
+    },
+    {
+      "id": "100015",
+      "type": "page",
+      "status": "current",
+      "title": "Release Process & Branching Strategy",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2023-10-05T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2023-10-05T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Release Process &amp; Branching Strategy</h1>\n<h2>Branching</h2>\n<p>We follow a simplified trunk-based model:</p>\n<ul>\n  <li><code>main</code> — always deployable, auto-deploys to staging</li>\n  <li>Feature branches cut from <code>main</code>, named <code>feature/&lt;ticket-id&gt;-short-description</code></li>\n  <li>Hotfix branches named <code>hotfix/&lt;description&gt;</code></li>\n</ul>\n<h2>Pull Requests</h2>\n<ul>\n  <li>All PRs require at least 1 approval before merge</li>\n  <li>CI must pass (linting, unit tests, type checks)</li>\n  <li>PRs should reference the Jira ticket in the description</li>\n</ul>\n<h2>Releasing to Production</h2>\n<ol>\n  <li>Confirm staging is stable and QA has signed off</li>\n  <li>Create a release tag: <code>git tag v&lt;MAJOR.MINOR.PATCH&gt;</code></li>\n  <li>Push the tag — this triggers the production deploy workflow in GitHub Actions</li>\n  <li>Monitor Cloudwatch logs and Sentry for 30 minutes post-deploy</li>\n  <li>Post in <code>#deployments</code> Slack channel with the version and a brief summary of what shipped</li>\n</ol>\n<h2>Hotfixes</h2>\n<p>Cut from <code>main</code>, fix, PR, merge, tag with patch bump. Skip the staging wait if the issue is critical — use judgment.</p>\n<h2>App Store Releases</h2>\n<p>React Native app releases to App Store and Google Play are handled separately by Marcus using Fastlane. Minimum 3 business days for App Store review turnaround.</p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100015",
+        "webui": "/spaces/ENG/pages/100015/Release+Process+%26+Branching+Strategy"
+      }
+    },
+    {
+      "id": "100016",
+      "type": "page",
+      "status": "current",
+      "title": "Incident Report — Payment Failures (2024-01-17)",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2024-01-19T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-01-19T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>Incident Report — Payment Failures (2024-01-17)</h1>\n<h2>Summary</h2>\n<p>Between 14:32 and 16:08 UTC on January 17, 2024, approximately 340 checkout attempts failed with a 500 error. Root cause was an expired Stripe API key in the production environment.</p>\n<h2>Timeline</h2>\n<table>\n  <tbody>\n    <tr><th>Time (UTC)</th><th>Event</th></tr>\n    <tr><td>14:32</td><td>First 500 errors on <code>POST /orders</code> reported in Sentry</td></tr>\n    <tr><td>14:47</td><td>Marcus notices error spike in Sentry and pings <code>#engineering</code></td></tr>\n    <tr><td>15:01</td><td>Priya identifies the Stripe key expiry as root cause</td></tr>\n    <tr><td>15:09</td><td>New key rotated in AWS Secrets Manager</td></tr>\n    <tr><td>15:12</td><td>App server restarted to pick up new secret</td></tr>\n    <tr><td>16:08</td><td>Error rate returns to baseline</td></tr>\n  </tbody>\n</table>\n<h2>Root Cause</h2>\n<p>The Stripe restricted API key used for production had an expiry date set to January 17. This was set during initial configuration and not tracked anywhere. When it expired, all payment requests to Stripe returned 401, which the app surface as 500.</p>\n<h2>Remediation</h2>\n<ul>\n  <li>Rotated Stripe key immediately</li>\n  <li>Added key expiry dates to a shared tracking doc (see: <em>API Keys &amp; Expiry Tracking</em>)</li>\n  <li>Set a calendar reminder 30 days before next expiry</li>\n</ul>\n<h2>Action Items</h2>\n<ul>\n  <li>Implement automated secret expiry alerting — not yet done</li>\n  <li>Review all other API keys for upcoming expiries</li>\n</ul>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100016",
+        "webui": "/spaces/ENG/pages/100016/Incident+Report+%E2%80%94+Payment+Failures+%282024-01-17%29"
+      }
+    },
+    {
+      "id": "100017",
+      "type": "page",
+      "status": "current",
+      "title": "API Keys & Expiry Tracking",
+      "space": { "id": "2001", "key": "ENG", "name": "Engineering", "type": "global" },
+      "history": {
+        "createdBy": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" },
+        "createdDate": "2024-01-19T00:00:00.000Z"
+      },
+      "version": {
+        "number": 1,
+        "when": "2024-01-19T00:00:00.000Z",
+        "by": { "type": "known", "accountId": "acc-priya-nair", "displayName": "Priya Nair" }
+      },
+      "body": {
+        "storage": {
+          "representation": "storage",
+          "value": "<h1>API Keys &amp; Expiry Tracking</h1>\n<h2>Purpose</h2>\n<p>Track all third-party API keys and credentials used in production with their expiry dates. Created after the January 17 payment incident.</p>\n<h2>Keys</h2>\n<table>\n  <tbody>\n    <tr><th>Service</th><th>Key Type</th><th>Environment</th><th>Expires</th><th>Owner</th></tr>\n    <tr><td>Stripe</td><td>Restricted API key</td><td>Production</td><td>2025-01-17</td><td>Priya</td></tr>\n    <tr><td>Stripe</td><td>Restricted API key</td><td>Staging</td><td>Never</td><td>Priya</td></tr>\n    <tr><td>Firebase</td><td>Service account</td><td>Production</td><td>Never</td><td>Daniel</td></tr>\n    <tr><td>Google Maps</td><td>API key</td><td>Production</td><td>2024-12-31</td><td>Marcus</td></tr>\n    <tr><td>Google Maps</td><td>API key</td><td>Staging</td><td>2024-12-31</td><td>Marcus</td></tr>\n    <tr><td>SendGrid</td><td>API key</td><td>Production</td><td>Never</td><td>Daniel</td></tr>\n    <tr><td>AWS</td><td>IAM access key (CI)</td><td>All</td><td>2024-06-01</td><td>Priya</td></tr>\n  </tbody>\n</table>\n<h2>Process</h2>\n<p>When a key is rotated, update this table. Set a calendar reminder in the Engineering Google Calendar 30 days before expiry.</p>\n<h2>Notes</h2>\n<p>The AWS IAM key used by GitHub Actions CI will need rotation by June 2024. Priya to handle.</p>\n<p><em>Last updated: 2024-01-19</em></p>"
+        }
+      },
+      "_links": {
+        "self": "/wiki/rest/api/content/100017",
+        "webui": "/spaces/ENG/pages/100017/API+Keys+%26+Expiry+Tracking"
+      }
+    }
+  ],
+  "start": 0,
+  "limit": 25,
+  "size": 17,
+  "_links": {
+    "base": "/wiki",
+    "context": "/wiki",
+    "self": "/wiki/rest/api/content?expand=space,history,version,body.storage&limit=25"
+  }
+}

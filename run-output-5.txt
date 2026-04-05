@@ -1,0 +1,79 @@
+﻿data: {"type":"progress","detail":"[pass1 Step 16/18] Starting: Generate How-To Guides","percent":0,"step_id":"pass1-step-16"}
+
+data: {"type":"step_started","step_id":"pass1-step-16","step_number":16,"total_steps":18,"step_name":"Generate How-To Guides","pass":"pass1","started_at":"2026-04-03T10:14:15.751Z","steps_remaining":2}
+
+data: {"type":"progress","detail":"Generating plans for 4 project targets...","percent":2,"step_percent":5,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 3/4 plans","percent":24,"step_percent":73,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 4/4 plans","percent":31,"step_percent":95,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"Generated 4 plans","percent":33,"step_percent":100,"step_id":"pass1-step-16"}
+
+data: {"type":"progress","detail":"[pass1 Step 16/18] Completed: Generate How-To Guides (149.0s)","percent":33,"step_id":"pass1-step-16"}
+
+data: {"type":"step_completed","step_id":"pass1-step-16","step_number":16,"total_steps":18,"step_name":"Generate How-To Guides","pass":"pass1","duration_ms":149017,"summary":"total_howtos: 4, llm_calls: 4, target_node_count: 4, target_nodes: 4 items, howto_titles: 4 items","steps_remaining":2,"metrics":{"llm_calls":4,"input_tokens":17439,"output_tokens":6760,"cost_usd":0.153717}}
+
+data: {"type":"progress","detail":"[pass1 Step 17/18] Starting: Extract Claims","percent":33,"step_id":"pass1-step-17"}
+
+data: {"type":"step_started","step_id":"pass1-step-17","step_number":17,"total_steps":18,"step_name":"Extract Claims","pass":"pass1","started_at":"2026-04-03T10:16:44.881Z","steps_remaining":1}
+
+data: {"type":"progress","detail":"Extracting claims from 50 entity pages...","percent":35,"step_percent":5,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 10/50 entity pages","percent":37,"step_percent":13,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 20/50 entity pages","percent":40,"step_percent":21,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 30/50 entity pages","percent":43,"step_percent":29,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 40/50 entity pages","percent":46,"step_percent":37,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Processed 50/50 entity pages","percent":48,"step_percent":45,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracting claims from 14 human pages via LLM...","percent":50,"step_percent":50,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 3/14 human pages","percent":53,"step_percent":60,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 6/14 human pages","percent":56,"step_percent":69,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 9/14 human pages","percent":60,"step_percent":79,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 12/14 human pages","percent":63,"step_percent":89,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted claims from 14/14 human pages","percent":65,"step_percent":95,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"Extracted 1053 total claims","percent":67,"step_percent":100,"step_id":"pass1-step-17"}
+
+data: {"type":"progress","detail":"[pass1 Step 17/18] Completed: Extract Claims (253.3s)","percent":67,"step_id":"pass1-step-17"}
+
+data: {"type":"step_completed","step_id":"pass1-step-17","step_number":17,"total_steps":18,"step_name":"Extract Claims","pass":"pass1","duration_ms":253349,"summary":"Extracted 1053 claims using 14 LLM calls","steps_remaining":1,"metrics":{"llm_calls":14,"input_tokens":9070,"output_tokens":11731,"cost_usd":0.203175}}
+
+data: {"type":"progress","detail":"[pass1 Step 18/18] Starting: Create Verify Cards","percent":67,"step_id":"pass1-step-18"}
+
+data: {"type":"step_started","step_id":"pass1-step-18","step_number":18,"total_steps":18,"step_name":"Create Verify Cards","pass":"pass1","started_at":"2026-04-03T10:20:58.271Z","steps_remaining":0}
+
+data: {"type":"progress","detail":"Phase 1: Gathering verification candidates...","percent":69,"step_percent":5,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 1 complete: 37 raw candidates","percent":74,"step_percent":20,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: LLM filtering and rewriting...","percent":75,"step_percent":25,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: processed 25/37 candidates","percent":84,"step_percent":52,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2: processed 37/37 candidates","percent":88,"step_percent":65,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 2 complete: 0/37 cards kept","percent":88,"step_percent":65,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 3: Attaching source references...","percent":90,"step_percent":70,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Phase 4: Auto-assigning...","percent":93,"step_percent":80,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"Created 0 verification cards (37 filtered, 0 deduped)","percent":100,"step_percent":100,"step_id":"pass1-step-18"}
+
+data: {"type":"progress","detail":"[pass1 Step 18/18] Completed: Create Verify Cards (74.8s)","percent":100,"step_id":"pass1-step-18"}
+
+data: {"type":"step_completed","step_id":"pass1-step-18","step_number":18,"total_steps":18,"step_name":"Create Verify Cards","pass":"pass1","duration_ms":74832,"summary":"Created 0 verification cards","steps_remaining":0,"metrics":{"llm_calls":2,"input_tokens":4237,"output_tokens":3672,"cost_usd":0.067791}}
+
+data: {"type":"done","runId":"c5111e40-5b76-41f1-b6af-ce65bc84bb7a","status":"completed"}
+
+

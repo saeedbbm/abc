@@ -1,0 +1,344 @@
+import { randomUUID } from "crypto";
+import { z } from "zod";
+import { getTenantCollections } from "@/lib/mongodb";
+import { getFastModel, getFastModelName, calculateCostUsd } from "@/lib/ai-model";
+import { structuredGenerate } from "@/src/application/lib/llm/structured-generate";
+import type { KB2GraphNodeType } from "@/src/entities/models/kb2-types";
+import type { KB2ParsedDocument } from "@/src/application/lib/kb2/confluence-parser";
+import { PrefixLogger } from "@/lib/utils";
+import { tokenSimilarity } from "@/src/application/workers/kb2/utils/text-similarity";
+import type { StepFunction } from "@/src/application/workers/kb2/pipeline-runner";
+
+const DiscoverySchema = z.object({
+  discoveries: z.array(z.object({
+    display_name: z.string(),
+    type: z.string().describe("One of: project, ticket, customer_feedback"),
+    category: z.string().describe("One of: past_undocumented, ongoing_undocumented, proposed_project, proposed_ticket, proposed_from_feedback"),
+    description: z.string(),
+    evidence: z.string(),
+    source_document: z.string(),
+    related_entities: z.array(z.string()),
+    confidence: z.enum(["high", "medium", "low"]),
+  })),
+});
+
+const DISCOVERY_PROMPT = `You analyze company knowledge base documents and an existing entity list to discover MISSING projects and tickets that should exist but were never formally documented.
+
+Look for:
+1. PAST UNDOCUMENTED PROJECTS: Work mentioned in conversations/PRs that happened in the past but has no project entity (e.g., "remember when we migrated to Redis last quarter?")
+2. ONGOING UNDOCUMENTED WORK: Patterns of activity (PRs, Slack discussions) around a topic with no project entity tracking it
+3. PROPOSED PROJECTS: Customer feedback themes or conversation suggestions that indicate a new project/feature should be created (e.g., 5 customers asking for offline ordering)
+4. PROPOSED TICKETS: Bugs, tasks, or improvements mentioned in conversations or feedback that have no Jira ticket (e.g., "we should fix that memory leak")
+5. PROPOSED FROM FEEDBACK: Recurring customer complaints or requests that deserve their own tracking item
+
+RULES:
+- Only propose discoveries that do NOT already exist as entities in the existing entity list
+- Each discovery must have clear evidence from the source documents
+- Confidence is evidence-based: "high" = multiple corroborating sources or explicit mentions; "medium" = single clear source; "low" = inferred or proposed items needing human verification
+- Reference existing entity names in related_entities when applicable
+- Source document types: Confluence = documented technical content, Jira = project tracking/ticketing, Slack = team conversations, GitHub = code/PRs, Customer Feedback = external user reports
+- If evidence comes from Confluence AND Jira, the project is DOCUMENTED
+- If evidence comes only from Jira, the project exists but may be UNDOCUMENTED (no Confluence docs)
+- If evidence comes only from Slack/GitHub, it is fully DISCOVERED/UNDOCUMENTED
+- A "project" is a multi-ticket initiative or feature with a defined scope. One-off bug fixes, dependency updates, and maintenance tasks are NOT projects — they are tickets at most.
+- Do NOT create a discovery for work that is just a single Jira ticket — that is already tracked.
+- Recurring customer feedback themes should default to category "proposed_from_feedback" with type "project" (feature-level), NOT individual tickets.
+- Proposed tickets should only be created for clearly task-like sources: specific bugs, concrete dependency upgrades, or other well-scoped actionable items.
+- For customer feedback: only create a proposed project/ticket if the same theme appears in 2+ submissions OR if the request describes a feature with clear scope.`;
+
+export const discoveryStep: StepFunction = async (ctx) => {
+  const logger = new PrefixLogger("kb2-discovery");
+  const stepId = "pass1-step-8";
+  const tc = getTenantCollections(ctx.companySlug);
+
+  const snapshotExecId = await ctx.getStepExecutionId("pass1", 1);
+  const snapshot = await tc.input_snapshots.findOne(
+    snapshotExecId ? { execution_id: snapshotExecId } : { run_id: ctx.runId },
+  );
+  if (!snapshot) throw new Error("No input snapshot found — run step 1 first");
+
+  const docs = snapshot.parsed_documents as KB2ParsedDocument[];
+  const nodesExecId = await ctx.getStepExecutionId("pass1", 5);
+  const nodesFilter = nodesExecId ? { execution_id: nodesExecId } : { run_id: ctx.runId };
+  const existingNodes = (await tc.graph_nodes.find(nodesFilter).toArray()) as unknown as KB2GraphNodeType[];
+
+  const existingEntityList = existingNodes
+    .map((n) => `- ${n.display_name} [${n.type}]`)
+    .join("\n");
+
+  const model = getFastModel(ctx.config?.pipeline_settings?.models);
+  let totalLLMCalls = 0;
+  const allDiscoveries: z.infer<typeof DiscoverySchema>["discoveries"] = [];
+
+  const discoverySettings = ctx.config?.pipeline_settings?.discovery;
+  const BATCH_SIZE = discoverySettings?.batch_size ?? 3;
+  const CONTENT_CAP = discoverySettings?.content_cap_per_doc ?? 3000;
+
+  let discoveryPrompt = DISCOVERY_PROMPT;
+  if (ctx.config?.prompts?.discovery?.system) {
+    discoveryPrompt = ctx.config.prompts.discovery.system;
+    const context = ctx.config?.profile?.company_context ?? "";
+    if (context) {
+      discoveryPrompt = discoveryPrompt.replace(/\$\{company_context\}/g, context);
+    } else {
+      discoveryPrompt = discoveryPrompt.replace(/\$\{company_context\}\n?/g, "");
+    }
+  }
+
+  const conversationDocs = docs.filter((d) =>
+    d.provider === "slack" || d.provider === "customerFeedback" || d.provider === "github" || d.provider === "jira",
+  );
+
+  if (conversationDocs.length === 0) {
+    await ctx.onProgress("No conversation/feedback documents to analyze", 100);
+    return { total_discoveries: 0, by_category: {} };
+  }
+
+  const totalBatches = Math.ceil(conversationDocs.length / BATCH_SIZE);
+
+  await ctx.onProgress(`Analyzing ${conversationDocs.length} documents for undocumented work...`, 5);
+
+  // --- Jira-based discovery: find In Progress / Done tickets with no matching project entity or Confluence docs ---
+  const jiraBasedDiscoveries: { ticket: string; project_name: string }[] = [];
+  const jiraDocs = docs.filter((d) => d.provider === "jira");
+  const confluenceTitles = new Set(
+    docs.filter((d) => d.provider === "confluence").map((d) => d.title.toLowerCase()),
+  );
+  const existingProjectNames = new Set(
+    existingNodes.filter((n) => n.type === "project").map((n) => n.display_name.toLowerCase()),
+  );
+
+  for (const jDoc of jiraDocs) {
+    const statusMatch = jDoc.content.match(/Status:\s*(In Progress|Done|Closed|Resolved|Complete|To Do|Backlog|Open|In Review|In Development)/i);
+    if (!statusMatch) continue;
+    const ticketName = jDoc.title;
+    const projectName = ticketName.replace(/\s*\[.*?\]\s*/g, "").replace(/\s*-\s*\d+$/, "").trim();
+    if (existingProjectNames.has(projectName.toLowerCase())) continue;
+    const hasConfluence = [...confluenceTitles].some(
+      (t) => t.includes(projectName.toLowerCase()) || tokenSimilarity(t, projectName) > 0.5,
+    );
+    if (hasConfluence) continue;
+    jiraBasedDiscoveries.push({ ticket: ticketName, project_name: projectName });
+    allDiscoveries.push({
+      display_name: projectName,
+      type: "project",
+      category: /^(done|closed|resolved|complete)$/i.test(statusMatch[1]) ? "past_undocumented" : "ongoing_undocumented",
+      description: `Project inferred from Jira ticket "${ticketName}" (${statusMatch[1]}) with no Confluence documentation.`,
+      evidence: `Jira ticket: ${ticketName}`,
+      source_document: jDoc.title,
+      related_entities: [],
+      confidence: "medium",
+    });
+  }
+
+  // --- Feedback clustering: group customerFeedback docs by token similarity ---
+  const feedbackClusters: { submissions: string[]; merged_name: string }[] = [];
+  const feedbackDocs = docs.filter((d) => d.provider === "customerFeedback");
+
+  if (feedbackDocs.length > 0) {
+    const FEEDBACK_SIM_THRESHOLD = 0.4;
+    const clustered = new Set<number>();
+    const clusters: { indices: number[]; representative: string }[] = [];
+
+    for (let i = 0; i < feedbackDocs.length; i++) {
+      if (clustered.has(i)) continue;
+      const cluster = [i];
+      clustered.add(i);
+      for (let j = i + 1; j < feedbackDocs.length; j++) {
+        if (clustered.has(j)) continue;
+        if (tokenSimilarity(feedbackDocs[i].title, feedbackDocs[j].title) >= FEEDBACK_SIM_THRESHOLD) {
+          cluster.push(j);
+          clustered.add(j);
+        }
+      }
+      if (cluster.length >= 2) {
+        clusters.push({ indices: cluster, representative: feedbackDocs[i].title });
+      }
+    }
+
+    for (const cluster of clusters) {
+      const submissions = cluster.indices.map((idx) => feedbackDocs[idx].title);
+      feedbackClusters.push({ submissions, merged_name: cluster.representative });
+      allDiscoveries.push({
+        display_name: cluster.representative,
+        type: "project",
+        category: "proposed_from_feedback",
+        description: `Recurring feedback theme across ${submissions.length} submissions.`,
+        evidence: submissions.map((s) => `- ${s}`).join("\n"),
+        source_document: feedbackDocs[cluster.indices[0]].title,
+        related_entities: [],
+        confidence: submissions.length >= 3 ? "medium" : "low",
+      });
+    }
+  }
+
+  let runningEntityList = existingEntityList;
+
+  for (let i = 0; i < conversationDocs.length; i += BATCH_SIZE) {
+    if (ctx.signal.aborted) throw new Error("Pipeline cancelled by user");
+    const batch = conversationDocs.slice(i, i + BATCH_SIZE);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+
+    const batchText = batch.map((d, idx) =>
+      `--- Document ${idx + 1}: ${d.title} (${d.provider}) ---\n${d.content.slice(0, CONTENT_CAP)}`,
+    ).join("\n\n");
+
+    const startMs = Date.now();
+    let usageData: { promptTokens: number; completionTokens: number } | null = null;
+    const result = await structuredGenerate({
+      model,
+      system: discoveryPrompt,
+      prompt: `EXISTING ENTITIES (do not re-discover these):\n${runningEntityList}\n\nDOCUMENTS TO ANALYZE:\n${batchText}`,
+      schema: DiscoverySchema,
+      logger,
+      onUsage: (usage) => { usageData = usage; },
+      signal: ctx.signal,
+    });
+    totalLLMCalls++;
+
+    if (usageData) {
+      const cost = calculateCostUsd(getFastModelName(ctx.config?.pipeline_settings?.models), usageData.promptTokens, usageData.completionTokens);
+      ctx.logLLMCall(stepId, getFastModelName(ctx.config?.pipeline_settings?.models),
+        `Discovery batch ${batchNum}/${totalBatches}`,
+        JSON.stringify(result, null, 2).slice(0, 5000),
+        usageData.promptTokens, usageData.completionTokens, cost, Date.now() - startMs);
+    }
+
+    const discoveries = Array.isArray(result?.discoveries) ? result.discoveries : [];
+    allDiscoveries.push(...discoveries);
+
+    for (const d of discoveries) {
+      runningEntityList += `\n- ${d.display_name} [${d.type}]`;
+    }
+
+    await ctx.onProgress(
+      `Batch ${batchNum}/${totalBatches}: found ${discoveries.length} discoveries (${allDiscoveries.length} total)`,
+      Math.round(5 + (batchNum / totalBatches) * 80),
+    );
+  }
+
+  const seenDiscoveries = new Map<string, typeof allDiscoveries[0]>();
+  for (const d of allDiscoveries) {
+    const key = d.display_name.toLowerCase().trim();
+    if (!seenDiscoveries.has(key)) {
+      seenDiscoveries.set(key, d);
+    } else {
+      const existing = seenDiscoveries.get(key)!;
+      existing.evidence = `${existing.evidence}\n\nAdditional evidence: ${d.evidence}`;
+      if (d.confidence === "high" || (d.confidence === "medium" && existing.confidence === "low")) {
+        existing.confidence = d.confidence;
+      }
+      existing.related_entities = [...new Set([...existing.related_entities, ...d.related_entities])];
+    }
+  }
+  const dedupedDiscoveries = [...seenDiscoveries.values()];
+
+  const existingNames = new Set(existingNodes.map((n) => n.display_name.toLowerCase()));
+  const existingNamesList = [...existingNames];
+  const duplicateChecks: { name: string; blocked_by: string; similarity: number }[] = [];
+
+  const uniqueDiscoveries = dedupedDiscoveries.filter((d) => {
+    const lowerName = d.display_name.toLowerCase();
+    if (existingNames.has(lowerName)) {
+      duplicateChecks.push({ name: d.display_name, blocked_by: lowerName, similarity: 1.0 });
+      return false;
+    }
+    for (const existing of existingNamesList) {
+      const sim = tokenSimilarity(lowerName, existing);
+      if (sim > 0.7) {
+        duplicateChecks.push({ name: d.display_name, blocked_by: existing, similarity: sim });
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const newNodes: KB2GraphNodeType[] = [];
+  for (const disc of uniqueDiscoveries) {
+    const validType = ["project", "ticket", "customer_feedback"].includes(disc.type) ? disc.type : "project";
+    newNodes.push({
+      node_id: randomUUID(),
+      run_id: ctx.runId,
+      execution_id: ctx.executionId,
+      type: validType as any,
+      display_name: disc.display_name,
+      aliases: [],
+      attributes: {
+        discovery_category: disc.category,
+        description: disc.description,
+        related_entities: disc.related_entities,
+        status: disc.category.startsWith("past_") ? "completed" :
+                disc.category.startsWith("ongoing_") ? "active" : "proposed",
+        documentation_level: "undocumented",
+      },
+      source_refs: [{
+        source_type: (() => {
+          const sourceDoc = docs.find((d: any) => d.title === disc.source_document || d.sourceId === disc.source_document);
+          return (sourceDoc?.provider ?? "slack") as any;
+        })(),
+        doc_id: disc.source_document,
+        title: disc.source_document,
+        excerpt: disc.evidence.slice(0, 300),
+      }],
+      truth_status: "inferred",
+      confidence: disc.confidence as any,
+    });
+  }
+
+  // --- Feedback discovery consolidation: merge feedback-based nodes referring to the same feature ---
+  const MERGE_SIM_THRESHOLD = 0.6;
+  const feedbackNodes = newNodes.filter((n) => n.attributes?.discovery_category === "proposed_from_feedback");
+  const mergedIndices = new Set<number>();
+
+  for (let i = 0; i < feedbackNodes.length; i++) {
+    if (mergedIndices.has(i)) continue;
+    for (let j = i + 1; j < feedbackNodes.length; j++) {
+      if (mergedIndices.has(j)) continue;
+      if (tokenSimilarity(feedbackNodes[i].display_name, feedbackNodes[j].display_name) > MERGE_SIM_THRESHOLD) {
+        feedbackNodes[i].source_refs = [
+          ...feedbackNodes[i].source_refs,
+          ...feedbackNodes[j].source_refs,
+        ];
+        feedbackNodes[i].aliases = [
+          ...new Set([...feedbackNodes[i].aliases, feedbackNodes[j].display_name]),
+        ];
+        mergedIndices.add(j);
+      }
+    }
+  }
+
+  const mergedOutNodeIds = new Set(
+    [...mergedIndices].map((idx) => feedbackNodes[idx].node_id),
+  );
+  const finalNodes = newNodes.filter((n) => !mergedOutNodeIds.has(n.node_id));
+
+  if (finalNodes.length > 0) {
+    await tc.graph_nodes.insertMany(finalNodes);
+  }
+
+  const byCategory: Record<string, number> = {};
+  for (const d of uniqueDiscoveries) {
+    byCategory[d.category] = (byCategory[d.category] || 0) + 1;
+  }
+
+  await ctx.onProgress(`Discovered ${finalNodes.length} new items`, 100);
+  return {
+    total_discoveries: finalNodes.length,
+    total_discoveries_by_category: byCategory,
+    llm_calls: totalLLMCalls,
+    by_category: byCategory,
+    jira_based_discoveries: jiraBasedDiscoveries,
+    feedback_clusters: feedbackClusters,
+    duplicate_checks: duplicateChecks,
+    discoveries: uniqueDiscoveries.map((d) => ({
+      display_name: d.display_name,
+      type: d.type,
+      category: d.category,
+      confidence: d.confidence,
+      description: d.description,
+      evidence: d.evidence,
+      source_document: d.source_document,
+      related_entities: d.related_entities,
+    })),
+  };
+};

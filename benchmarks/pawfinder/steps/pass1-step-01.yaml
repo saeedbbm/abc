@@ -1,0 +1,24 @@
+step_id: pass1-step-01
+benchmark_name: PawFinder benchmark
+
+ground_truth_files:
+  - ground-truth/F-entity-counts.txt
+
+benchmark_focus:
+  - Preserve source boundaries that matter downstream, especially Slack conversations.
+  - Keep Step 0 text readable for humans, but parse it into source-faithful structured units.
+  - Avoid collapsing many real source units into a few generic blobs.
+
+benchmark_must_fit:
+  - The PawFinder text export contains 39 Slack conversations across 3 channels; collapsing them into 3 channel blobs is a benchmark failure.
+  - The text export contains 34 Jira tickets, 16 PRs, 6 Confluence docs, and 6 feedback submissions; those units should remain individually traceable.
+  - Source identity should stay stable enough that later source_refs can point back to one concrete conversation, PR, ticket, page, or submission.
+
+benchmark_watchouts:
+  - Slack merged by channel instead of conversation/date
+  - GitHub review discussion flattened so provenance is hard to recover
+  - Confluence page sections lost badly enough that later evidence highlighting becomes weak
+
+benchmark_questions:
+  - If the judge samples a Kim evidence source, can it point to one concrete Slack conversation rather than a giant channel blob?
+  - If the judge samples a Matt review comment source, is there enough source identity to separate PR discussion from unrelated repo content?

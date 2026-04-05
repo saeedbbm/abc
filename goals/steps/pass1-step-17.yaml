@@ -1,0 +1,62 @@
+step_id: pass1-step-17
+step_number: 17
+step_name: Extract Claims
+pass: pass1
+
+purpose: >
+  Turn generated pages into concrete verifiable claims that can later be reviewed,
+  challenged, or upgraded with better evidence.
+
+inputs:
+  - step 14 entity pages
+  - step 15 human pages
+  - source and entity references already present on those pages
+
+primary_outputs:
+  - claims with truth status, confidence, entity refs, and provenance
+
+judge_should_look_at:
+  - sampled claims from both entity pages and human pages
+  - whether claims preserve entity refs and evidence grounding
+  - whether the step reads the correct upstream page sets
+
+must_do:
+  - extract claims from both entity and human pages
+  - preserve entity references exactly where possible
+  - separate direct claims from inferred claims
+  - keep enough provenance to trace a claim back to source-backed page content
+
+must_not_do:
+  - read entity pages from the wrong step
+  - collapse complex sections into vague mega-claims
+  - drop entity references or source grounding
+
+success_signals:
+  - claims are specific, reviewable, and traceable
+  - human-page claims still point back to the entities and evidence they came from
+  - confidence and truth status are plausible
+
+failure_signals:
+  - claims lose provenance
+  - claims are too vague to verify
+  - upstream page wiring errors silently reduce coverage
+
+deterministic_checks:
+  - key: total_claims_positive
+    description: Claim extraction should produce at least some claims on non-empty pages.
+    mode: gte
+    target: 1
+  - key: sampled_claims_have_entity_refs
+    description: Sampled claims should retain entity references where relevant.
+    mode: eq
+    target: 1
+  - key: sampled_claims_have_truth_status
+    description: Sampled claims should distinguish direct versus inferred truth status.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - claims are traceable and structurally useful
+  block_when:
+    - claims lose the grounding needed for verification

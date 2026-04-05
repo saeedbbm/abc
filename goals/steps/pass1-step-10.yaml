@@ -1,0 +1,67 @@
+step_id: pass1-step-10
+step_number: 10
+step_name: Pattern Synthesis
+pass: pass1
+
+purpose: >
+  Discover cross-cutting hidden conventions from repeated evidence packs plus
+  supporting canonical entities, and synthesize them into first-class convention
+  entities with correct ownership, evidence, and reusable pattern descriptions.
+
+inputs:
+  - step 7 repeated-pattern evidence packs
+  - step 9 corrected canonical entities
+
+primary_outputs:
+  - convention entities
+  - supporting decision lists when available
+  - evidence-rich source_refs and ownership attribution
+
+judge_should_look_at:
+  - actual convention nodes created
+  - constituent decisions for each convention
+  - whether conventions represent real cross-cutting patterns rather than isolated decisions
+
+must_do:
+  - synthesize conventions only when supported by repeated evidence across source units or documents
+  - attribute conventions to the right person or team based on provenance-weighted evidence, not majority decided_by counting
+  - use canonical decision nodes as support when they help, not as the only admissible evidence
+  - preserve enough evidence for later pages and verify cards
+  - set documentation_level explicitly on each convention (undocumented, partially_documented, documented)
+
+must_not_do:
+  - create hidden conventions from a single weak source unit
+  - split one broad convention into multiple narrow fragments without justification
+  - label fully documented standards as hidden conventions
+  - use majority decided_by counting as final attribution; use provenance-weighted evidence instead
+  - use benchmark-specific target names or counts
+
+success_signals:
+  - each convention is backed by repeated evidence and supporting entities when available
+  - convention ownership matches the evidence, not implementation proximity
+  - convention pattern rules are actionable and reusable across features
+
+failure_signals:
+  - documented standards are relabeled as hidden conventions
+  - broad conventions are fragmented into multiple small nodes
+  - convention ownership is still downstream of earlier attribution errors
+
+deterministic_checks:
+  - key: conventions_found_positive
+    description: Pattern synthesis should find at least one real convention on pattern-rich runs.
+    mode: gte
+    target: 1
+  - key: sampled_conventions_have_owner_and_evidence
+    description: Sampled conventions should include ownership and evidence.
+    mode: eq
+    target: 1
+  - key: documentation_level_set
+    description: Each convention should have documentation_level explicitly set.
+    mode: eq
+    target: 1
+
+go_no_go:
+  proceed_when:
+    - convention nodes are evidence-backed, attributed, and reusable
+  block_when:
+    - conventions are fragmented, misattributed, or mostly documented standards in disguise
